@@ -1651,6 +1651,27 @@ export function AIAssistantDrawer({
                       SyncAppvPublishing bypass (web delivery)
                     </button>
 
+                    {/* ── Web Delivery (per OS) ── */}
+                    <span className={styles.templateOsLabel}>Web Delivery</span>
+                    <button className={styles.suggestion} onClick={() => setInputValue('Set up a Python web delivery attack (exploit/multi/script/web_delivery TARGET 0) for a Linux victim with Python installed and generate the one-liner')} disabled={!isConnected}>
+                      Linux — Python web delivery
+                    </button>
+                    <button className={styles.suggestion} onClick={() => setInputValue('Set up a Python web delivery attack (exploit/multi/script/web_delivery TARGET 0) for a macOS victim and generate the one-liner command')} disabled={!isConnected}>
+                      macOS — Python web delivery
+                    </button>
+                    <button className={styles.suggestion} onClick={() => setInputValue('Set up a PowerShell web delivery attack (exploit/multi/script/web_delivery TARGET 2) for a Windows victim and generate the one-liner command')} disabled={!isConnected}>
+                      Windows — PowerShell web delivery
+                    </button>
+                    <button className={styles.suggestion} onClick={() => setInputValue('Set up a Regsvr32 web delivery attack (exploit/multi/script/web_delivery TARGET 3) for a Windows victim to bypass AppLocker restrictions')} disabled={!isConnected}>
+                      Windows — Regsvr32 AppLocker bypass
+                    </button>
+                    <button className={styles.suggestion} onClick={() => setInputValue('Set up a PHP web delivery attack (exploit/multi/script/web_delivery TARGET 1) for a victim web server running PHP and generate the one-liner')} disabled={!isConnected}>
+                      PHP server — PHP web delivery
+                    </button>
+                    <button className={styles.suggestion} onClick={() => setInputValue('Set up a Python web delivery attack (exploit/multi/script/web_delivery TARGET 0) for any OS with Python installed — works on Linux, macOS, and Windows')} disabled={!isConnected}>
+                      Cross-platform — Python web delivery
+                    </button>
+
                     {/* ── Email Delivery ── */}
                     <span className={styles.templateOsLabel}>Email Delivery</span>
                     <button className={styles.suggestion} onClick={() => setInputValue('Generate a phishing payload and send it via email to the victim at target@example.com with a convincing IT support pretext')} disabled={!isConnected}>

