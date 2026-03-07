@@ -21,16 +21,14 @@ ENV PYTHONPATH=/app
 # Set working directory
 WORKDIR /app
 
-# need to add docker source
-RUN apt-get -y update && apt-get -y upgrade && \
-    apt-get -y install git ca-certificates curl && \
-    install -m 0755 -d /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
-    chmod a+r /etc/apt/keyrings/docker.asc && \
-    echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-   tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Add Docker official APT repository (for up-to-date CLI)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install system dependencies
 # - Docker CLI for orchestrating ProjectDiscovery containers
@@ -40,7 +38,7 @@ RUN apt-get -y update && apt-get -y upgrade && \
 # - Build tools for Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Docker CLI (to communicate with host Docker daemon)
-    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+    docker-ce-cli \
     # Tor and proxychains for anonymous scanning
     tor \
     proxychains4 \
@@ -77,7 +75,8 @@ RUN mkdir -p /var/run/tor && \
     echo "Log notice stdout" >> /etc/tor/torrc
 
 # Create non-root user for security (but allow Docker access)
-RUN groupadd -r redamon && \
+RUN groupadd -f docker && \
+    groupadd -r redamon && \
     useradd -r -g redamon -G docker redamon && \
     mkdir -p /home/redamon && \
     chown -R redamon:redamon /home/redamon
