@@ -735,7 +735,6 @@ The graph contains **17 recon node types** organized into four categories, plus 
 The graph connects these nodes through a directed relationship chain that mirrors real-world infrastructure topology:
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 flowchart TB
     Domain -->|HAS_SUBDOMAIN| Subdomain
     Subdomain -->|RESOLVES_TO| IP
@@ -902,7 +901,6 @@ The CodeFix agent takes a single remediation entry and autonomously implements t
 5. **Ship** — commit all accepted changes, push to GitHub, and open a pull request
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 flowchart LR
     subgraph Triage["Triage Agent"]
         NEO4J[(Neo4j\nAttack Surface)] --> COLLECT[9 Cypher\nQueries]
@@ -1051,7 +1049,6 @@ Reports support **download** (saves HTML locally), **open in new tab** (browser 
 ### High-Level Architecture
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 flowchart TB
     subgraph User["👤 User Layer"]
         Browser[Web Browser]
@@ -1141,7 +1138,6 @@ flowchart TB
 ### Data Flow Pipeline
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 flowchart TB
     subgraph Phase1["Phase 1: Reconnaissance"]
         Domain[🌐 Domain] --> Subdomains[📋 Subdomains<br/>crt.sh, HackerTarget, Knockpy]
@@ -1194,7 +1190,6 @@ flowchart TB
 ### Docker Container Architecture
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 flowchart TB
     subgraph Host["🖥️ Host Machine"]
         subgraph Containers["Docker Containers"]
@@ -1302,7 +1297,6 @@ flowchart TB
 ### Recon Pipeline Detail
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 flowchart TB
     subgraph Input["📥 Input Configuration"]
         Params[project_settings.py<br/>Webapp API → PostgreSQL<br/>TARGET_DOMAIN, SCAN_MODULES]
@@ -1380,7 +1374,6 @@ flowchart TB
 ### Recon Module Data Flow
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 sequenceDiagram
     participant User
     participant Main as main.py
@@ -1474,7 +1467,6 @@ sequenceDiagram
 ### Agent Workflow (ReAct Pattern)
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 stateDiagram-v2
     [*] --> Idle: Start
     Idle --> Reasoning: User Message
@@ -1513,7 +1505,6 @@ stateDiagram-v2
 ### MCP Tool Integration
 
 ```mermaid
-%%{init: {'theme': 'neutral', 'themeVariables': {'mainBkg': '#f4f4f5', 'nodeBorder': '#888', 'clusterBkg': '#e8e8ea', 'clusterBorder': '#aaa', 'lineColor': '#555', 'primaryTextColor': '#222'}}}%%
 sequenceDiagram
     participant User
     participant Agent as AI Agent
