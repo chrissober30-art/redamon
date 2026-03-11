@@ -65,14 +65,6 @@ export function GlobalHeader() {
 
         <div className={styles.divider} />
 
-        <Link
-          href="/settings"
-          className={`${styles.helpLink} ${pathname === '/settings' ? styles.navItemActive : ''}`}
-          title="Global Settings"
-        >
-          <Settings size={16} />
-        </Link>
-
         <a
           href="https://github.com/samugit83/redamon/wiki"
           target="_blank"
@@ -86,6 +78,16 @@ export function GlobalHeader() {
         <div className={styles.divider} />
 
         <UserSelector />
+
+        <div className={styles.divider} />
+
+        <Link
+          href="/settings"
+          className={`${styles.helpLink} ${pathname === '/settings' ? styles.navItemActive : ''}`}
+          title="Global Settings"
+        >
+          <Settings size={17} />
+        </Link>
       </div>
     </header>
   )

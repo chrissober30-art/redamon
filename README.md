@@ -91,6 +91,14 @@ We maintain a public **[Project Board](https://github.com/users/samugit83/projec
 
 > **Want to contribute?** See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started.
 
+### Contributors Wall of Fame
+
+A special thanks to the people who go above and beyond — contributing code, spreading the word, and helping shape RedAmon into a better tool for the community. These are our project champions and evangelists.
+
+| Contributor | GitHub |
+|------------|--------|
+| L4stPL4Y3R — Ritesh Gohil · AWS Security Specialty · eWPTXv2 · eCPPTv2 · CRTP · CEH · ISC2 CC · Security Researcher · Information Security Engineer | [github.com/L4stPL4Y3R](https://github.com/L4stPL4Y3R) |
+
 ---
 
 ## Quick Start
@@ -546,22 +554,36 @@ Beyond the MCP tools listed above, the `kali_shell` and `execute_code` tools giv
 
 > **Note:** The container runs with `NET_ADMIN`, `NET_RAW`, and `SYS_PTRACE` capabilities, enabling raw socket operations (SYN scanning), packet capture, and process debugging. The agent can also compile and execute C/C++ exploits in-place using `execute_code`.
 
-#### Attack Path Routing
+#### Attack Skills
 
-The agent uses an **LLM-powered Intent Router** to classify each user request into the appropriate attack path category. Rather than following a single, fixed exploitation workflow, the router analyzes the user's objective, the available target intelligence from the Neo4j graph, and the current operational phase to select the correct attack chain — each with its own Metasploit workflow, tool sequence, and post-exploitation behavior.
+The agent uses an **LLM-powered Intent Router** to classify each user request into the appropriate attack skill. Rather than following a single, fixed exploitation workflow, the router analyzes the user's objective, the available target intelligence from the Neo4j graph, and the current operational phase to select the correct attack chain — each with its own tool sequence, workflow, and post-exploitation behavior.
 
-The architecture supports **10 attack path categories** (CVE exploitation, brute force, social engineering, DoS, fuzzing, credential capture, wireless attacks, web application attacks, client-side exploitation, and local privilege escalation), with an implementation roadmap to progressively enable each one. Attack paths can also **chain into each other** — for example, a credential capture can feed captured usernames into a brute force attack, or a fuzzing discovery can chain into CVE research and exploitation.
+The classification result is shown as a **badge** at the top of the agent chat drawer. Hovering the badge reveals a tooltip listing all available skills (built-in and user-defined) with the active one highlighted.
 
-**Currently implemented attack paths:**
+**Built-in Skills**
 
-| # | Attack Path | Description | Module Type | Post-Exploitation |
-|---|-------------|-------------|-------------|-------------------|
-| 1 | **CVE-Based Exploitation** | Exploits known vulnerabilities identified by CVE identifier. The agent searches for a matching Metasploit exploit module, configures target parameters and payload (reverse/bind shell), and fires the exploit. Supports both statefull (Meterpreter session) and stateless (one-shot command) post-exploitation. | `exploit/*` | Yes |
-| 2 | **Hydra Brute Force** | Password guessing attacks against 50+ authentication protocols (SSH, FTP, RDP, SMB, MySQL, HTTP forms, and more). The agent uses THC Hydra (`execute_hydra`) with configurable threads, timeouts, and retry strategies. After credentials are discovered, the agent establishes access via `sshpass` (SSH), database clients, or Metasploit psexec (SMB). | `execute_hydra` | Sometimes (SSH, SMB) |
-| 3 | **Phishing / Social Engineering** | Generates malicious payloads (msfvenom), weaponized documents (Office macros, PDF, RTF, LNK), web delivery one-liners, and HTA servers. Delivers via email (smtplib), chat download (docker cp), or web link. 6-step guided workflow with handler setup and session callback. | `msfvenom`, `fileformat/*`, `web_delivery` | Yes |
-| 4 | **Unclassified Fallback** | Dynamic classification for techniques that don't match CVE, brute force, or phishing (e.g., `sql_injection-unclassified`, `ssrf-unclassified`). The agent uses all available tools generically without a mandatory workflow. | Any available | Depends on technique |
+Three attack skills are included out of the box:
 
-For full details on all 10 attack path categories, the intent router architecture, chain-specific workflows, and the implementation roadmap, see the **[Attack Paths Documentation](agentic/readmes/README.ATTACK_PATHS.md)**.
+| # | Skill | Description |
+|---|-------|-------------|
+| 1 | **CVE Exploit** | Exploits known CVEs using Metasploit modules. The agent searches for a matching exploit, configures target parameters and payload, and fires the exploit. Supports statefull (Meterpreter) and stateless post-exploitation. |
+| 2 | **Brute Force** | Password and credential attacks using THC Hydra against 50+ protocols (SSH, FTP, RDP, SMB, MySQL, HTTP forms, and more). After credentials are discovered, the agent establishes access via `sshpass`, database clients, or Metasploit psexec. |
+| 3 | **Phishing / Social Engineering** | Payload generation (msfvenom), weaponized documents, web delivery, and email delivery. 6-step guided workflow with handler setup and session callback. |
+
+Requests that don't match any skill are classified as **unclassified** and the agent uses all available tools generically.
+
+**User Attack Skills**
+
+You can extend RedAmon with your own attack skills by uploading Markdown (`.md`) files in **Global Settings > Attack Skills**. Each file defines a complete attack workflow — reconnaissance steps, exploitation procedure, and post-exploitation actions — that the agent follows when a user request matches the skill.
+
+To add a user skill:
+1. Write a `.md` file describing the attack methodology (e.g., SQL injection, SSRF, XXE)
+2. Go to **Global Settings** and upload the file under **Attack Skills**
+3. Enable or disable individual skills per project in **Project Settings > Attack Skills**
+
+The skill content is injected into the agent's prompt across all phases (informational, exploitation, post-exploitation), so the agent follows your workflow from recon through post-exploitation.
+
+For full details on skill authoring, the intent router architecture, and built-in skill workflows, see the **[Attack Skills Documentation](redamon.wiki/16.-Attack-Skills)**.
 
 ---
 

@@ -9,7 +9,7 @@
 'use client'
 
 import React, { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react'
-import { Send, Bot, User, Loader2, AlertCircle, Sparkles, Plus, Shield, ShieldAlert, Target, Zap, HelpCircle, WifiOff, Wifi, Square, Play, Download, Wrench, History, ChevronDown, EyeOff, Eye, Mail, Copy, Check } from 'lucide-react'
+import { Send, Bot, User, Loader2, AlertCircle, Sparkles, Plus, Shield, ShieldAlert, Target, Zap, HelpCircle, WifiOff, Wifi, Square, Play, Download, Wrench, History, ChevronDown, EyeOff, Eye, Mail, Copy, Check, Swords } from 'lucide-react'
 import { StealthIcon } from '@/components/icons/StealthIcon'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -151,10 +151,19 @@ const KNOWN_ATTACK_PATH_CONFIG: Record<string, { label: string; shortLabel: stri
   },
 }
 
-/** Derive display config for any attack path type (known or unclassified). */
+/** Derive display config for any attack skill type (known, user, or unclassified). */
 function getAttackPathConfig(type: string): { label: string; shortLabel: string; color: string; bgColor: string } {
   if (KNOWN_ATTACK_PATH_CONFIG[type]) {
     return KNOWN_ATTACK_PATH_CONFIG[type]
+  }
+  // User skill: "user_skill:<id>" — derive from the skill name embedded in the type
+  if (type.startsWith('user_skill:')) {
+    return {
+      label: 'User Skill',
+      shortLabel: 'SKILL',
+      color: 'var(--accent-primary, #3b82f6)',
+      bgColor: 'rgba(59, 130, 246, 0.15)',
+    }
   }
   // Unclassified: derive label from the type string
   // e.g. "sql_injection-unclassified" -> label "Sql Injection", shortLabel "SI"
@@ -803,7 +812,7 @@ export function AIAssistantDrawer({
   const [isStopped, setIsStopped] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
   const [currentPhase, setCurrentPhase] = useState<Phase>('informational')
-  const [attackPathType, setAttackPathType] = useState<string>('cve_exploit')
+  const [attackPathType, setAttackPathType] = useState<string>('')
   const [iterationCount, setIterationCount] = useState(0)
   const [awaitingApproval, setAwaitingApproval] = useState(false)
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequestPayload | null>(null)
@@ -840,6 +849,42 @@ export function AIAssistantDrawer({
   } = useConversations(projectId, userId)
 
   const { saveMessage, updateConversation: updateConvMeta } = useChatPersistence(conversationId)
+
+  // Attack skill data for badge tooltip
+  const [skillData, setSkillData] = useState<{
+    builtIn: { id: string; name: string }[]
+    user: { id: string; name: string }[]
+    config: { builtIn: Record<string, boolean>; user: Record<string, boolean> }
+  } | null>(null)
+
+  useEffect(() => {
+    if (!userId || !projectId) return
+    let cancelled = false
+    async function fetchSkills() {
+      try {
+        const [availRes, projRes] = await Promise.all([
+          fetch(`/api/users/${userId}/attack-skills/available`),
+          fetch(`/api/projects/${projectId}`),
+        ])
+        if (cancelled) return
+        if (availRes.ok && projRes.ok) {
+          const avail = await availRes.json()
+          const proj = await projRes.json()
+          const cfg = proj.attackSkillConfig || { builtIn: {}, user: {} }
+          setSkillData({
+            builtIn: avail.builtIn,
+            user: avail.user,
+            config: {
+              builtIn: cfg.builtIn || {},
+              user: cfg.user || {},
+            },
+          })
+        }
+      } catch { /* silent */ }
+    }
+    fetchSkills()
+    return () => { cancelled = true }
+  }, [userId, projectId])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -902,7 +947,7 @@ export function AIAssistantDrawer({
     }
     setChatItems([])
     setCurrentPhase('informational')
-    setAttackPathType('cve_exploit')
+    setAttackPathType('')
     setIterationCount(0)
     setAwaitingApproval(false)
     setApprovalRequest(null)
@@ -1732,7 +1777,7 @@ export function AIAssistantDrawer({
     // and persist messages via the backend persistence layer
     setChatItems([])
     setCurrentPhase('informational')
-    setAttackPathType('cve_exploit')
+    setAttackPathType('')
     setIterationCount(0)
     setAwaitingApproval(false)
     setApprovalRequest(null)
@@ -1763,6 +1808,7 @@ export function AIAssistantDrawer({
     let lastApprovalRequest: any = null
     let lastQuestionRequest: any = null
     let lastRenderedPhase: string = ''
+    let lastAttackPathType: string = ''
     // Track whether the agent did actual WORK after the last approval/question.
     // assistant_message doesn't count (it's the phase transition description that
     // arrives alongside the approval_request). Only thinking/tool_start indicate
@@ -1905,6 +1951,8 @@ export function AIAssistantDrawer({
         lastTodoList = data.todo_list || []
         return null
       } else if (msg.type === 'phase_update') {
+        // Track attack path type for state restoration
+        if (data.attack_path_type) lastAttackPathType = data.attack_path_type
         // Only render when phase actually changes (avoid duplicate "Phase: informational" noise)
         const phase = data.current_phase || 'unknown'
         if (phase !== lastRenderedPhase) {
@@ -2085,6 +2133,7 @@ export function AIAssistantDrawer({
     setChatItems(finalRestored)
     setConversationId(conv.id)
     setCurrentPhase((conv.currentPhase || 'informational') as Phase)
+    setAttackPathType(lastAttackPathType)
     setIterationCount(conv.iterationCount || 0)
     setIsLoading(conv.agentRunning)
     setIsStopped(false)
@@ -2450,19 +2499,65 @@ export function AIAssistantDrawer({
           ) : null
         })()}
 
-        {/* Attack Path Badge - Show when in exploitation or post_exploitation phase */}
-        {(currentPhase === 'exploitation' || currentPhase === 'post_exploitation') && (
-          <div
-            className={styles.phaseBadge}
-            style={{
-              backgroundColor: getAttackPathConfig(attackPathType).bgColor,
-              borderColor: getAttackPathConfig(attackPathType).color,
-            }}
+        {/* Attack Skill Badge - Show in all phases once classified */}
+        {attackPathType && (currentPhase === 'informational' || currentPhase === 'exploitation' || currentPhase === 'post_exploitation') && (
+          <Tooltip
+            position="bottom"
+            content={
+              <div className={styles.skillTooltip}>
+                <div className={styles.skillTooltipHeader}>
+                  <Swords size={11} />
+                  Attack Skills
+                </div>
+                {skillData && (
+                  <>
+                    <div className={styles.skillTooltipGroup}>
+                      <div className={styles.skillTooltipGroupLabel}>Built-in</div>
+                      {skillData.builtIn.map(s => {
+                        const enabled = skillData.config.builtIn[s.id] !== false
+                        const isActive = attackPathType === s.id
+                        return (
+                          <div key={s.id} className={`${styles.skillTooltipItem} ${!enabled ? styles.skillTooltipItemDisabled : ''} ${isActive ? styles.skillTooltipItemActive : ''}`}>
+                            <span className={styles.skillTooltipName}>{s.name}</span>
+                            {isActive && <Check size={11} className={styles.skillTooltipCheck} />}
+                            {!enabled && <span className={styles.skillTooltipOff}>OFF</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {skillData.user.length > 0 && (
+                      <div className={styles.skillTooltipGroup}>
+                        <div className={styles.skillTooltipGroupLabel}>User Skills</div>
+                        {skillData.user.map(s => {
+                          const enabled = skillData.config.user[s.id] !== false
+                          const isActive = attackPathType === `user_skill:${s.id}`
+                          return (
+                            <div key={s.id} className={`${styles.skillTooltipItem} ${!enabled ? styles.skillTooltipItemDisabled : ''} ${isActive ? styles.skillTooltipItemActive : ''}`}>
+                              <span className={styles.skillTooltipName}>{s.name}</span>
+                              {isActive && <Check size={11} className={styles.skillTooltipCheck} />}
+                              {!enabled && <span className={styles.skillTooltipOff}>OFF</span>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            }
           >
-            <span style={{ color: getAttackPathConfig(attackPathType).color }}>
-              {getAttackPathConfig(attackPathType).shortLabel}
-            </span>
-          </div>
+            <div
+              className={styles.phaseBadge}
+              style={{
+                backgroundColor: getAttackPathConfig(attackPathType).bgColor,
+                borderColor: getAttackPathConfig(attackPathType).color,
+              }}
+            >
+              <span style={{ color: getAttackPathConfig(attackPathType).color }}>
+                {getAttackPathConfig(attackPathType).shortLabel}
+              </span>
+            </div>
+          </Tooltip>
         )}
 
         {iterationCount > 0 && (

@@ -472,7 +472,7 @@ class StreamingCallback:
         await self.connection.send_message(MessageType.PLAN_ANALYSIS, payload)
         self._persist("plan_analysis", payload)
 
-    async def on_phase_update(self, current_phase: str, iteration_count: int, attack_path_type: str = "cve_exploit"):
+    async def on_phase_update(self, current_phase: str, iteration_count: int, attack_path_type: str = ""):
         """Called when phase changes"""
         payload = {
             "current_phase": current_phase,

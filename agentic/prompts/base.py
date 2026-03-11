@@ -115,14 +115,57 @@ def build_attack_path_behavior(attack_path_type):
             "In informational phase: Gather target info (IP, port, service version, CVE details), "
             "then request transition to exploitation phase."
         )
+    elif attack_path_type.startswith("user_skill:"):
+        return (
+            "Follow the attack skill workflow guidance provided in the Available Tools section.\n"
+            "The skill defines phase-specific steps — follow them for the current phase."
+        )
     elif attack_path_type.endswith("-unclassified"):
         return (
             "No mandatory workflow — use available tools based on the attack technique.\n"
             "In informational phase: Gather relevant target info, then request transition to exploitation.\n"
             "In exploitation: Use the generic exploitation workflow provided."
         )
+    elif not attack_path_type:
+        return ""  # Not yet classified
     else:
         return f"Follow the workflow guidance in the Available Tools section for attack path: {attack_path_type}"
+
+
+def build_kali_install_prompt():
+    """Build kali_shell library installation rules from project settings."""
+    from project_settings import get_setting
+
+    enabled = get_setting('KALI_INSTALL_ENABLED', False)
+    if not enabled:
+        return (
+            "\n## Kali Shell — Library Installation: DISABLED\n\n"
+            "**DO NOT install any packages** (pip install, apt install, apt-get install) via kali_shell.\n"
+            "Only use pre-installed tools and libraries.\n"
+        )
+
+    parts = [
+        "\n## Kali Shell — Library Installation: ALLOWED\n\n"
+        "You MAY install packages via `pip install` or `apt install` in kali_shell "
+        "when needed for a specific attack or activity. "
+        "Installed packages are **ephemeral** — they are lost on container restart.\n"
+    ]
+
+    allowed = get_setting('KALI_INSTALL_ALLOWED_PACKAGES', '')
+    forbidden = get_setting('KALI_INSTALL_FORBIDDEN_PACKAGES', '')
+
+    if allowed.strip():
+        parts.append(
+            f"**Authorized packages (whitelist):** Only these may be installed: `{allowed.strip()}`\n"
+            "Do NOT install any package not in this list.\n"
+        )
+
+    if forbidden.strip():
+        parts.append(
+            f"**Forbidden packages (blacklist):** NEVER install these: `{forbidden.strip()}`\n"
+        )
+
+    return "\n".join(parts)
 
 
 def build_roe_prompt_section():
@@ -377,11 +420,11 @@ You work step-by-step using the Thought-Tool-Output pattern:
 
 {available_tools}
 
-## Attack Path: {attack_path_type}
+## Attack Skill: {attack_path_type}
 
 {attack_path_behavior}
 
-Create minimal TODOs — follow the attack path workflow for step-by-step guidance.
+Create minimal TODOs — follow the attack skill workflow for step-by-step guidance.
 
 ## Current State
 
@@ -740,7 +783,7 @@ SUMMARY_RESPONSE_PROMPT = """Generate a brief summary of the completed task.
 ## Completion Reason
 {completion_reason}
 
-## Attack Path Type
+## Attack Skill Type
 {attack_path_type}
 
 ## Execution Summary

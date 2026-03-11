@@ -199,8 +199,14 @@ def apply_project_settings(orchestrator, project_id: str) -> None:
     settings = load_project_settings(project_id)
     new_model = settings.get('OPENAI_MODEL', 'claude-opus-4-6')
 
-    if new_model != orchestrator.model_name:
-        logger.info(f"Model changed: {orchestrator.model_name} -> {new_model}")
+    # Re-run LLM setup if model changed OR if LLM is None (previous setup failed)
+    model_changed = new_model != orchestrator.model_name
+    need_setup = model_changed or orchestrator.llm is None
+    if need_setup:
+        if model_changed:
+            logger.info(f"Model changed: {orchestrator.model_name} -> {new_model}")
+        else:
+            logger.info(f"Retrying LLM setup for {new_model} (previous attempt failed)")
         orchestrator.model_name = new_model
 
         # Resolve keys from user's LLM providers (DB-driven)
@@ -213,16 +219,24 @@ def apply_project_settings(orchestrator, project_id: str) -> None:
         openrouter_p = _resolve_provider_key(user_providers, "openrouter")
         bedrock_p = _resolve_provider_key(user_providers, "bedrock")
 
-        orchestrator.llm = setup_llm(
-            new_model,
-            openai_api_key=(openai_p or {}).get("apiKey"),
-            anthropic_api_key=(anthropic_p or {}).get("apiKey"),
-            openrouter_api_key=(openrouter_p or {}).get("apiKey"),
-            aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
-            aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
-            aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
-            custom_llm_config=custom_config,
-        )
+        try:
+            orchestrator.llm = setup_llm(
+                new_model,
+                openai_api_key=(openai_p or {}).get("apiKey"),
+                anthropic_api_key=(anthropic_p or {}).get("apiKey"),
+                openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+                aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
+                aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+                aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
+                custom_llm_config=custom_config,
+            )
+        except (ValueError, Exception) as e:
+            # LLM setup failed (missing API key, bad config, etc.)
+            # Leave llm as None — callers check and return a clear error.
+            logger.error(f"LLM setup failed for {new_model}: {e}")
+            orchestrator.llm = None
+            return
+
         # Update Neo4j tool's LLM for text-to-Cypher queries
         if orchestrator.neo4j_manager:
             orchestrator.neo4j_manager.llm = orchestrator.llm

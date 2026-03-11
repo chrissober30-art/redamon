@@ -1045,6 +1045,79 @@ td:hover .tableCellCopyButton {
   color: var(--text-tertiary);
 }
 
+/* Attack Skill badge tooltip */
+.skillTooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.skillTooltipHeader {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-gray-400);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-gray-700);
+}
+
+.skillTooltipGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skillTooltipGroupLabel {
+  font-size: 9px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-gray-500);
+  margin-bottom: 1px;
+}
+
+.skillTooltipItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--color-gray-200);
+}
+
+.skillTooltipItemActive {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--color-gray-50);
+}
+
+.skillTooltipItemDisabled {
+  opacity: 0.4;
+}
+
+.skillTooltipName {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.skillTooltipCheck {
+  color: var(--accent-primary, #3b82f6);
+  flex-shrink: 0;
+}
+
+.skillTooltipOff {
+  font-size: 9px;
+  font-weight: var(--font-semibold);
+  color: var(--color-gray-500);
+  text-transform: uppercase;
+}
+
 /* Phase badge on individual messages */
 .messagePhaseBadge {
   display: inline-flex;

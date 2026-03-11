@@ -428,11 +428,11 @@ async def get_defaults():
     # STEALTH_MODE is a project-level setting (not agent-specific), served by
     # recon defaults as "stealthMode".  Exclude it here to avoid creating a
     # duplicate "agentStealthMode" key that Prisma doesn't recognise.
-    SKIP_KEYS = {'STEALTH_MODE'}
+    SKIP_KEYS = {'STEALTH_MODE', 'USER_ATTACK_SKILLS'}
 
     # HYDRA_* keys map to Prisma fields without the 'agent' prefix
     # (e.g. HYDRA_ENABLED -> hydraEnabled, not agentHydraEnabled)
-    NO_PREFIX_KEYS = {k for k in DEFAULT_AGENT_SETTINGS if k.startswith(('HYDRA_', 'PHISHING_', 'ROE_'))}
+    NO_PREFIX_KEYS = {k for k in DEFAULT_AGENT_SETTINGS if k.startswith(('HYDRA_', 'PHISHING_', 'ROE_', 'ATTACK_SKILL_'))}
 
     camel_case_defaults = {}
     for k, v in DEFAULT_AGENT_SETTINGS.items():

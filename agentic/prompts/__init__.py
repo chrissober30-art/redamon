@@ -27,10 +27,11 @@ from .base import (
     build_tool_args_section,
     build_tool_name_enum,
     build_phase_definitions,
+    build_kali_install_prompt,
 )
 
 # Re-export from classification
-from .classification import ATTACK_PATH_CLASSIFICATION_PROMPT
+from .classification import ATTACK_PATH_CLASSIFICATION_PROMPT, build_classification_prompt
 
 # Re-export from CVE exploit prompts
 from .cve_exploit_prompts import (
@@ -92,7 +93,7 @@ def get_phase_tools(
     phase: str,
     activate_post_expl: bool = True,
     post_expl_type: str = "stateless",
-    attack_path_type: str = "cve_exploit",
+    attack_path_type: str = "",
     execution_trace: list = None,
 ) -> str:
     """Get tool descriptions for the current phase with attack path-specific guidance.
@@ -137,6 +138,10 @@ def get_phase_tools(
     # Determine allowed tools for current phase (dynamic from TOOL_PHASE_MAP in DB)
     allowed_tools = get_allowed_tools_for_phase(phase)
 
+    # Kali shell library installation rules (prompt-based control)
+    if "kali_shell" in allowed_tools:
+        parts.append(build_kali_install_prompt())
+
     # Dynamic tool availability table — skip in informational phase where
     # build_informational_tool_descriptions() already provides full details
     if phase != "informational":
@@ -171,14 +176,38 @@ def get_phase_tools(
         if session_config:
             parts.append(session_config)
 
+    # Helper: resolve user skill content (used across all phases)
+    def _resolve_user_skill() -> str | None:
+        if not attack_path_type.startswith("user_skill:"):
+            return None
+        from project_settings import get_enabled_user_skills
+        skill_id = attack_path_type.split(":", 1)[1]
+        skill = next((s for s in get_enabled_user_skills() if s['id'] == skill_id), None)
+        return f"## User Attack Skill: {skill['name']}\n\n{skill['content']}" if skill else None
+
     # Add phase and ATTACK PATH specific workflow guidance
     if phase == "informational":
         # Dynamic tool descriptions (only shows allowed tools)
         parts.append(build_informational_tool_descriptions(allowed_tools))
 
+        # Inject user skill content for skill-specific recon guidance
+        user_skill_content = _resolve_user_skill()
+        if user_skill_content:
+            parts.append(
+                user_skill_content + "\n\n"
+                "**Current phase is informational.** Follow the skill's reconnaissance "
+                "steps to gather target info, then request transition to exploitation."
+            )
+
     elif phase == "exploitation":
-        # SELECT WORKFLOW BASED ON ATTACK PATH TYPE
-        if attack_path_type == "brute_force_credential_guess" and "execute_hydra" in allowed_tools:
+        # Check which built-in skills are enabled
+        from project_settings import get_enabled_builtin_skills
+        enabled_builtins = get_enabled_builtin_skills()
+
+        # SELECT WORKFLOW BASED ON ATTACK SKILL TYPE
+        if (attack_path_type == "brute_force_credential_guess"
+                and "brute_force_credential_guess" in enabled_builtins
+                and "execute_hydra" in allowed_tools):
             # Hydra-based brute force workflow
             hydra_flags = get_hydra_flags_from_settings()
             # Build flags without -t for templates that override thread count per protocol
@@ -191,7 +220,8 @@ def get_phase_tools(
             ))
             # Add wordlist reference guide
             parts.append(HYDRA_WORDLIST_GUIDANCE)
-        elif attack_path_type == "phishing_social_engineering":
+        elif (attack_path_type == "phishing_social_engineering"
+                and "phishing_social_engineering" in enabled_builtins):
             # Phishing / Social Engineering workflow
             parts.append(PHISHING_SOCIAL_ENGINEERING_TOOLS)
             parts.append(PHISHING_PAYLOAD_FORMAT_GUIDANCE)
@@ -202,10 +232,18 @@ def get_phase_tools(
                     f"## Pre-Configured SMTP Settings\n\n"
                     f"Use these for email delivery via execute_code (Python smtplib):\n{smtp_config}\n"
                 )
+        elif attack_path_type.startswith("user_skill:"):
+            # User-uploaded attack skill — inject its .md content as workflow
+            user_skill_content = _resolve_user_skill()
+            if user_skill_content:
+                parts.append(user_skill_content)
+            else:
+                parts.append(UNCLASSIFIED_EXPLOIT_TOOLS)  # fallback
         elif attack_path_type.endswith("-unclassified"):
             # Generic unclassified workflow — no specific tool workflow
             parts.append(UNCLASSIFIED_EXPLOIT_TOOLS)
-        elif "metasploit_console" in allowed_tools:
+        elif ("cve_exploit" in enabled_builtins
+                and "metasploit_console" in allowed_tools):
             # CVE-based exploitation (default)
             parts.append(CVE_EXPLOIT_TOOLS)
             # Select payload guidance based on post_expl_type
@@ -219,7 +257,7 @@ def get_phase_tools(
                 else:
                     parts.append(NO_MODULE_FALLBACK_STATELESS)
         else:
-            # No exploitation tools available — show only informational tool descriptions
+            # No exploitation tools available or skill disabled — show only informational tool descriptions
             parts.append(build_informational_tool_descriptions(allowed_tools))
 
         # Add note about post-exploitation availability
@@ -227,8 +265,15 @@ def get_phase_tools(
             parts.append("\n**NOTE:** Post-exploitation phase is DISABLED. Complete exploitation and use action='complete'.\n")
 
     elif phase == "post_exploitation":
-        # Only show post-exploitation workflows if metasploit_console is allowed
-        if "metasploit_console" in allowed_tools:
+        # User skills define their own post-exploitation workflow
+        user_skill_content = _resolve_user_skill()
+        if user_skill_content:
+            parts.append(
+                user_skill_content + "\n\n"
+                "**Current phase is post-exploitation.** Follow the skill's "
+                "post-exploitation steps if defined, or use available tools."
+            )
+        elif "metasploit_console" in allowed_tools:
             if is_statefull:
                 parts.append(POST_EXPLOITATION_TOOLS_STATEFULL)
             else:
@@ -265,6 +310,7 @@ __all__ = [
     "TEXT_TO_CYPHER_SYSTEM",
     # Classification
     "ATTACK_PATH_CLASSIFICATION_PROMPT",
+    "build_classification_prompt",
     # CVE exploit
     "CVE_EXPLOIT_TOOLS",
     "CVE_PAYLOAD_GUIDANCE_STATEFULL",

@@ -11,9 +11,9 @@ malicious document creation, web delivery, handler setup, and email delivery.
 # =============================================================================
 
 PHISHING_SOCIAL_ENGINEERING_TOOLS = """
-## ATTACK PATH: PHISHING / SOCIAL ENGINEERING
+## ATTACK SKILL: PHISHING / SOCIAL ENGINEERING
 
-**CRITICAL: This attack path has been CLASSIFIED as phishing / social engineering.**
+**CRITICAL: This attack skill has been CLASSIFIED as phishing / social engineering.**
 **You MUST use the social engineering workflow below.**
 
 Focus on generating payloads, malicious documents, or web delivery mechanisms

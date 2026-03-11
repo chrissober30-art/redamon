@@ -76,6 +76,11 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'web_search': ['informational', 'exploitation', 'post_exploitation'],
     },
 
+    # Kali Shell Library Installation
+    'KALI_INSTALL_ENABLED': False,
+    'KALI_INSTALL_ALLOWED_PACKAGES': '',
+    'KALI_INSTALL_FORBIDDEN_PACKAGES': '',
+
     # Hydra Brute Force
     'HYDRA_ENABLED': True,
     'HYDRA_THREADS': 16,
@@ -88,6 +93,17 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
 
     # Phishing / Social Engineering
     'PHISHING_SMTP_CONFIG': '',  # Free-text SMTP config for phishing email delivery (optional)
+
+    # Attack Skill Configuration
+    'ATTACK_SKILL_CONFIG': {
+        'builtIn': {
+            'cve_exploit': True,
+            'brute_force_credential_guess': True,
+            'phishing_social_engineering': True,
+        },
+        'user': {},
+    },
+    'USER_ATTACK_SKILLS': [],  # Populated from DB when user skills are enabled
 
     # Legacy (deprecated — kept for backward compat)
     'BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS': 3,
@@ -146,7 +162,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     """
     import requests
 
-    url = f"{webapp_url.rstrip('/')}/api/projects/{project_id}"
+    url = f"{webapp_url.rstrip('/')}/api/projects/{project_id}?includeSkillContent=true"
     logger.info(f"Fetching agent settings from {url}")
 
     response = requests.get(url, timeout=30)
@@ -182,6 +198,9 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['TOOL_PHASE_MAP'] = project.get('agentToolPhaseMap', DEFAULT_AGENT_SETTINGS['TOOL_PHASE_MAP'])
     settings['BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS'] = project.get('agentBruteForceMaxWordlistAttempts', DEFAULT_AGENT_SETTINGS['BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS'])
     settings['BRUTEFORCE_SPEED'] = project.get('agentBruteforceSpeed', DEFAULT_AGENT_SETTINGS['BRUTEFORCE_SPEED'])
+    settings['KALI_INSTALL_ENABLED'] = project.get('agentKaliInstallEnabled', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_ENABLED'])
+    settings['KALI_INSTALL_ALLOWED_PACKAGES'] = project.get('agentKaliInstallAllowedPackages', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_ALLOWED_PACKAGES'])
+    settings['KALI_INSTALL_FORBIDDEN_PACKAGES'] = project.get('agentKaliInstallForbiddenPackages', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_FORBIDDEN_PACKAGES'])
     settings['HYDRA_ENABLED'] = project.get('hydraEnabled', DEFAULT_AGENT_SETTINGS['HYDRA_ENABLED'])
     settings['HYDRA_THREADS'] = project.get('hydraThreads', DEFAULT_AGENT_SETTINGS['HYDRA_THREADS'])
     settings['HYDRA_WAIT_BETWEEN_CONNECTIONS'] = project.get('hydraWaitBetweenConnections', DEFAULT_AGENT_SETTINGS['HYDRA_WAIT_BETWEEN_CONNECTIONS'])
@@ -192,6 +211,8 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['HYDRA_MAX_WORDLIST_ATTEMPTS'] = project.get('hydraMaxWordlistAttempts', DEFAULT_AGENT_SETTINGS['HYDRA_MAX_WORDLIST_ATTEMPTS'])
     settings['STEALTH_MODE'] = project.get('stealthMode', DEFAULT_AGENT_SETTINGS['STEALTH_MODE'])
     settings['PHISHING_SMTP_CONFIG'] = project.get('phishingSmtpConfig', DEFAULT_AGENT_SETTINGS['PHISHING_SMTP_CONFIG'])
+    settings['ATTACK_SKILL_CONFIG'] = project.get('attackSkillConfig', DEFAULT_AGENT_SETTINGS['ATTACK_SKILL_CONFIG'])
+    settings['USER_ATTACK_SKILLS'] = project.get('userAttackSkills', DEFAULT_AGENT_SETTINGS['USER_ATTACK_SKILLS'])
 
     # Target scope (used by guardrail checks inside the agent)
     settings['TARGET_DOMAIN'] = project.get('targetDomain', '')
@@ -365,6 +386,24 @@ def reload_settings(project_id: Optional[str] = None) -> dict[str, Any]:
     _settings = None
     _current_project_id = None
     return get_settings()
+
+
+# =============================================================================
+# ATTACK SKILL HELPERS
+# =============================================================================
+
+def get_enabled_builtin_skills() -> set[str]:
+    """Return the set of enabled built-in attack skill IDs."""
+    config = get_setting('ATTACK_SKILL_CONFIG', {})
+    return {k for k, v in config.get('builtIn', {}).items() if v}
+
+
+def get_enabled_user_skills() -> list[dict]:
+    """Return list of enabled user attack skills (id, name, content)."""
+    config = get_setting('ATTACK_SKILL_CONFIG', {})
+    user_toggles = config.get('user', {})
+    return [s for s in get_setting('USER_ATTACK_SKILLS', [])
+            if user_toggles.get(s['id'], True)]
 
 
 # =============================================================================

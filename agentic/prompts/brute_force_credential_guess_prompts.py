@@ -11,7 +11,7 @@ Replaces the legacy Metasploit auxiliary/scanner login module workflow.
 # =============================================================================
 
 HYDRA_BRUTE_FORCE_TOOLS = """
-## ATTACK PATH: BRUTE FORCE CREDENTIAL GUESS (THC Hydra)
+## ATTACK SKILL: BRUTE FORCE CREDENTIAL GUESS (THC Hydra)
 
 **CRITICAL: This objective has been CLASSIFIED as brute force credential guessing.**
 **You MUST follow the Hydra workflow below. DO NOT switch to other attack methods.**

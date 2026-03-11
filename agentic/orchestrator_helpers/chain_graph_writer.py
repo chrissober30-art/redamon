@@ -314,7 +314,7 @@ def _write_attack_chain(
             "project_id": project_id,
             "title": title or "",
             "objective": objective or "",
-            "attack_path_type": attack_path_type or "cve_exploit",
+            "attack_path_type": attack_path_type or "",
             "target_host": target_host or "",
             "target_port": target_port,
             "target_cves": target_cves or [],

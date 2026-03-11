@@ -419,6 +419,47 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
             </div>
           </div>
 
+          {/* Kali Shell — Library Installation */}
+          <div className={styles.subSection}>
+            <h3 className={styles.subSectionTitle}>Kali Shell — Library Installation</h3>
+            <div className={styles.toggleRow}>
+              <div>
+                <span className={styles.toggleLabel}>Allow Library Installation</span>
+                <p className={styles.toggleDescription}>Let the agent install packages (pip/apt) in kali_shell during a pentest. Installed packages are ephemeral — lost on container restart.</p>
+              </div>
+              <Toggle
+                checked={data.agentKaliInstallEnabled}
+                onChange={(checked) => updateField('agentKaliInstallEnabled', checked)}
+              />
+            </div>
+            {data.agentKaliInstallEnabled && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Authorized Packages</label>
+                  <textarea
+                    className="textInput"
+                    value={data.agentKaliInstallAllowedPackages}
+                    onChange={(e) => updateField('agentKaliInstallAllowedPackages', e.target.value)}
+                    rows={2}
+                    placeholder="e.g. pyftpdlib, scapy, droopescan"
+                  />
+                  <span className={styles.fieldHint}>Comma-separated whitelist. If non-empty, ONLY these packages can be installed.</span>
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Forbidden Packages</label>
+                  <textarea
+                    className="textInput"
+                    value={data.agentKaliInstallForbiddenPackages}
+                    onChange={(e) => updateField('agentKaliInstallForbiddenPackages', e.target.value)}
+                    rows={2}
+                    placeholder="e.g. metasploit-framework, cobalt-strike"
+                  />
+                  <span className={styles.fieldHint}>Comma-separated blacklist. These packages must NEVER be installed.</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Retries, Logging & Debug */}
           <div className={styles.subSection}>
             <h3 className={styles.subSectionTitle}>Retries, Logging & Debug</h3>

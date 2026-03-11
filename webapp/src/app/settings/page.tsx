@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, Upload, Download, Swords } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
 import { LlmProviderForm } from '@/components/settings/LlmProviderForm'
 import type { ProviderData } from '@/components/settings/LlmProviderForm'
 import { PROVIDER_TYPES } from '@/lib/llmProviderPresets'
+import { Modal } from '@/components/ui/Modal/Modal'
 import styles from '@/components/settings/Settings.module.css'
 
 interface UserSettings {
@@ -39,6 +40,98 @@ export default function SettingsPage() {
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({})
+
+  // Attack Skills
+  const [attackSkills, setAttackSkills] = useState<{ id: string; name: string; createdAt: string }[]>([])
+  const [skillsLoading, setSkillsLoading] = useState(true)
+  const [skillNameModal, setSkillNameModal] = useState(false)
+  const [pendingSkillContent, setPendingSkillContent] = useState('')
+  const [pendingSkillName, setPendingSkillName] = useState('')
+  const [skillUploading, setSkillUploading] = useState(false)
+  // Fetch attack skills
+  const fetchSkills = useCallback(async () => {
+    if (!userId) return
+    try {
+      const resp = await fetch(`/api/users/${userId}/attack-skills`)
+      if (resp.ok) setAttackSkills(await resp.json())
+    } catch (err) {
+      console.error('Failed to fetch attack skills:', err)
+    } finally {
+      setSkillsLoading(false)
+    }
+  }, [userId])
+
+  // Upload skill from .md file — read file then open name modal
+  const handleSkillUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !userId) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setPendingSkillContent(reader.result as string)
+      setPendingSkillName(file.name.replace(/\.md$/i, ''))
+      setSkillNameModal(true)
+    }
+    reader.readAsText(file)
+    e.target.value = '' // Reset input
+  }, [userId])
+
+  // Confirm skill upload from modal
+  const confirmSkillUpload = useCallback(async () => {
+    if (!userId || !pendingSkillName.trim()) return
+    setSkillUploading(true)
+    try {
+      const resp = await fetch(`/api/users/${userId}/attack-skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: pendingSkillName.trim(), content: pendingSkillContent }),
+      })
+      if (resp.ok) {
+        fetchSkills()
+        setSkillNameModal(false)
+        setPendingSkillContent('')
+        setPendingSkillName('')
+      } else {
+        const err = await resp.json()
+        alert(err.error || 'Failed to upload skill')
+      }
+    } catch (err) {
+      console.error('Failed to upload skill:', err)
+    } finally {
+      setSkillUploading(false)
+    }
+  }, [userId, pendingSkillName, pendingSkillContent, fetchSkills])
+
+  // Download skill as .md
+  const downloadSkill = useCallback(async (skillId: string, skillName: string) => {
+    if (!userId) return
+    try {
+      const resp = await fetch(`/api/users/${userId}/attack-skills/${skillId}`)
+      if (resp.ok) {
+        const skill = await resp.json()
+        const blob = new Blob([skill.content], { type: 'text/markdown' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${skillName}.md`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      console.error('Failed to download skill:', err)
+    }
+  }, [userId])
+
+  // Delete skill
+  const deleteSkill = useCallback(async (skillId: string) => {
+    if (!userId || !confirm('Delete this skill? It will be removed from all projects.')) return
+    try {
+      await fetch(`/api/users/${userId}/attack-skills/${skillId}`, { method: 'DELETE' })
+      fetchSkills()
+    } catch (err) {
+      console.error('Failed to delete skill:', err)
+    }
+  }, [userId, fetchSkills])
 
   // Fetch providers
   const fetchProviders = useCallback(async () => {
@@ -74,7 +167,8 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchProviders()
     fetchSettings()
-  }, [fetchProviders, fetchSettings])
+    fetchSkills()
+  }, [fetchProviders, fetchSettings, fetchSkills])
 
   // Delete provider
   const deleteProvider = useCallback(async (providerId: string) => {
@@ -218,6 +312,53 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Section 3: Attack Skills */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}><Swords size={16} /> Attack Skills</h2>
+          <label className="primaryButton" style={{ cursor: 'pointer' }}>
+            <Upload size={14} /> Upload Skill
+            <input
+              type="file"
+              accept=".md"
+              style={{ display: 'none' }}
+              onChange={handleSkillUpload}
+            />
+          </label>
+        </div>
+        <p className={styles.sectionHint}>
+          Upload .md files defining custom attack skill workflows. Skills become available as toggles in all project settings.
+        </p>
+
+        {skillsLoading ? (
+          <div className={styles.emptyState}><Loader2 size={16} className={styles.spin} /> Loading...</div>
+        ) : attackSkills.length === 0 ? (
+          <div className={styles.emptyState}>No custom skills uploaded yet. Upload a .md file to get started.</div>
+        ) : (
+          <div className={styles.providerList}>
+            {attackSkills.map(skill => (
+              <div key={skill.id} className={styles.providerCard}>
+                <span className={styles.providerIcon}><Swords size={16} /></span>
+                <div className={styles.providerInfo}>
+                  <div className={styles.providerName}>{skill.name}</div>
+                  <div className={styles.providerMeta}>
+                    Uploaded {new Date(skill.createdAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <div className={styles.providerActions}>
+                  <button className="iconButton" title="Download" onClick={() => downloadSkill(skill.id, skill.name)}>
+                    <Download size={14} />
+                  </button>
+                  <button className="iconButton" title="Delete" onClick={() => deleteSkill(skill.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Save settings button */}
       {settingsDirty && (
         <div className={styles.formActions} style={{ justifyContent: 'flex-end' }}>
@@ -227,6 +368,48 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+
+      {/* Skill name modal */}
+      <Modal
+        isOpen={skillNameModal}
+        onClose={() => { setSkillNameModal(false); setPendingSkillContent(''); setPendingSkillName('') }}
+        title="Upload Attack Skill"
+        size="small"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => { setSkillNameModal(false); setPendingSkillContent(''); setPendingSkillName('') }}
+            >
+              Cancel
+            </button>
+            <button
+              className="primaryButton"
+              disabled={!pendingSkillName.trim() || skillUploading}
+              onClick={confirmSkillUpload}
+            >
+              {skillUploading ? <Loader2 size={14} className={styles.spin} /> : <Upload size={14} />}
+              Upload
+            </button>
+          </>
+        }
+      >
+        <div className="formGroup">
+          <label className="formLabel">Skill Name</label>
+          <input
+            className="textInput"
+            type="text"
+            value={pendingSkillName}
+            onChange={(e) => setPendingSkillName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && pendingSkillName.trim()) confirmSkillUpload() }}
+            placeholder="e.g. SQL Injection Workflow"
+            autoFocus
+          />
+          <span className="formHint">
+            This name appears in project settings and classification badges.
+          </span>
+        </div>
+      </Modal>
     </div>
   )
 }

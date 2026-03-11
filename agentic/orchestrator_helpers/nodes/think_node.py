@@ -94,7 +94,7 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
     objective_history_formatted = format_objective_history(state.get("objective_history", []))
 
     # Get phase tools with attack path type for dynamic routing
-    attack_path_type = state.get("attack_path_type", "cve_exploit")
+    attack_path_type = state.get("attack_path_type", "")
     available_tools = get_phase_tools(
         phase,
         get_setting('ACTIVATE_POST_EXPL_PHASE', True),

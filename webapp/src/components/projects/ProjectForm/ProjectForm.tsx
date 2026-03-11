@@ -20,9 +20,7 @@ import { MitreSection } from './sections/MitreSection'
 import { SecurityChecksSection } from './sections/SecurityChecksSection'
 import { GithubSection } from './sections/GithubSection'
 import { AgentBehaviourSection } from './sections/AgentBehaviourSection'
-import { CveExploitSection } from './sections/CveExploitSection'
-import { HydraSection } from './sections/BruteForceSection'
-import { PhishingSection } from './sections/PhishingSection'
+import { AttackSkillsSection } from './sections/AttackSkillsSection'
 import { GvmScanSection } from './sections/GvmScanSection'
 import { CypherFixSettingsSection } from './sections/CypherFixSettingsSection'
 import { RoeSection } from './sections/RoeSection'
@@ -62,7 +60,7 @@ const TABS = [
   { id: 'gvm', label: 'GVM Scan' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'agent', label: 'Agent Behaviour' },
-  { id: 'attack', label: 'Attack Paths' },
+  { id: 'attack', label: 'Attack Skills' },
   { id: 'cypherfix', label: 'CypherFix' },
 ] as const
 
@@ -388,11 +386,7 @@ export function ProjectForm({
         )}
 
         {activeTab === 'attack' && (
-          <>
-            <CveExploitSection data={formData} updateField={updateField} />
-            <HydraSection data={formData} updateField={updateField} />
-            <PhishingSection data={formData} updateField={updateField} />
-          </>
+          <AttackSkillsSection data={formData} updateField={updateField} />
         )}
 
         {activeTab === 'cypherfix' && (

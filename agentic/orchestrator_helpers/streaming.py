@@ -93,7 +93,7 @@ async def emit_streaming_events(state: dict, callback) -> None:
             await callback.on_phase_update(
                 state.get("current_phase", "informational"),
                 state.get("current_iteration", 0),
-                state.get("attack_path_type", "cve_exploit")
+                state.get("attack_path_type", "")
             )
 
         # Todo list update

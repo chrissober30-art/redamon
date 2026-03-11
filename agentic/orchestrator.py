@@ -440,6 +440,13 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        # Fail fast: if no LLM could be configured, return an error immediately
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Invoking with: {question[:10000]}")
 
         try:
@@ -469,6 +476,12 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Resuming with approval: {decision}")
 
         try:
@@ -507,6 +520,12 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Resuming with answer: {answer[:10000]}")
 
         try:
@@ -609,6 +628,15 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        # Fail fast: if no LLM could be configured, return an error immediately
+        # instead of letting the guardrail's fail-closed mask it as "Target Blocked".
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            await streaming_callback.on_error(msg, recoverable=False)
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Invoking with streaming: {question[:10000]}")
 
         # Store streaming callback and guidance queue per-session
@@ -663,6 +691,13 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            await streaming_callback.on_error(msg, recoverable=False)
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Resuming with streaming approval: {decision}")
 
         self._streaming_callbacks[session_id] = streaming_callback
@@ -721,6 +756,13 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            await streaming_callback.on_error(msg, recoverable=False)
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Resuming with streaming answer: {answer[:10000]}")
 
         self._streaming_callbacks[session_id] = streaming_callback
@@ -777,6 +819,13 @@ class AgentOrchestrator:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
 
         self._apply_project_settings(project_id)
+
+        if self.llm is None:
+            msg = "LLM not configured. Please add an API key in Global Settings."
+            logger.error(f"[{user_id}/{project_id}/{session_id}] {msg}")
+            await streaming_callback.on_error(msg, recoverable=False)
+            return InvokeResponse(error=msg)
+
         logger.info(f"[{user_id}/{project_id}/{session_id}] Resuming execution from checkpoint")
 
         self._streaming_callbacks[session_id] = streaming_callback

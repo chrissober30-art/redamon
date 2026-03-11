@@ -378,11 +378,13 @@ class AttackPathClassification(BaseModel):
     def validate_attack_path_type(cls, v: str) -> str:
         if v in KNOWN_ATTACK_PATHS:
             return v
+        if v.startswith("user_skill:"):
+            return v
         if _UNCLASSIFIED_RE.match(v):
             return v
         raise ValueError(
             f"attack_path_type must be 'cve_exploit', 'brute_force_credential_guess', "
-            f"'phishing_social_engineering', or match '<term>-unclassified' pattern. Got: '{v}'"
+            f"'phishing_social_engineering', 'user_skill:<id>', or match '<term>-unclassified' pattern. Got: '{v}'"
         )
 
 
@@ -551,7 +553,7 @@ def create_initial_state(
         "current_phase": "informational",
         "phase_history": [PhaseHistoryEntry(phase="informational").model_dump()],
         "phase_transition_pending": None,
-        "attack_path_type": "cve_exploit",  # Default, will be classified when entering exploitation
+        "attack_path_type": "",  # Empty until classified by classify_attack_path
         "execution_trace": [],
         "todo_list": [],
         # Multi-objective support

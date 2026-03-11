@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
@@ -44,6 +45,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Exclude binary document data from regular responses (use /roe/download instead)
     const { roeDocumentData: _binary, ...projectWithoutBinary } = project
+
+    // If ?includeSkillContent=true, fetch enabled user skill contents for agent consumption
+    // Skills default to ON when not present in config.user (matching frontend behaviour).
+    const includeSkillContent = request.nextUrl.searchParams.get('includeSkillContent') === 'true'
+    if (includeSkillContent && project.userId) {
+      const config = (project.attackSkillConfig as Prisma.JsonObject) || {}
+      const userToggles = (config.user as Prisma.JsonObject) || {}
+
+      // IDs explicitly disabled (set to false)
+      const disabledIds = Object.entries(userToggles)
+        .filter(([, v]) => v === false)
+        .map(([id]) => id)
+
+      // Fetch all user skills EXCEPT explicitly disabled ones
+      const skills = await prisma.userAttackSkill.findMany({
+        where: {
+          userId: project.userId,
+          ...(disabledIds.length > 0 ? { id: { notIn: disabledIds } } : {}),
+        },
+        select: { id: true, name: true, content: true },
+      })
+      return NextResponse.json({ ...projectWithoutBinary, userAttackSkills: skills })
+    }
+
     return NextResponse.json(projectWithoutBinary)
   } catch (error) {
     console.error('Failed to fetch project:', error)
