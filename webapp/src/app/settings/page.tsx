@@ -11,10 +11,14 @@ import styles from '@/components/settings/Settings.module.css'
 
 interface UserSettings {
   tavilyApiKey: string
+  shodanApiKey: string
+  serpApiKey: string
 }
 
 const EMPTY_SETTINGS: UserSettings = {
   tavilyApiKey: '',
+  shodanApiKey: '',
+  serpApiKey: '',
 }
 
 function getProviderIcon(providerType: string): string {
@@ -204,6 +208,8 @@ export default function SettingsPage() {
         const data = await resp.json()
         setSettings({
           tavilyApiKey: data.tavilyApiKey || '',
+          shodanApiKey: data.shodanApiKey || '',
+          serpApiKey: data.serpApiKey || '',
         })
       }
     } catch (err) {
@@ -244,6 +250,8 @@ export default function SettingsPage() {
         const data = await resp.json()
         setSettings({
           tavilyApiKey: data.tavilyApiKey || '',
+          shodanApiKey: data.shodanApiKey || '',
+          serpApiKey: data.serpApiKey || '',
         })
         setSettingsDirty(false)
       }
@@ -352,10 +360,29 @@ export default function SettingsPage() {
             <SecretField
               label="Tavily API Key"
               hint="Enables web_search tool for CVE research and exploit lookups"
+              signupUrl="https://app.tavily.com/home"
               value={settings.tavilyApiKey}
               visible={!!visibleFields.tavilyApiKey}
               onToggle={() => toggleFieldVisibility('tavilyApiKey')}
               onChange={v => updateSetting('tavilyApiKey', v)}
+            />
+            <SecretField
+              label="Shodan API Key"
+              hint="Enables the shodan tool for internet-wide OSINT (search, host info, DNS, count)"
+              signupUrl="https://account.shodan.io/"
+              value={settings.shodanApiKey}
+              visible={!!visibleFields.shodanApiKey}
+              onToggle={() => toggleFieldVisibility('shodanApiKey')}
+              onChange={v => updateSetting('shodanApiKey', v)}
+            />
+            <SecretField
+              label="SerpAPI Key"
+              hint="Enables google_dork tool for Google dorking OSINT (site:, inurl:, filetype:). Free: 250 searches/month"
+              signupUrl="https://serpapi.com/manage-api-key"
+              value={settings.serpApiKey}
+              visible={!!visibleFields.serpApiKey}
+              onToggle={() => toggleFieldVisibility('serpApiKey')}
+              onChange={v => updateSetting('serpApiKey', v)}
             />
           </div>
         )}
@@ -526,6 +553,7 @@ export default function SettingsPage() {
 function SecretField({
   label,
   hint,
+  signupUrl,
   value,
   visible,
   onToggle,
@@ -533,6 +561,7 @@ function SecretField({
 }: {
   label: string
   hint: string
+  signupUrl?: string
   value: string
   visible: boolean
   onToggle: () => void
@@ -553,7 +582,17 @@ function SecretField({
           {visible ? <EyeOff size={14} /> : <Eye size={14} />}
         </button>
       </div>
-      <span className="formHint">{hint}</span>
+      <span className="formHint">
+        {hint}
+        {signupUrl && (
+          <>
+            {' — '}
+            <a href={signupUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>
+              Get API key
+            </a>
+          </>
+        )}
+      </span>
     </div>
   )
 }

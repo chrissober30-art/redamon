@@ -22,7 +22,7 @@
 .modal {
   position: relative;
   width: 100%;
-  max-width: 480px;
+  max-width: 576px;
   max-height: calc(100vh - var(--space-8));
   background: var(--bg-secondary);
   border: 1px solid var(--border-default);
@@ -50,7 +50,7 @@
 }
 
 .modalLarge {
-  max-width: 640px;
+  max-width: 768px;
 }
 
 .modalFull {

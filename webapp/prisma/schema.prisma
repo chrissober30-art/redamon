@@ -61,6 +61,8 @@ model UserSettings {
 
   // Tool API Keys
   tavilyApiKey    String   @default("") @map("tavily_api_key")
+  shodanApiKey    String   @default("") @map("shodan_api_key")
+  serpApiKey       String   @default("") @map("serp_api_key")
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -324,10 +326,11 @@ model Project {
   agentToolOutputMaxChars               Int      @default(20000) @map("agent_tool_output_max_chars")
   agentCypherMaxRetries                 Int      @default(3) @map("agent_cypher_max_retries")
   agentLlmParseMaxRetries               Int      @default(3) @map("agent_llm_parse_max_retries")
+  agentDeepThinkEnabled                 Boolean  @default(true) @map("agent_deep_think_enabled")
   agentCreateGraphImageOnInit           Boolean  @default(false) @map("agent_create_graph_image_on_init")
   agentLogMaxMb                         Int      @default(10) @map("agent_log_max_mb")
   agentLogBackupCount                   Int      @default(5) @map("agent_log_backup_count")
-  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
+  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"google_dork\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
   agentKaliInstallEnabled               Boolean  @default(false) @map("agent_kali_install_enabled")
   agentKaliInstallAllowedPackages       String   @default("") @map("agent_kali_install_allowed_packages")
   agentKaliInstallForbiddenPackages     String   @default("") @map("agent_kali_install_forbidden_packages")
@@ -343,6 +346,15 @@ model Project {
   hydraExtraChecks                      String   @default("nsr") @map("hydra_extra_checks")
   hydraVerbose                          Boolean  @default(true) @map("hydra_verbose")
   hydraMaxWordlistAttempts              Int      @default(3) @map("hydra_max_wordlist_attempts")
+
+  // Shodan OSINT Settings (agent tool toggle — kept separate from pipeline features)
+  shodanEnabled                         Boolean  @default(true) @map("shodan_enabled")
+
+  // Shodan Pipeline Enrichment (per-feature toggles, gated by global API key)
+  shodanHostLookup                      Boolean  @default(false) @map("shodan_host_lookup")
+  shodanReverseDns                      Boolean  @default(false) @map("shodan_reverse_dns")
+  shodanDomainDns                       Boolean  @default(false) @map("shodan_domain_dns")
+  shodanPassiveCves                     Boolean  @default(false) @map("shodan_passive_cves")
 
   // ========== PHISHING / SOCIAL ENGINEERING SETTINGS ==========
   phishingSmtpConfig                    String   @default("") @map("phishing_smtp_config")

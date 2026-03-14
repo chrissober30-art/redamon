@@ -432,7 +432,7 @@ async def get_defaults():
 
     # HYDRA_* keys map to Prisma fields without the 'agent' prefix
     # (e.g. HYDRA_ENABLED -> hydraEnabled, not agentHydraEnabled)
-    NO_PREFIX_KEYS = {k for k in DEFAULT_AGENT_SETTINGS if k.startswith(('HYDRA_', 'PHISHING_', 'ROE_', 'ATTACK_SKILL_'))}
+    NO_PREFIX_KEYS = {k for k in DEFAULT_AGENT_SETTINGS if k.startswith(('HYDRA_', 'PHISHING_', 'ROE_', 'ATTACK_SKILL_', 'SHODAN_'))}
 
     camel_case_defaults = {}
     for k, v in DEFAULT_AGENT_SETTINGS.items():

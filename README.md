@@ -24,7 +24,7 @@
   <img height="24" src="https://img.shields.io/badge/Stealth-Mode-5B21B6?style=flat&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MDAgNjAwIiBmaWxsPSJ3aGl0ZSI+PHBvbHlnb24gcG9pbnRzPSI0MDAsODAgODAwLDQyMCA3MjAsNDIwIDY4MCwzODAgNjIwLDQyMCA1NjAsMzgwIDUwMCw0MjAgNDQwLDM4MCAzODAsNDIwIDMyMCwzODAgMjYwLDQyMCAyMDAsMzgwIDEyMCw0MjAgMCw0MjAiLz48L3N2Zz4=&logoColor=white" alt="Stealth Mode"/>
   <img height="24" src="https://img.shields.io/badge/30+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="30+ Security Tools"/>
   <img height="24" src="https://img.shields.io/badge/185,000+-DETECTION%20RULES-8B1142?style=flat" alt="185,000+ Detection Rules"/>
-  <img height="24" src="https://img.shields.io/badge/180+-PROJECT%20SETTINGS-00899B?style=flat" alt="180+ Settings"/>
+  <img height="24" src="https://img.shields.io/badge/190+-PROJECT%20SETTINGS-00899B?style=flat" alt="190+ Settings"/>
   <img height="24" src="https://img.shields.io/badge/400+-AI%20MODELS-04A878?style=flat&logo=huggingface&logoColor=white" alt="400+ AI Models"/>
   <img height="24" src="https://img.shields.io/badge/%F0%9F%96%A5%EF%B8%8F_LOCAL%20MODELS-OLLAMA%20%7C%20vLLM%20%7C%20LM%20Studio-B85C00?style=flat" alt="Local Models Support"/>
   <img height="24" src="https://img.shields.io/badge/Metasploit-Framework-1A6DAA?style=flat" alt="Metasploit Framework"/>
@@ -83,7 +83,7 @@ We maintain a public **[Project Board](https://github.com/users/samugit83/projec
 | Attack Path: Credential Capture & MITM | New | [#46](https://github.com/samugit83/redamon/issues/46) |
 | Attack Path: Local Privilege Escalation | New | [#47](https://github.com/samugit83/redamon/issues/47) |
 | Attack Path: Client-Side Browser Exploitation | New | [#48](https://github.com/samugit83/redamon/issues/48) |
-| Agent Tool Expansion (Shodan, Dorking, Python, Memory) | New | [#49](https://github.com/samugit83/redamon/issues/49) |
+| Agent Tool Expansion (Shodan, Dorking, Python, Memory) | Partial | [#49](https://github.com/samugit83/redamon/issues/49) |
 | Agent Intelligence: Hierarchical Planning | New | [#50](https://github.com/samugit83/redamon/issues/50) |
 | Agent Intelligence: Reflexion & Episodic Memory | New | [#51](https://github.com/samugit83/redamon/issues/51) |
 | Agent Intelligence: Metacognitive Monitoring | New | [#52](https://github.com/samugit83/redamon/issues/52) |
@@ -295,7 +295,7 @@ The platform is built around six pillars:
 | **Attack Surface Graph** | A Neo4j knowledge graph with 17 node types and 20+ relationship types that serves as the single source of truth for every finding — and the primary data source the AI agent queries before every decision. |
 | **EvoGraph** | A persistent, evolutionary attack chain graph in Neo4j that tracks every step, finding, decision, and failure across the attack lifecycle — bridging the recon graph and enabling cross-session intelligence accumulation. |
 | **CypherFix** | Automated vulnerability remediation pipeline — an AI triage agent correlates and prioritizes findings from the graph, then a CodeFix agent clones the target repository, implements fixes using a ReAct loop with 11 code tools, and opens a GitHub pull request. |
-| **Project Settings Engine** | 180+ per-project parameters — exposed through the webapp UI — that control every tool's behavior, from Naabu thread counts to Nuclei severity filters to agent approval gates. |
+| **Project Settings Engine** | 190+ per-project parameters — exposed through the webapp UI — that control every tool's behavior, from Naabu thread counts to Nuclei severity filters to agent approval gates. |
 
 ---
 
@@ -448,13 +448,13 @@ The AI agent is a **LangGraph-based autonomous system** that implements the ReAc
 
 The agent progresses through three distinct operational phases, each with different tool access and objectives:
 
-**Informational Phase** — The default starting phase. The agent gathers intelligence by querying the Neo4j graph, running web searches for CVE details, performing HTTP requests with curl, and scanning ports with Naabu. No offensive tools are available. The agent analyzes the attack surface, identifies high-value targets, and builds a mental model of what's exploitable.
+**Informational Phase** — The default starting phase. The agent gathers intelligence by querying the Neo4j graph, running web searches for CVE details, querying Shodan for passive host intelligence, performing Google dorking for indexed resources, making HTTP requests with curl, and scanning ports with Naabu. When **Deep Think** is enabled (default: on), the agent performs a structured strategic analysis at session start, phase transitions, and failure loops — producing a prioritized action plan before acting. No offensive tools are available in this phase. The agent analyzes the attack surface, identifies high-value targets, and builds a mental model of what's exploitable.
 
 **Exploitation Phase** — When the agent identifies a viable attack path, it requests a phase transition. This requires **user approval** (configurable). Once approved, the agent gains access to the Metasploit console via MCP and can execute exploits. Four attack path types are supported:
 
 - **CVE Exploit** — the agent searches for a matching Metasploit module, configures the payload (reverse shell or bind shell), sets target parameters, and fires the exploit. For statefull mode, it establishes a Meterpreter session; for stateless mode, it executes one-shot commands. Two **tunnel providers** are supported for NAT/cloud environments: **ngrok** (free, single port 4444, stageless only) and **chisel** (multi-port 4444 + 8080, staged + stageless, requires VPS). When a tunnel is enabled, LHOST and LPORT are auto-detected — no manual port forwarding needed. Chisel also enables web delivery and HTA delivery attacks that require two ports.
 - **Hydra Brute Force** — the agent uses THC Hydra to brute force credentials against services like SSH, FTP, RDP, SMB, MySQL, HTTP forms, and 50+ other protocols. Hydra settings (threads, timeouts, extra checks) are fully configurable per project. After credentials are discovered, the agent establishes access via `sshpass`, database clients, or Metasploit psexec.
-- **Phishing / Social Engineering** — the agent generates malicious payloads (msfvenom executables, Office macro documents, PDFs, web delivery one-liners, HTA servers) and delivers them via email (Python smtplib with configurable SMTP settings), chat download (`docker cp`), or web link. A 6-step workflow guides the agent through target platform selection, handler setup, payload generation, verification, delivery, and session callback. SMTP settings are configured per project in the Attack Paths tab.
+- **Phishing / Social Engineering** — the agent generates malicious payloads (msfvenom executables, Office macro documents, PDFs, web delivery one-liners, HTA servers) and delivers them via email (Python smtplib with configurable SMTP settings), chat download (`docker cp`), or web link. A 6-step workflow guides the agent through target platform selection, handler setup, payload generation, verification, delivery, and session callback. SMTP settings are configured per project in the Attack Skills tab.
 - **Unclassified Fallback** — for techniques that don't match CVE exploit, brute force, or phishing (e.g., SQL injection, XSS, SSRF, file upload). The agent dynamically classifies the attack type and uses available tools generically without a mandatory workflow. These appear with a grey badge and a `-unclassified` suffix in the classification.
 
 When an exploit succeeds, the agent records a **ChainFinding(exploit_success)** in the [EvoGraph](#evograph--attack-chain-evolution) — recording the attack type, target IP, port, CVE IDs, Metasploit module, payload, session ID, and credentials discovered. This finding is linked to the attack chain step that produced it and bridged to the targeted IP and exploited CVE in the recon graph, making every successful compromise a permanent, queryable, and cross-session-accessible part of the knowledge graph.
@@ -493,10 +493,12 @@ The agent executes security tools through the **Model Context Protocol**, with e
 |------|---------|-------------|
 | **query_graph** | Neo4j Cypher queries for target intelligence | All phases |
 | **web_search** | Tavily-based CVE/exploit research | All phases |
+| **shodan** | Shodan internet intelligence — host info, banners, CVEs, reverse DNS | Informational & Exploitation |
+| **google_dork** | Google dorking via SerpAPI — exposed files, admin panels, configs | Informational |
 | **execute_curl** | HTTP requests, API probing, header inspection | All phases |
-| **execute_naabu** | Fast port scanning and service detection | All phases |
+| **execute_naabu** | Fast port scanning and service detection | Informational & Exploitation |
 | **execute_nmap** | Deep service analysis, OS fingerprinting, NSE scripts | All phases |
-| **execute_nuclei** | Vulnerability scanning with 9,000+ templates | All phases |
+| **execute_nuclei** | Vulnerability scanning with 9,000+ templates | Informational & Exploitation |
 | **kali_shell** | Direct Kali Linux shell commands (arbitrary command execution) | All phases |
 | **execute_code** | Run custom Python/Bash exploit scripts on the Kali sandbox | Exploitation & Post-exploitation |
 | **execute_hydra** | THC Hydra brute force password cracking (50+ protocols) | Exploitation & Post-exploitation |
@@ -919,7 +921,7 @@ flowchart LR
 
 ### Project Settings
 
-Every project in RedAmon has **180+ configurable parameters** across 11 setting categories that control the behavior of each reconnaissance module and the AI agent. These settings are managed through the webapp's project form UI, stored in PostgreSQL via Prisma ORM, and fetched by the recon container and agent at runtime.
+Every project in RedAmon has **190+ configurable parameters** across 14 tabs (grouped into Scope, Recon Pipeline, AI Agent, and Remediation) that control the behavior of each reconnaissance module and the AI agent. These settings are managed through the webapp's project form UI, stored in PostgreSQL via Prisma ORM, and fetched by the recon container and agent at runtime.
 
 <p align="center">
   <img src="assets/settings.gif" alt="RedAmon Project Settings" width="100%"/>
@@ -935,11 +937,12 @@ Every project in RedAmon has **180+ configurable parameters** across 11 setting 
 | **CVE & MITRE** | CVE enrichment from NVD/Vulners, CWE/CAPEC mapping |
 | **Security Checks** | 25+ individual checks: headers, TLS, DNS, exposed services |
 | **GVM Scan** | Scan profiles, target strategy, timeouts |
-| **Integrations** | GitHub secret hunting with 40+ regex patterns |
-| **Agent Behaviour** | LLM model (400+), phases, payloads, tunnel provider (ngrok/chisel), approval gates, limits |
-| **Attack Paths** | Hydra brute force, phishing SMTP configuration, tool phase restriction matrix |
+| **Integrations** | GitHub secret hunting with 40+ regex patterns, Shodan OSINT enrichment (host lookup, reverse DNS, domain DNS, passive CVEs) |
+| **Agent Behaviour** | LLM model (400+), Deep Think strategic reasoning, phases, payloads, tunnel provider (ngrok/chisel), approval gates, limits |
+| **Tool Matrix** | Per-phase tool restrictions for all 13 agent tools, API key status warnings for Tavily/Shodan/SerpAPI |
+| **Attack Skills** | Hydra brute force, phishing SMTP configuration |
 
-> **Full parameter reference:** See the **[Project Settings Reference](https://github.com/samugit83/redamon/wiki/9.-Project-Settings-Reference)** in the Wiki for all 180+ parameters with defaults and descriptions.
+> **Full parameter reference:** See the **[Project Settings Reference](https://github.com/samugit83/redamon/wiki/9.-Project-Settings-Reference)** in the Wiki for all 190+ parameters with defaults and descriptions.
 >
 > **Complete user guide:** See the **[RedAmon Wiki](https://github.com/samugit83/redamon/wiki)** for step-by-step instructions on creating users, projects, running scans, and using the AI agent.
 
@@ -961,7 +964,7 @@ RedAmon supports uploading a **Rules of Engagement** document (PDF, TXT, MD, or 
 **Enforcement — AI Agent**
 - **Prompt injection** — the full RoE is injected into the agent's system prompt at the `think_node`, including client contacts, excluded hosts, testing permissions, forbidden categories, rate limits, data handling rules, compliance frameworks, and incident procedures
 - **Severity phase cap** — a hard deterministic gate in `execute_tool_node` blocks tool execution if the current phase exceeds the RoE maximum (e.g., "exploitation" blocks post-exploitation tools regardless of what the LLM decides)
-- **Tool restrictions** — tools explicitly forbidden by the RoE are disabled via the Tool Phase Restrictions matrix in the Agent Behaviour tab
+- **Tool restrictions** — tools explicitly forbidden by the RoE are disabled via the Tool Phase Restrictions matrix in the **Tool Matrix** tab
 - **Timing warnings** — the `initialize_node` checks engagement dates and time windows, injecting warnings into the agent prompt if the engagement has ended or testing is outside the allowed window
 
 **RoE Viewer**

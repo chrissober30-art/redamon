@@ -4258,6 +4258,292 @@ class Neo4jClient:
         return stats
 
 
+    def update_graph_from_shodan(self, recon_data: dict, user_id: str, project_id: str) -> dict:
+        """
+        Update the Neo4j graph database with Shodan OSINT enrichment data.
+
+        Creates/updates:
+        - IP nodes with geo/ISP/OS metadata (from host lookup)
+        - Port + Service nodes (from host lookup services)
+        - Subdomain nodes + RESOLVES_TO (from reverse DNS / domain DNS)
+        - DNSRecord nodes (from domain DNS)
+        - Vulnerability + CVE nodes (from passive CVEs)
+
+        Uses MERGE for automatic deduplication with data from other tools.
+        """
+        stats = {
+            "ips_enriched": 0,
+            "ports_created": 0,
+            "services_created": 0,
+            "subdomains_created": 0,
+            "dns_records_created": 0,
+            "vulnerabilities_created": 0,
+            "cves_created": 0,
+            "relationships_created": 0,
+            "errors": [],
+        }
+
+        shodan_data = recon_data.get("shodan", {})
+        if not shodan_data:
+            stats["errors"].append("No shodan data found in recon_data")
+            return stats
+
+        domain = recon_data.get("domain", "")
+
+        with self.driver.session() as session:
+
+            # ── 1. IP Enrichment (from host lookup) ──
+            for host in shodan_data.get("hosts", []):
+                ip = host.get("ip")
+                if not ip:
+                    continue
+                try:
+                    props = {k: v for k, v in {
+                        "os": host.get("os"),
+                        "isp": host.get("isp"),
+                        "organization": host.get("org"),
+                        "country": host.get("country_name"),
+                        "city": host.get("city"),
+                        "shodan_enriched": True,
+                    }.items() if v is not None}
+
+                    session.run(
+                        """
+                        MERGE (i:IP {address: $address, user_id: $user_id, project_id: $project_id})
+                        SET i += $props, i.updated_at = datetime()
+                        """,
+                        address=ip, user_id=user_id, project_id=project_id, props=props
+                    )
+                    stats["ips_enriched"] += 1
+
+                    # Port + Service nodes from host services
+                    # (InternetDB ports are NOT graphed here — Naabu already
+                    # handles port discovery in both active and passive mode)
+                    for svc in host.get("services", []):
+                        port_num = svc.get("port")
+                        if not port_num:
+                            continue
+                        protocol = svc.get("transport", "tcp")
+
+                        # MERGE Port
+                        session.run(
+                            """
+                            MERGE (p:Port {number: $port, protocol: $protocol, ip_address: $ip,
+                                           user_id: $user_id, project_id: $project_id})
+                            ON CREATE SET p.state = 'open', p.source = 'shodan', p.updated_at = datetime()
+                            ON MATCH SET p.updated_at = datetime()
+                            MERGE (i:IP {address: $ip, user_id: $user_id, project_id: $project_id})
+                            MERGE (i)-[:HAS_PORT]->(p)
+                            """,
+                            port=port_num, protocol=protocol, ip=ip,
+                            user_id=user_id, project_id=project_id
+                        )
+                        stats["ports_created"] += 1
+                        stats["relationships_created"] += 1
+
+                        # MERGE Service (if product is known)
+                        product = svc.get("product", "").strip()
+                        if product:
+                            svc_props = {k: v for k, v in {
+                                "version": svc.get("version"),
+                                "banner": svc.get("banner"),
+                                "source": "shodan",
+                                "module": svc.get("module"),
+                            }.items() if v}
+
+                            session.run(
+                                """
+                                MERGE (svc:Service {name: $name, port_number: $port, ip_address: $ip,
+                                                    user_id: $user_id, project_id: $project_id})
+                                ON CREATE SET svc += $props, svc.updated_at = datetime()
+                                ON MATCH SET svc.updated_at = datetime()
+                                WITH svc
+                                MATCH (p:Port {number: $port, protocol: $protocol, ip_address: $ip,
+                                               user_id: $user_id, project_id: $project_id})
+                                MERGE (p)-[:RUNS_SERVICE]->(svc)
+                                """,
+                                name=product, port=port_num, protocol=protocol, ip=ip,
+                                user_id=user_id, project_id=project_id, props=svc_props
+                            )
+                            stats["services_created"] += 1
+                            stats["relationships_created"] += 1
+
+                except Exception as e:
+                    stats["errors"].append(f"Failed to enrich IP {ip}: {e}")
+
+            # ── 2. Reverse DNS → Subdomain nodes ──
+            for ip, hostnames in shodan_data.get("reverse_dns", {}).items():
+                for hostname in hostnames:
+                    if not hostname:
+                        continue
+                    try:
+                        session.run(
+                            """
+                            MERGE (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
+                            ON CREATE SET s.source = 'shodan_rdns', s.discovered_at = datetime(),
+                                          s.updated_at = datetime()
+                            MERGE (i:IP {address: $ip, user_id: $user_id, project_id: $project_id})
+                            MERGE (s)-[:RESOLVES_TO {record_type: 'A', timestamp: datetime()}]->(i)
+                            """,
+                            name=hostname, ip=ip, user_id=user_id, project_id=project_id
+                        )
+                        stats["subdomains_created"] += 1
+                        stats["relationships_created"] += 1
+
+                        # Link to domain if we know it
+                        if domain:
+                            session.run(
+                                """
+                                MATCH (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
+                                MATCH (d:Domain {name: $domain, user_id: $user_id, project_id: $project_id})
+                                MERGE (s)-[:BELONGS_TO]->(d)
+                                """,
+                                name=hostname, domain=domain,
+                                user_id=user_id, project_id=project_id
+                            )
+                            stats["relationships_created"] += 1
+
+                    except Exception as e:
+                        stats["errors"].append(f"Failed to create subdomain {hostname}: {e}")
+
+            # ── 3. Domain DNS → Subdomain + DNSRecord nodes ──
+            domain_dns = shodan_data.get("domain_dns", {})
+            for sub_name in domain_dns.get("subdomains", []):
+                if not sub_name:
+                    continue
+                fqdn = f"{sub_name}.{domain}" if domain and not sub_name.endswith(domain) else sub_name
+                try:
+                    session.run(
+                        """
+                        MERGE (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
+                        ON CREATE SET s.source = 'shodan_dns', s.discovered_at = datetime(),
+                                      s.updated_at = datetime()
+                        """,
+                        name=fqdn, user_id=user_id, project_id=project_id
+                    )
+                    stats["subdomains_created"] += 1
+
+                    if domain:
+                        session.run(
+                            """
+                            MATCH (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
+                            MATCH (d:Domain {name: $domain, user_id: $user_id, project_id: $project_id})
+                            MERGE (s)-[:BELONGS_TO]->(d)
+                            """,
+                            name=fqdn, domain=domain,
+                            user_id=user_id, project_id=project_id
+                        )
+                        stats["relationships_created"] += 1
+
+                except Exception as e:
+                    stats["errors"].append(f"Failed to create subdomain {fqdn}: {e}")
+
+            for record in domain_dns.get("records", []):
+                rec_type = record.get("type", "")
+                rec_value = record.get("value", "")
+                rec_sub = record.get("subdomain", "")
+                if not rec_type or not rec_value:
+                    continue
+                fqdn = f"{rec_sub}.{domain}" if rec_sub and domain else domain
+                try:
+                    session.run(
+                        """
+                        MERGE (dns:DNSRecord {type: $type, value: $value, subdomain: $subdomain,
+                                              user_id: $user_id, project_id: $project_id})
+                        ON CREATE SET dns.source = 'shodan', dns.updated_at = datetime()
+                        """,
+                        type=rec_type, value=rec_value, subdomain=fqdn,
+                        user_id=user_id, project_id=project_id
+                    )
+                    stats["dns_records_created"] += 1
+
+                    # Link A/AAAA records to IP nodes
+                    if rec_type in ("A", "AAAA"):
+                        session.run(
+                            """
+                            MATCH (s:Subdomain {name: $subdomain, user_id: $user_id, project_id: $project_id})
+                            MERGE (i:IP {address: $ip, user_id: $user_id, project_id: $project_id})
+                            MERGE (s)-[:RESOLVES_TO {record_type: $type, timestamp: datetime()}]->(i)
+                            """,
+                            subdomain=fqdn, ip=rec_value, type=rec_type,
+                            user_id=user_id, project_id=project_id
+                        )
+                        stats["relationships_created"] += 1
+
+                except Exception as e:
+                    stats["errors"].append(f"Failed to create DNS record {rec_type}={rec_value}: {e}")
+
+            # ── 4. Passive CVEs → Vulnerability + CVE nodes ──
+            for cve_entry in shodan_data.get("cves", []):
+                cve_id = cve_entry.get("cve_id", "")
+                ip = cve_entry.get("ip", "")
+                if not cve_id or not ip:
+                    continue
+                vuln_id = f"shodan-{cve_id}-{ip}"
+                try:
+                    session.run(
+                        """
+                        MERGE (v:Vulnerability {id: $vuln_id})
+                        ON CREATE SET v.source = 'shodan', v.name = $cve_id,
+                                      v.cves = [$cve_id], v.user_id = $user_id,
+                                      v.project_id = $project_id, v.updated_at = datetime()
+                        """,
+                        vuln_id=vuln_id, cve_id=cve_id,
+                        user_id=user_id, project_id=project_id
+                    )
+                    stats["vulnerabilities_created"] += 1
+
+                    session.run(
+                        """
+                        MERGE (c:CVE {id: $cve_id})
+                        ON CREATE SET c.source = 'shodan', c.user_id = $user_id,
+                                      c.project_id = $project_id, c.updated_at = datetime()
+                        """,
+                        cve_id=cve_id, user_id=user_id, project_id=project_id
+                    )
+                    stats["cves_created"] += 1
+
+                    session.run(
+                        """
+                        MATCH (v:Vulnerability {id: $vuln_id})
+                        MATCH (c:CVE {id: $cve_id})
+                        MERGE (v)-[:INCLUDES_CVE]->(c)
+                        """,
+                        vuln_id=vuln_id, cve_id=cve_id
+                    )
+                    stats["relationships_created"] += 1
+
+                    session.run(
+                        """
+                        MATCH (i:IP {address: $ip, user_id: $user_id, project_id: $project_id})
+                        MATCH (v:Vulnerability {id: $vuln_id})
+                        MERGE (i)-[:HAS_VULNERABILITY]->(v)
+                        """,
+                        ip=ip, vuln_id=vuln_id,
+                        user_id=user_id, project_id=project_id
+                    )
+                    stats["relationships_created"] += 1
+
+                except Exception as e:
+                    stats["errors"].append(f"Failed to create CVE {cve_id} for {ip}: {e}")
+
+            # Print summary
+            print(f"\n[+] Shodan Graph Update Summary:")
+            print(f"[+] Enriched {stats['ips_enriched']} IP nodes")
+            print(f"[+] Created {stats['ports_created']} Port nodes")
+            print(f"[+] Created {stats['services_created']} Service nodes")
+            print(f"[+] Created {stats['subdomains_created']} Subdomain nodes")
+            print(f"[+] Created {stats['dns_records_created']} DNSRecord nodes")
+            print(f"[+] Created {stats['vulnerabilities_created']} Vulnerability nodes")
+            print(f"[+] Created {stats['cves_created']} CVE nodes")
+            print(f"[+] Created {stats['relationships_created']} relationships")
+
+            if stats["errors"]:
+                print(f"[!] {len(stats['errors'])} errors occurred")
+
+        return stats
+
+
 if __name__ == "__main__":
     # Quick connection test
     print("[*] Testing Neo4j connection...")

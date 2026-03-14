@@ -12,6 +12,7 @@ import styles from './AgentTimeline.module.css'
 import { ThinkingCard } from './ThinkingCard'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { PlanWaveCard } from './PlanWaveCard'
+import { DeepThinkCard } from './DeepThinkCard'
 import type { TodoItem } from '@/lib/websocket-types'
 
 export interface ThinkingItem {
@@ -56,15 +57,27 @@ export interface PlanWaveItem {
   recommended_next_steps?: string[]
 }
 
-export type TimelineItem = ThinkingItem | ToolExecutionItem | PlanWaveItem
+export interface DeepThinkItem {
+  type: 'deep_think'
+  id: string
+  timestamp: Date
+  trigger_reason: string
+  analysis: string
+  iteration: number
+  phase: string
+}
+
+export type TimelineItem = ThinkingItem | ToolExecutionItem | PlanWaveItem | DeepThinkItem
 
 export interface AgentTimelineProps {
   items: TimelineItem[]
   isStreaming: boolean
   onItemExpand?: (itemId: string) => void
+  missingApiKeys?: Set<string>
+  onAddApiKey?: (toolId: string) => void
 }
 
-export function AgentTimeline({ items, isStreaming, onItemExpand }: AgentTimelineProps) {
+export function AgentTimeline({ items, isStreaming, onItemExpand, missingApiKeys, onAddApiKey }: AgentTimelineProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
 
   const toggleExpand = (itemId: string) => {
@@ -106,17 +119,27 @@ export function AgentTimeline({ items, isStreaming, onItemExpand }: AgentTimelin
                 isExpanded={isExpanded}
                 onToggleExpand={() => toggleExpand(item.id)}
               />
+            ) : item.type === 'deep_think' ? (
+              <DeepThinkCard
+                item={item}
+                isExpanded={isExpanded}
+                onToggleExpand={() => toggleExpand(item.id)}
+              />
             ) : item.type === 'plan_wave' ? (
               <PlanWaveCard
                 item={item}
                 isExpanded={isExpanded}
                 onToggleExpand={() => toggleExpand(item.id)}
+                missingApiKeys={missingApiKeys}
+                onAddApiKey={onAddApiKey}
               />
             ) : (
               <ToolExecutionCard
                 item={item}
                 isExpanded={isExpanded}
                 onToggleExpand={() => toggleExpand(item.id)}
+                missingApiKey={missingApiKeys?.has(item.tool_name)}
+                onAddApiKey={onAddApiKey ? () => onAddApiKey(item.tool_name) : undefined}
               />
             )}
           </div>

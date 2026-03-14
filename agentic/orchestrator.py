@@ -27,6 +27,8 @@ from tools import (
     MCPToolsManager,
     Neo4jToolManager,
     WebSearchToolManager,
+    ShodanToolManager,
+    GoogleDorkToolManager,
     PhaseAwareToolExecutor,
 )
 from orchestrator_helpers import (
@@ -170,6 +172,28 @@ class AgentOrchestrator:
                 self.tool_executor.update_web_search_tool(new_tool)
                 logger.info("Updated Tavily web search tool with user settings key")
 
+        # Update Shodan key from user settings if available
+        shodan_key = user_settings.get('shodanApiKey', '')
+        if self._shodan_manager and self.tool_executor:
+            shodan_enabled = get_setting('SHODAN_ENABLED', True)
+            if shodan_key and shodan_enabled and self._shodan_manager.api_key != shodan_key:
+                self._shodan_manager.api_key = shodan_key
+                shodan_tool = self._shodan_manager.get_tool()
+                self.tool_executor.update_shodan_tool(shodan_tool)
+                logger.info("Updated Shodan OSINT tool with user settings key")
+            elif not shodan_enabled:
+                self.tool_executor.update_shodan_tool(None)
+                logger.info("Shodan tool disabled via project settings")
+
+        # Update Google dork (SerpAPI) key from user settings if available
+        serp_api_key = user_settings.get('serpApiKey', '')
+        if self._google_dork_manager and self.tool_executor:
+            if serp_api_key and self._google_dork_manager.api_key != serp_api_key:
+                self._google_dork_manager.api_key = serp_api_key
+                google_dork_tool = self._google_dork_manager.get_tool()
+                self.tool_executor.update_google_dork_tool(google_dork_tool)
+                logger.info("Updated Google dork tool with SerpAPI key")
+
     def _setup_llm(self) -> None:
         """Initialize the LLM based on current model_name.
 
@@ -222,8 +246,19 @@ class AgentOrchestrator:
         self._web_search_manager = WebSearchToolManager()
         web_search_tool = self._web_search_manager.get_tool()
 
+        # Setup Shodan OSINT tool (key resolved later via _apply_project_settings)
+        self._shodan_manager = ShodanToolManager()
+        shodan_tool = self._shodan_manager.get_tool()
+
+        # Setup Google dork tool (key resolved later via _apply_project_settings)
+        self._google_dork_manager = GoogleDorkToolManager()
+        google_dork_tool = self._google_dork_manager.get_tool()
+
         # Create phase-aware tool executor
-        self.tool_executor = PhaseAwareToolExecutor(mcp_manager, graph_tool, web_search_tool)
+        self.tool_executor = PhaseAwareToolExecutor(
+            mcp_manager, graph_tool, web_search_tool,
+            shodan_tool, google_dork_tool,
+        )
         self.tool_executor.register_mcp_tools(mcp_tools)
 
         logger.info(f"Tools initialized: {len(self.tool_executor.get_all_tools())} available")

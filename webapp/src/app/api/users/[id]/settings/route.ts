@@ -25,6 +25,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Return empty defaults (don't create yet)
       return NextResponse.json({
         tavilyApiKey: '',
+        shodanApiKey: '',
+        serpApiKey: '',
       })
     }
 
@@ -33,6 +35,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       settings = {
         ...settings,
         tavilyApiKey: maskSecret(settings.tavilyApiKey),
+        shodanApiKey: maskSecret(settings.shodanApiKey),
+        serpApiKey: maskSecret(settings.serpApiKey),
       }
     }
 
@@ -58,7 +62,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
 
     const data: Record<string, string> = {}
-    const fields = ['tavilyApiKey'] as const
+    const fields = ['tavilyApiKey', 'shodanApiKey', 'serpApiKey'] as const
 
     for (const field of fields) {
       if (field in body) {
@@ -82,6 +86,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({
       ...settings,
       tavilyApiKey: maskSecret(settings.tavilyApiKey),
+      shodanApiKey: maskSecret(settings.shodanApiKey),
+      serpApiKey: maskSecret(settings.serpApiKey),
     })
   } catch (error) {
     console.error('Failed to update user settings:', error)

@@ -489,6 +489,451 @@ class WebSearchToolManager:
 
 
 # =============================================================================
+# GOOGLE DORK TOOL MANAGER (via SerpAPI)
+# =============================================================================
+
+SERPAPI_BASE = "https://serpapi.com/search"
+
+
+class GoogleDorkToolManager:
+    """Manages Google dork search tool via SerpAPI for OSINT reconnaissance."""
+
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or ''
+
+    def get_tool(self) -> Optional[callable]:
+        """
+        Set up and return the Google dork search tool.
+
+        Returns:
+            The google_dork tool function, or None if SerpAPI key is not configured.
+        """
+        if not self.api_key:
+            logger.warning(
+                "SerpAPI key not configured - google_dork tool will not be available. "
+                "Set it in Global Settings (http://localhost:3000/settings)."
+            )
+            return None
+
+        manager = self
+
+        @tool
+        async def google_dork(query: str) -> str:
+            """
+            Search Google using advanced dork operators for OSINT reconnaissance.
+
+            Use this tool to find:
+            - Exposed files on target domains (filetype:sql, filetype:env, filetype:bak)
+            - Admin panels and login pages (inurl:admin, inurl:login)
+            - Directory listings (intitle:"index of")
+            - Sensitive data leaks (intext:password, intext:"sql syntax")
+
+            This is passive OSINT — no packets are sent to the target.
+
+            Args:
+                query: Google dork query (e.g., "site:example.com filetype:pdf")
+
+            Returns:
+                Search results with titles, URLs, and snippets
+            """
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(
+                        SERPAPI_BASE,
+                        params={
+                            "engine": "google",
+                            "api_key": manager.api_key,
+                            "q": query,
+                            "num": 10,
+                            "nfpr": 1,      # Disable auto-correct to preserve dork syntax
+                            "filter": 0,    # Disable similar results filter
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                # Check for API-level errors
+                if "error" in data:
+                    return f"Google dork error: {data['error']}"
+
+                items = data.get("organic_results", [])
+                if not items:
+                    return f"No results found for: {query}"
+
+                # Get total results count
+                search_info = data.get("search_information", {})
+                total = search_info.get("total_results", "?")
+
+                formatted = []
+                for item in items:
+                    pos = item.get("position", "?")
+                    title = item.get("title", "No title")
+                    link = item.get("link", "")
+                    snippet = item.get("snippet", "")
+                    displayed_link = item.get("displayed_link", "")
+
+                    entry = f"[{pos}] {title}\n    URL: {link}"
+                    if displayed_link:
+                        entry += f"\n    Display: {displayed_link}"
+                    if snippet:
+                        entry += f"\n    {snippet}"
+                    formatted.append(entry)
+
+                header = f"Google dork results ({total} total, showing {len(items)}):\n"
+                return header + "\n\n".join(formatted)
+
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status == 401:
+                    return "SerpAPI error: Invalid API key. Check Global Settings."
+                elif status == 429:
+                    return "SerpAPI error: Rate limit exceeded (free: 250/month, 50/hour)."
+                return f"SerpAPI error: HTTP {status}"
+            except Exception as e:
+                logger.error(f"Google dork search failed: {e}")
+                return f"Google dork error: {str(e)}"
+
+        logger.info("Google dork search tool configured (via SerpAPI)")
+        return google_dork
+
+
+# =============================================================================
+# SHODAN TOOL MANAGER
+# =============================================================================
+
+SHODAN_API_BASE = "https://api.shodan.io"
+
+
+class ShodanToolManager:
+    """Manages unified Shodan OSINT tool for internet-wide reconnaissance."""
+
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or ''
+
+    def get_tool(self) -> Optional[callable]:
+        """
+        Set up and return unified Shodan tool with 5 actions.
+
+        Returns:
+            The shodan tool, or None if Shodan API key is not configured.
+        """
+        if not self.api_key:
+            logger.warning(
+                "Shodan API key not configured - shodan tool will not be available. "
+                "Set it in Global Settings (http://localhost:3000/settings)."
+            )
+            return None
+
+        manager = self
+
+        @tool
+        async def shodan(action: str, query: str = "", ip: str = "", domain: str = "") -> str:
+            """
+            Unified Shodan OSINT tool for internet-wide reconnaissance.
+
+            Actions:
+            - search: Search Shodan for devices/services (requires paid key)
+            - host: Get detailed info for a specific IP
+            - dns_reverse: Reverse DNS lookup for an IP
+            - dns_domain: Get DNS records and subdomains for a domain (requires paid key)
+            - count: Count matching hosts without full search
+
+            Args:
+                action: One of "search", "host", "dns_reverse", "dns_domain", "count"
+                query: Shodan search query (for search and count actions)
+                ip: Target IP address (for host and dns_reverse actions)
+                domain: Target domain (for dns_domain action)
+
+            Returns:
+                Formatted results from the Shodan API
+            """
+            if action == "search":
+                return await _action_search(manager.api_key, query)
+            elif action == "host":
+                return await _action_host(manager.api_key, ip)
+            elif action == "dns_reverse":
+                return await _action_dns_reverse(manager.api_key, ip)
+            elif action == "dns_domain":
+                return await _action_dns_domain(manager.api_key, domain)
+            elif action == "count":
+                return await _action_count(manager.api_key, query)
+            else:
+                return (
+                    f"Error: Unknown action '{action}'. "
+                    "Valid actions: search, host, dns_reverse, dns_domain, count"
+                )
+
+        logger.info("Shodan OSINT tool configured (5 actions)")
+        return shodan
+
+
+async def _action_search(api_key: str, query: str) -> str:
+    """Search Shodan for internet-connected devices."""
+    if not query:
+        return "Error: 'query' parameter is required for action='search'"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{SHODAN_API_BASE}/shodan/host/search",
+                params={"key": api_key, "query": query},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        total = data.get("total", 0)
+        matches = data.get("matches", [])
+
+        if not matches:
+            return f"No Shodan results for query: {query} (total: {total})"
+
+        lines = [f"Shodan search: {total} total results (showing {len(matches)})"]
+        lines.append("")
+
+        for i, match in enumerate(matches[:20], 1):
+            ip = match.get("ip_str", "?")
+            port = match.get("port", "?")
+            org = match.get("org", "")
+            product = match.get("product", "")
+            version = match.get("version", "")
+            hostnames = match.get("hostnames", [])
+            vulns = list(match.get("vulns", {}).keys()) if match.get("vulns") else []
+            transport = match.get("transport", "tcp")
+
+            svc = f"{product} {version}".strip() if product else ""
+            host_line = f"[{i}] {ip}:{port}/{transport}"
+            if org:
+                host_line += f"  org={org}"
+            if hostnames:
+                host_line += f"  hosts={','.join(hostnames[:3])}"
+            if svc:
+                host_line += f"  svc={svc}"
+            if vulns:
+                host_line += f"  vulns={','.join(vulns[:5])}"
+
+            lines.append(host_line)
+
+        return "\n".join(lines)
+
+    except httpx.HTTPStatusError as e:
+        return _handle_http_error(e, "search")
+    except Exception as e:
+        logger.error(f"Shodan search failed: {e}")
+        return f"Shodan search error: {str(e)}"
+
+
+async def _action_host(api_key: str, ip: str) -> str:
+    """Get detailed Shodan information for a specific IP address."""
+    if not ip:
+        return "Error: 'ip' parameter is required for action='host'"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{SHODAN_API_BASE}/shodan/host/{ip}",
+                params={"key": api_key},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        lines = [f"Shodan Host: {data.get('ip_str', ip)}"]
+
+        hostnames = data.get("hostnames", [])
+        if hostnames:
+            lines.append(f"Hostnames: {', '.join(hostnames)}")
+
+        os_info = data.get("os")
+        if os_info:
+            lines.append(f"OS: {os_info}")
+
+        org = data.get("org", "")
+        isp = data.get("isp", "")
+        if org:
+            lines.append(f"Org: {org}")
+        if isp and isp != org:
+            lines.append(f"ISP: {isp}")
+
+        country = data.get("country_name", "")
+        city = data.get("city", "")
+        if country:
+            loc = country
+            if city:
+                loc = f"{city}, {country}"
+            lines.append(f"Location: {loc}")
+
+        ports = data.get("ports", [])
+        if ports:
+            lines.append(f"Open ports: {', '.join(str(p) for p in sorted(ports))}")
+
+        vulns = data.get("vulns", [])
+        if vulns:
+            lines.append(f"Vulnerabilities ({len(vulns)}): {', '.join(vulns[:15])}")
+            if len(vulns) > 15:
+                lines.append(f"  ... and {len(vulns) - 15} more")
+
+        # Per-service details
+        services = data.get("data", [])
+        if services:
+            lines.append("")
+            lines.append(f"Services ({len(services)}):")
+            for svc in services[:15]:
+                port = svc.get("port", "?")
+                transport = svc.get("transport", "tcp")
+                product = svc.get("product", "")
+                version = svc.get("version", "")
+                svc_name = f"{product} {version}".strip() if product else ""
+
+                svc_line = f"  {port}/{transport}"
+                if svc_name:
+                    svc_line += f"  {svc_name}"
+
+                # Banner snippet (first 200 chars)
+                banner = svc.get("data", "").strip()
+                if banner:
+                    snippet = banner[:200].replace("\n", " | ")
+                    svc_line += f"  banner: {snippet}"
+
+                lines.append(svc_line)
+
+            if len(services) > 15:
+                lines.append(f"  ... and {len(services) - 15} more services")
+
+        return "\n".join(lines)
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            return f"Shodan: No information available for IP {ip}"
+        return _handle_http_error(e, "host")
+    except Exception as e:
+        logger.error(f"Shodan host info failed: {e}")
+        return f"Shodan host info error: {str(e)}"
+
+
+async def _action_dns_reverse(api_key: str, ip: str) -> str:
+    """Reverse DNS lookup for an IP address."""
+    if not ip:
+        return "Error: 'ip' parameter is required for action='dns_reverse'"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{SHODAN_API_BASE}/dns/reverse",
+                params={"key": api_key, "ips": ip},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        hostnames = data.get(ip, [])
+        if not hostnames:
+            return f"No reverse DNS records for {ip}"
+
+        lines = [f"Reverse DNS for {ip}:"]
+        for hostname in hostnames:
+            lines.append(f"  {hostname}")
+        return "\n".join(lines)
+
+    except httpx.HTTPStatusError as e:
+        return _handle_http_error(e, "dns_reverse")
+    except Exception as e:
+        logger.error(f"Shodan DNS reverse failed: {e}")
+        return f"Shodan DNS reverse error: {str(e)}"
+
+
+async def _action_dns_domain(api_key: str, domain: str) -> str:
+    """Get DNS records and subdomains for a domain."""
+    if not domain:
+        return "Error: 'domain' parameter is required for action='dns_domain'"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{SHODAN_API_BASE}/dns/domain/{domain}",
+                params={"key": api_key},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        lines = [f"DNS for {domain}:"]
+
+        subdomains = data.get("subdomains", [])
+        if subdomains:
+            lines.append(f"Subdomains ({len(subdomains)}): {', '.join(subdomains[:30])}")
+            if len(subdomains) > 30:
+                lines.append(f"  ... and {len(subdomains) - 30} more")
+
+        records = data.get("data", [])
+        if records:
+            lines.append("")
+            lines.append(f"Records ({len(records)}):")
+            for i, rec in enumerate(records[:30], 1):
+                rec_type = rec.get("type", "?")
+                subdomain = rec.get("subdomain", "")
+                value = rec.get("value", "")
+                fqdn = f"{subdomain}.{domain}" if subdomain else domain
+                lines.append(f"  [{i}] {rec_type}  {fqdn} -> {value}")
+            if len(records) > 30:
+                lines.append(f"  ... and {len(records) - 30} more records")
+
+        if not subdomains and not records:
+            lines.append("No DNS data found")
+
+        if data.get("more", False):
+            lines.append("\nNote: Additional results available (API returned partial data)")
+
+        return "\n".join(lines)
+
+    except httpx.HTTPStatusError as e:
+        return _handle_http_error(e, "dns_domain")
+    except Exception as e:
+        logger.error(f"Shodan DNS domain failed: {e}")
+        return f"Shodan DNS domain error: {str(e)}"
+
+
+async def _action_count(api_key: str, query: str) -> str:
+    """Count Shodan results for a query without consuming search credits."""
+    if not query:
+        return "Error: 'query' parameter is required for action='count'"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{SHODAN_API_BASE}/shodan/host/count",
+                params={
+                    "key": api_key,
+                    "query": query,
+                    "facets": "port,country,org",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        total = data.get("total", 0)
+        lines = [f"Shodan count: {total} hosts matching '{query}'"]
+
+        facets = data.get("facets", {})
+        for facet_name, facet_values in facets.items():
+            if facet_values:
+                lines.append(f"\n{facet_name}:")
+                for fv in facet_values[:10]:
+                    lines.append(f"  {fv.get('value', '?')}: {fv.get('count', 0)}")
+
+        return "\n".join(lines)
+
+    except httpx.HTTPStatusError as e:
+        return _handle_http_error(e, "count")
+    except Exception as e:
+        logger.error(f"Shodan count failed: {e}")
+        return f"Shodan count error: {str(e)}"
+
+
+def _handle_http_error(e: 'httpx.HTTPStatusError', action: str) -> str:
+    """Common HTTP error handler for all Shodan actions."""
+    status = e.response.status_code
+    if status == 401:
+        return "Shodan API error: Invalid API key. Check Global Settings."
+    elif status == 403:
+        return f"Shodan API error: Action '{action}' requires a paid Shodan API key."
+    elif status == 429:
+        return "Shodan API error: Rate limit exceeded. Try again later."
+    return f"Shodan API error: HTTP {status}"
+
+
+# =============================================================================
 # PHASE-AWARE TOOL EXECUTOR
 # =============================================================================
 
@@ -503,6 +948,8 @@ class PhaseAwareToolExecutor:
         mcp_manager: MCPToolsManager,
         graph_tool: Optional[callable],
         web_search_tool: Optional[callable] = None,
+        shodan_tool: Optional[callable] = None,
+        google_dork_tool: Optional[callable] = None,
     ):
         self.mcp_manager = mcp_manager
         self.graph_tool = graph_tool
@@ -517,6 +964,14 @@ class PhaseAwareToolExecutor:
         if web_search_tool:
             self._all_tools["web_search"] = web_search_tool
 
+        # Register Shodan tool
+        if shodan_tool:
+            self._all_tools["shodan"] = shodan_tool
+
+        # Register Google dork tool
+        if google_dork_tool:
+            self._all_tools["google_dork"] = google_dork_tool
+
     def register_mcp_tools(self, tools: List) -> None:
         """Register MCP tools after they're loaded."""
         for tool in tools:
@@ -528,6 +983,20 @@ class PhaseAwareToolExecutor:
         """Replace the web search tool (e.g. when Tavily key changes)."""
         self.web_search_tool = tool
         self._all_tools["web_search"] = tool
+
+    def update_shodan_tool(self, tool: Optional[callable]) -> None:
+        """Replace or remove the Shodan tool (e.g. when API key changes)."""
+        if tool:
+            self._all_tools["shodan"] = tool
+        else:
+            self._all_tools.pop("shodan", None)
+
+    def update_google_dork_tool(self, tool: Optional[callable]) -> None:
+        """Replace or remove the Google dork tool (e.g. when SerpAPI key changes)."""
+        if tool:
+            self._all_tools["google_dork"] = tool
+        else:
+            self._all_tools.pop("google_dork", None)
 
     def _extract_text_from_output(self, output) -> str:
         """
@@ -618,6 +1087,13 @@ class PhaseAwareToolExecutor:
                 output = await tool.ainvoke(question)
             elif tool_name == "web_search":
                 # Web search tool expects 'query' argument
+                query = tool_args.get("query", "")
+                output = await tool.ainvoke(query)
+            elif tool_name == "shodan":
+                # Shodan tool handles routing internally via action param
+                output = await tool.ainvoke(tool_args)
+            elif tool_name == "google_dork":
+                # Google dork tool expects 'query' argument
                 query = tool_args.get("query", "")
                 output = await tool.ainvoke(query)
             else:

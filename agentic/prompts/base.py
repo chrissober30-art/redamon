@@ -1371,3 +1371,71 @@ RETURN s.name, collect(t.name) as technologies
 Generate ONLY valid Cypher queries. No explanations, no markdown formatting.
 """
 
+
+# =============================================================================
+# DEEP THINK PROMPTS
+# =============================================================================
+
+DEEP_THINK_PROMPT = """You are a senior penetration testing strategist performing deep analysis before acting.
+
+## Context
+- **Phase**: {current_phase}
+- **Objective**: {objective}
+- **Attack Path**: {attack_path_type}
+- **Iteration**: {iteration}/{max_iterations}
+- **Trigger**: {trigger_reason}
+
+## Known Target Information
+{target_info}
+
+## Attack Chain Progress
+{chain_context}
+
+## Your Task
+
+Perform a deep, structured analysis of the current situation. Consider ALL possible attack vectors, evaluate trade-offs, and produce a clear action plan. Be concise but thorough.
+
+Output valid JSON matching this exact schema:
+{{
+    "situation_assessment": "Brief summary of what we know and where we stand",
+    "attack_vectors_identified": ["vector1", "vector2", "..."],
+    "recommended_approach": "The chosen strategy and WHY it's the best path forward",
+    "priority_order": ["step1", "step2", "step3", "..."],
+    "risks_and_mitigations": "What could go wrong and how to handle it"
+}}
+"""
+
+
+DEEP_THINK_SECTION = """
+## Deep Think
+
+The following deep analysis was performed at a key decision point. Use it to guide your strategy:
+
+{deep_think_result}
+
+Follow this analysis unless new information invalidates it. If the situation has fundamentally changed, note it in your thought.
+"""
+
+DEEP_THINK_SELF_REQUEST_INSTRUCTION = """
+### Deep Think Self-Request
+
+You have Deep Think (strategic reasoning) enabled. If at any point you feel you are:
+- **Stuck or going in circles** — repeating similar tools without new results
+- **Not making meaningful progress** — tools succeed but yield no actionable findings
+- **Unsure which vector to pursue** — multiple options and no clear winner
+- **Hitting a wall** — tried several approaches and none worked
+
+...then set `"need_deep_think": true` in your JSON output. This will trigger a strategic re-evaluation on the next iteration to help you pivot or refocus.
+
+Example:
+```json
+{{
+    "thought": "...",
+    "reasoning": "...",
+    "action": "use_tool",
+    "need_deep_think": true,
+    ...
+}}
+```
+"""
+

@@ -291,6 +291,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'SECURITY_CHECK_TIMEOUT': 10,
     'SECURITY_CHECK_MAX_WORKERS': 10,
 
+    # Shodan Pipeline Enrichment
+    'SHODAN_HOST_LOOKUP': False,
+    'SHODAN_REVERSE_DNS': False,
+    'SHODAN_DOMAIN_DNS': False,
+    'SHODAN_PASSIVE_CVES': False,
+    'SHODAN_API_KEY': '',
+
     # Rules of Engagement (recon-relevant fields only)
     'ROE_ENABLED': False,
     'ROE_EXCLUDED_HOSTS': [],
@@ -301,6 +308,19 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'ROE_TIME_WINDOW_END_TIME': '18:00',
     'ROE_GLOBAL_MAX_RPS': 0,
 }
+
+
+def _fetch_shodan_api_key(user_id: str, webapp_url: str) -> str:
+    """Fetch the unmasked Shodan API key from user's global settings."""
+    import requests as _req
+    try:
+        url = f"{webapp_url.rstrip('/')}/api/users/{user_id}/settings?internal=true"
+        resp = _req.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get('shodanApiKey', '')
+    except Exception as e:
+        logger.warning(f"Could not fetch Shodan API key: {e}")
+        return ''
 
 
 def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
@@ -536,6 +556,20 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['SECURITY_CHECK_NO_RATE_LIMITING'] = project.get('securityCheckNoRateLimiting', DEFAULT_SETTINGS['SECURITY_CHECK_NO_RATE_LIMITING'])
     settings['SECURITY_CHECK_TIMEOUT'] = project.get('securityCheckTimeout', DEFAULT_SETTINGS['SECURITY_CHECK_TIMEOUT'])
     settings['SECURITY_CHECK_MAX_WORKERS'] = project.get('securityCheckMaxWorkers', DEFAULT_SETTINGS['SECURITY_CHECK_MAX_WORKERS'])
+
+    # Shodan Pipeline Enrichment
+    settings['SHODAN_HOST_LOOKUP'] = project.get('shodanHostLookup', DEFAULT_SETTINGS['SHODAN_HOST_LOOKUP'])
+    settings['SHODAN_REVERSE_DNS'] = project.get('shodanReverseDns', DEFAULT_SETTINGS['SHODAN_REVERSE_DNS'])
+    settings['SHODAN_DOMAIN_DNS'] = project.get('shodanDomainDns', DEFAULT_SETTINGS['SHODAN_DOMAIN_DNS'])
+    settings['SHODAN_PASSIVE_CVES'] = project.get('shodanPassiveCves', DEFAULT_SETTINGS['SHODAN_PASSIVE_CVES'])
+
+    # Fetch Shodan API key from user's global settings
+    shodan_any = any([
+        settings['SHODAN_HOST_LOOKUP'], settings['SHODAN_REVERSE_DNS'],
+        settings['SHODAN_DOMAIN_DNS'], settings['SHODAN_PASSIVE_CVES'],
+    ])
+    if shodan_any and settings.get('USER_ID'):
+        settings['SHODAN_API_KEY'] = _fetch_shodan_api_key(settings['USER_ID'], webapp_url)
 
     # Rules of Engagement
     settings['ROE_ENABLED'] = project.get('roeEnabled', DEFAULT_SETTINGS['ROE_ENABLED'])

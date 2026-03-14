@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from state import (
     AgentState,
+    DeepThinkResult,
     ExecutionStep,
     LLMDecision,
     PhaseHistoryEntry,
@@ -29,6 +30,9 @@ from prompts import (
     REACT_SYSTEM_PROMPT,
     PENDING_OUTPUT_ANALYSIS_SECTION,
     PENDING_PLAN_OUTPUTS_SECTION,
+    DEEP_THINK_PROMPT,
+    DEEP_THINK_SECTION,
+    DEEP_THINK_SELF_REQUEST_INSTRUCTION,
     get_phase_tools,
     build_phase_definitions,
     build_informational_guidance,
@@ -93,6 +97,93 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
     qa_history_formatted = format_qa_history(state.get("qa_history", []))
     objective_history_formatted = format_objective_history(state.get("objective_history", []))
 
+    # ─── Deep Think pre-step (conditional) ────────────────────────────────
+    deep_think_result = state.get("deep_think_result")  # existing from prior iterations
+    deep_think_triggered = False
+
+    if get_setting('DEEP_THINK_ENABLED', False):
+        trigger_reason = None
+
+        # Condition 1: first iteration of session
+        if iteration == 1:
+            trigger_reason = "First iteration — establishing initial strategy"
+
+        # Condition 2: phase transition just happened
+        elif just_transitioned:
+            trigger_reason = f"Phase transition to {just_transitioned} — re-evaluating strategy"
+
+        # Condition 3: failure loop (3+ consecutive failures)
+        _exec_trace = state.get("execution_trace", [])
+        if not trigger_reason and len(_exec_trace) >= 3:
+            _consecutive = 0
+            for _step in reversed(_exec_trace[-6:]):
+                _out = ((_step.get("tool_output") or "")[:500]).lower()
+                _is_fail = (
+                    not _step.get("success", True)
+                    or "failed" in _out
+                    or "error" in _out
+                    or "exploit completed, but no session" in _out
+                )
+                if _is_fail:
+                    _consecutive += 1
+                else:
+                    break
+            if _consecutive >= 3:
+                trigger_reason = f"Failure loop detected ({_consecutive} consecutive failures) — pivoting strategy"
+
+        # Condition 4: LLM self-requested deep think on previous iteration
+        if not trigger_reason and state.get("_need_deep_think", False):
+            trigger_reason = "Agent self-assessed stagnation — strategic re-evaluation requested"
+
+        if trigger_reason:
+            try:
+                deep_think_prompt = DEEP_THINK_PROMPT.format(
+                    current_phase=phase,
+                    objective=current_objective,
+                    attack_path_type=state.get("attack_path_type", ""),
+                    iteration=iteration,
+                    max_iterations=state.get("max_iterations", get_setting('MAX_ITERATIONS', 100)),
+                    target_info=target_info_formatted,
+                    chain_context=chain_context_formatted,
+                    trigger_reason=trigger_reason,
+                )
+
+                dt_response = await llm.ainvoke([
+                    SystemMessage(content=deep_think_prompt),
+                    HumanMessage(content="Produce the deep think analysis JSON now."),
+                ])
+                dt_raw = normalize_content(dt_response.content).strip()
+                # Strip markdown code fences if present (LLMs often wrap JSON in ```json ... ```)
+                if dt_raw.startswith("```"):
+                    dt_raw = dt_raw.split("\n", 1)[1] if "\n" in dt_raw else dt_raw[3:]
+                    if dt_raw.endswith("```"):
+                        dt_raw = dt_raw[:-3].strip()
+                dt_parsed = DeepThinkResult.model_validate_json(dt_raw)
+
+                deep_think_result = (
+                    f"**Situation:** {dt_parsed.situation_assessment}\n\n"
+                    f"**Attack Vectors:** {', '.join(dt_parsed.attack_vectors_identified)}\n\n"
+                    f"**Approach:** {dt_parsed.recommended_approach}\n\n"
+                    f"**Priority:** {' → '.join(dt_parsed.priority_order)}\n\n"
+                    f"**Risks:** {dt_parsed.risks_and_mitigations}"
+                )
+                deep_think_triggered = True
+                logger.info(f"[{user_id}/{project_id}/{session_id}] Deep Think triggered: {trigger_reason}")
+
+                # Stream to frontend
+                if streaming_callbacks:
+                    streaming_cb = streaming_callbacks.get(session_id)
+                    if streaming_cb:
+                        await streaming_cb.on_deep_think(
+                            trigger_reason=trigger_reason,
+                            analysis=deep_think_result,
+                            iteration=iteration,
+                            phase=phase,
+                        )
+            except Exception as e:
+                logger.warning(f"[{user_id}/{project_id}/{session_id}] Deep Think failed (non-blocking): {e}")
+    # ─── End Deep Think ──────────────────────────────────────────────────
+
     # Get phase tools with attack path type for dynamic routing
     attack_path_type = state.get("attack_path_type", "")
     available_tools = get_phase_tools(
@@ -124,6 +215,14 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         target_info=target_info_formatted,
         qa_history=qa_history_formatted,
     )
+
+    # Inject Deep Think section if available (from state or just computed)
+    if deep_think_result:
+        system_prompt += DEEP_THINK_SECTION.format(deep_think_result=deep_think_result)
+
+    # Inject Deep Think self-request instruction (only when enabled)
+    if get_setting('DEEP_THINK_ENABLED', False):
+        system_prompt += DEEP_THINK_SELF_REQUEST_INSTRUCTION
 
     # Inject stealth mode rules if enabled (prepended for maximum priority)
     if get_setting('STEALTH_MODE', False):
@@ -396,6 +495,13 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         "_just_transitioned_to": None,  # Clear the marker
         "_completed_step": None,  # Will be set if we process pending output
     }
+
+    # Persist deep think result in state (only when newly triggered)
+    if deep_think_triggered:
+        updates["deep_think_result"] = deep_think_result
+
+    # Persist LLM self-request for deep think (triggers on next iteration)
+    updates["_need_deep_think"] = decision.need_deep_think if get_setting('DEEP_THINK_ENABLED', False) else False
 
     # When action is plan_tools, set _current_plan instead of _current_step
     if decision.action == "plan_tools" and decision.tool_plan:

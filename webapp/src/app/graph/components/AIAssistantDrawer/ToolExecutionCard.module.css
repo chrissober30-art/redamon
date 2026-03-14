@@ -102,6 +102,28 @@
   color: var(--text-primary);
   font-family: 'JetBrains Mono', monospace;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.apiKeyMissing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #ef4444;
+  font-family: -apple-system, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.apiKeyMissing:hover {
+  color: #dc2626;
 }
 
 .argsPreview {

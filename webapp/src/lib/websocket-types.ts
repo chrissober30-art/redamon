@@ -42,6 +42,7 @@ export enum MessageType {
   PLAN_START = 'plan_start',
   PLAN_COMPLETE = 'plan_complete',
   PLAN_ANALYSIS = 'plan_analysis',
+  DEEP_THINK = 'deep_think',
 }
 
 // =============================================================================
@@ -195,6 +196,13 @@ export interface TaskCompletePayload {
   message: string
   final_phase: string
   total_iterations: number
+}
+
+export interface DeepThinkPayload {
+  trigger_reason: string
+  analysis: string
+  iteration: number
+  phase: string
 }
 
 export interface FileReadyPayload {

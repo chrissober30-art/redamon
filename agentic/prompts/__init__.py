@@ -28,6 +28,9 @@ from .base import (
     build_tool_name_enum,
     build_phase_definitions,
     build_kali_install_prompt,
+    DEEP_THINK_PROMPT,
+    DEEP_THINK_SECTION,
+    DEEP_THINK_SELF_REQUEST_INSTRUCTION,
 )
 
 # Re-export from classification
@@ -330,6 +333,10 @@ __all__ = [
     "POST_EXPLOITATION_TOOLS_STATELESS",
     # Stealth rules
     "STEALTH_MODE_RULES",
+    # Deep Think
+    "DEEP_THINK_PROMPT",
+    "DEEP_THINK_SECTION",
+    "DEEP_THINK_SELF_REQUEST_INSTRUCTION",
     # Function
     "get_phase_tools",
 ]

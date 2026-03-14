@@ -116,7 +116,7 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
       {isOpen && (
         <div className={styles.sectionContent}>
           <p className={styles.sectionDescription}>
-            Configure the AI agent orchestrator that performs autonomous pentesting. Controls LLM model, phase transitions, payload settings, tool access, and safety gates.
+            Configure the AI agent orchestrator that performs autonomous pentesting. Controls LLM model, phase transitions, payload settings, and safety gates. Tool access per phase is configured in the Tool Matrix tab.
           </p>
 
           {/* LLM & Phase Configuration */}
@@ -218,6 +218,21 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
               <Toggle
                 checked={data.agentActivatePostExplPhase}
                 onChange={(checked) => updateField('agentActivatePostExplPhase', checked)}
+              />
+            </div>
+            <div className={styles.toggleRow}>
+              <div>
+                <span className={styles.toggleLabel}>Deep Think</span>
+                <p className={styles.toggleDescription}>
+                  When enabled, the agent performs an explicit deep reasoning step at key decision points
+                  (start of session, phase transitions, failure loops) to plan multi-step attack strategies
+                  before acting. Adds ~1 extra LLM call at these moments. Recommended for complex targets
+                  with multiple services.
+                </p>
+              </div>
+              <Toggle
+                checked={data.agentDeepThinkEnabled}
+                onChange={(checked) => updateField('agentDeepThinkEnabled', checked)}
               />
             </div>
             <div className={styles.fieldRow}>
@@ -508,66 +523,6 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
                 checked={data.agentCreateGraphImageOnInit}
                 onChange={(checked) => updateField('agentCreateGraphImageOnInit', checked)}
               />
-            </div>
-          </div>
-
-          {/* Tool Phase Restrictions */}
-          <div className={styles.subSection}>
-            <h3 className={styles.subSectionTitle}>Tool Phase Restrictions</h3>
-            <span className={styles.fieldHint} style={{ marginBottom: 'var(--space-2)', display: 'block' }}>
-              Controls which tools the agent can use in each phase. Check the phases where each tool should be available.
-            </span>
-            <div className={styles.toolPhaseGrid}>
-              <div className={styles.toolPhaseHeader}>
-                <span className={styles.toolPhaseHeaderLabel}>Tool</span>
-                <span className={styles.toolPhaseHeaderLabel}>Informational</span>
-                <span className={styles.toolPhaseHeaderLabel}>Exploitation</span>
-                <span className={styles.toolPhaseHeaderLabel}>Post-Exploitation</span>
-              </div>
-              {[
-                { id: 'query_graph', label: 'query_graph' },
-                { id: 'web_search', label: 'web_search' },
-                { id: 'execute_curl', label: 'execute_curl' },
-                { id: 'execute_naabu', label: 'execute_naabu' },
-                { id: 'execute_nmap', label: 'execute_nmap' },
-                { id: 'execute_nuclei', label: 'execute_nuclei' },
-                { id: 'kali_shell', label: 'kali_shell' },
-                { id: 'execute_code', label: 'execute_code' },
-                { id: 'execute_hydra', label: 'execute_hydra' },
-                { id: 'metasploit_console', label: 'metasploit_console' },
-                { id: 'msf_restart', label: 'msf_restart' },
-              ].map(tool => {
-                const phaseMap = (typeof data.agentToolPhaseMap === 'string'
-                  ? JSON.parse(data.agentToolPhaseMap)
-                  : data.agentToolPhaseMap ?? {}) as Record<string, string[]>
-                const toolPhases = phaseMap[tool.id] || []
-
-                const togglePhase = (phase: string) => {
-                  const newMap = { ...phaseMap }
-                  const current = newMap[tool.id] || []
-                  if (current.includes(phase)) {
-                    newMap[tool.id] = current.filter((p: string) => p !== phase)
-                  } else {
-                    newMap[tool.id] = [...current, phase]
-                  }
-                  updateField('agentToolPhaseMap', newMap as typeof data.agentToolPhaseMap)
-                }
-
-                return (
-                  <div key={tool.id} className={styles.toolPhaseRow}>
-                    <span className={styles.toolPhaseName}>{tool.label}</span>
-                    {['informational', 'exploitation', 'post_exploitation'].map(phase => (
-                      <label key={phase} className={styles.phaseCheck}>
-                        <input
-                          type="checkbox"
-                          checked={toolPhases.includes(phase)}
-                          onChange={() => togglePhase(phase)}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                )
-              })}
             </div>
           </div>
 

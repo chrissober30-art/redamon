@@ -405,6 +405,27 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
 
         save_recon_file(combined_result, output_file)
 
+    # Shodan OSINT Enrichment (passive — runs before port scan)
+    shodan_enabled = any([
+        settings.get('SHODAN_HOST_LOOKUP'),
+        settings.get('SHODAN_REVERSE_DNS'),
+        settings.get('SHODAN_PASSIVE_CVES'),
+    ])
+    if shodan_enabled:
+        from recon.shodan_enrich import run_shodan_enrichment
+        combined_result = run_shodan_enrichment(combined_result, settings)
+        combined_result["metadata"]["modules_executed"].append("shodan_enrich")
+        save_recon_file(combined_result, output_file)
+
+        if UPDATE_GRAPH_DB:
+            try:
+                from graph_db import Neo4jClient
+                with Neo4jClient() as graph_client:
+                    if graph_client.verify_connection():
+                        graph_client.update_graph_from_shodan(combined_result, USER_ID, PROJECT_ID)
+            except Exception as e:
+                print(f"[!] Shodan graph update failed: {e}")
+
     # Continue pipeline: port_scan -> http_probe -> resource_enum -> vuln_scan
     if "port_scan" in SCAN_MODULES:
         combined_result = run_port_scan(combined_result, output_file=output_file, settings=settings)
@@ -670,6 +691,43 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
             combined_result["metadata"]["graph_db_error"] = str(e)
 
         save_recon_file(combined_result, output_file)
+
+    # Step 2.5: Shodan OSINT Enrichment (passive — runs before port scan)
+    shodan_enabled = any([
+        _settings.get('SHODAN_HOST_LOOKUP'),
+        _settings.get('SHODAN_REVERSE_DNS'),
+        _settings.get('SHODAN_DOMAIN_DNS'),
+        _settings.get('SHODAN_PASSIVE_CVES'),
+    ])
+    if shodan_enabled:
+        from recon.shodan_enrich import run_shodan_enrichment
+        combined_result = run_shodan_enrichment(combined_result, _settings)
+        combined_result["metadata"]["modules_executed"].append("shodan_enrich")
+        save_recon_file(combined_result, output_file)
+
+        if UPDATE_GRAPH_DB:
+            print(f"\n[GRAPH UPDATE] Shodan Enrichment Data")
+            print("-" * 40)
+            try:
+                from graph_db import Neo4jClient
+                with Neo4jClient() as graph_client:
+                    if graph_client.verify_connection():
+                        shodan_stats = graph_client.update_graph_from_shodan(combined_result, USER_ID, PROJECT_ID)
+                        combined_result["metadata"]["graph_db_shodan_updated"] = True
+                        combined_result["metadata"]["graph_db_shodan_stats"] = shodan_stats
+                        print(f"[+] Graph database updated with Shodan data")
+                    else:
+                        print(f"[!] Could not connect to Neo4j - skipping Shodan graph update")
+                        combined_result["metadata"]["graph_db_shodan_updated"] = False
+            except ImportError:
+                print(f"[!] Neo4j client not available - skipping Shodan graph update")
+                combined_result["metadata"]["graph_db_shodan_updated"] = False
+            except Exception as e:
+                print(f"[!] Shodan graph update failed: {e}")
+                combined_result["metadata"]["graph_db_shodan_updated"] = False
+                combined_result["metadata"]["graph_db_shodan_error"] = str(e)
+
+            save_recon_file(combined_result, output_file)
 
     # Step 3: Port scanning (fast port discovery)
     if "port_scan" in SCAN_MODULES:

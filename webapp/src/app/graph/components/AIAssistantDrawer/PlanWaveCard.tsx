@@ -17,9 +17,11 @@ interface PlanWaveCardProps {
   item: PlanWaveItem
   isExpanded: boolean
   onToggleExpand: () => void
+  missingApiKeys?: Set<string>
+  onAddApiKey?: (toolId: string) => void
 }
 
-export function PlanWaveCard({ item, isExpanded, onToggleExpand }: PlanWaveCardProps) {
+export function PlanWaveCard({ item, isExpanded, onToggleExpand, missingApiKeys, onAddApiKey }: PlanWaveCardProps) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
 
   const toggleToolExpand = (toolId: string) => {
@@ -126,6 +128,8 @@ export function PlanWaveCard({ item, isExpanded, onToggleExpand }: PlanWaveCardP
                 item={tool}
                 isExpanded={expandedTools.has(tool.id)}
                 onToggleExpand={() => toggleToolExpand(tool.id)}
+                missingApiKey={missingApiKeys?.has(tool.tool_name)}
+                onAddApiKey={onAddApiKey ? () => onAddApiKey(tool.tool_name) : undefined}
               />
             ))}
           </div>

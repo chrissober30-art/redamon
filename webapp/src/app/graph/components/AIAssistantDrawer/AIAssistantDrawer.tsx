@@ -9,7 +9,7 @@
 'use client'
 
 import React, { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react'
-import { Send, Bot, User, Loader2, AlertCircle, Sparkles, Plus, Shield, ShieldAlert, Target, Zap, HelpCircle, WifiOff, Wifi, Square, Play, Download, Wrench, History, ChevronDown, EyeOff, Eye, Mail, Copy, Check, Swords } from 'lucide-react'
+import { Send, Bot, User, Loader2, AlertCircle, Sparkles, Plus, Shield, ShieldAlert, Target, Zap, HelpCircle, WifiOff, Wifi, Square, Play, Download, Wrench, History, ChevronDown, EyeOff, Eye, Mail, Copy, Check, Swords, Lightbulb, Settings, X } from 'lucide-react'
 import { StealthIcon } from '@/components/icons/StealthIcon'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -33,7 +33,11 @@ import { useConversations } from '@/hooks/useConversations'
 import { useChatPersistence } from '@/hooks/useChatPersistence'
 import type { Conversation } from '@/hooks/useConversations'
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip'
-import type { ThinkingItem, ToolExecutionItem, PlanWaveItem } from './AgentTimeline'
+import { AgentBehaviourSection } from '@/components/projects/ProjectForm/sections/AgentBehaviourSection'
+import { AttackSkillsSection } from '@/components/projects/ProjectForm/sections/AttackSkillsSection'
+import { ToolMatrixSection } from '@/components/projects/ProjectForm/sections/ToolMatrixSection'
+import type { Project } from '@prisma/client'
+import type { ThinkingItem, ToolExecutionItem, PlanWaveItem, DeepThinkItem } from './AgentTimeline'
 
 type Phase = 'informational' | 'exploitation' | 'post_exploitation'
 
@@ -72,7 +76,7 @@ interface FileDownloadItem {
   source: string
 }
 
-type ChatItem = Message | ThinkingItem | ToolExecutionItem | PlanWaveItem | FileDownloadItem
+type ChatItem = Message | ThinkingItem | ToolExecutionItem | PlanWaveItem | FileDownloadItem | DeepThinkItem
 
 /** Format prefixed model names for display (e.g. "openrouter/meta-llama/llama-4" → "llama-4 (OR)") */
 function formatModelDisplay(model: string): string {
@@ -103,6 +107,8 @@ interface AIAssistantDrawerProps {
   toolPhaseMap?: Record<string, string[]>
   stealthMode?: boolean
   onToggleStealth?: (newValue: boolean) => void
+  deepThinkEnabled?: boolean
+  onToggleDeepThink?: (newValue: boolean) => void
   onRefetchGraph?: () => void
   isOtherChainsHidden?: boolean
   onToggleOtherChains?: () => void
@@ -801,6 +807,8 @@ export function AIAssistantDrawer({
   toolPhaseMap,
   stealthMode = false,
   onToggleStealth,
+  deepThinkEnabled = true,
+  onToggleDeepThink,
   onRefetchGraph,
   isOtherChainsHidden = false,
   onToggleOtherChains,
@@ -828,6 +836,13 @@ export function AIAssistantDrawer({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null)
 
+  // API key status for tool alerts + inline key modal
+  const [missingApiKeys, setMissingApiKeys] = useState<Set<string>>(new Set())
+  const [apiKeyModal, setApiKeyModal] = useState<string | null>(null) // tool id
+  const [apiKeyValue, setApiKeyValue] = useState('')
+  const [apiKeyVisible, setApiKeyVisible] = useState(false)
+  const [apiKeySaving, setApiKeySaving] = useState(false)
+
   // Conversation history state
   const [showHistory, setShowHistory] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -849,6 +864,145 @@ export function AIAssistantDrawer({
   } = useConversations(projectId, userId)
 
   const { saveMessage, updateConversation: updateConvMeta } = useChatPersistence(conversationId)
+
+  // Fetch API key status for tool alerts
+  const fetchApiKeyStatus = useCallback(() => {
+    if (!userId) return
+    fetch(`/api/users/${userId}/settings`)
+      .then(r => r.ok ? r.json() : null)
+      .then(settings => {
+        if (!settings) return
+        const missing = new Set<string>()
+        if (!settings.tavilyApiKey) missing.add('web_search')
+        if (!settings.shodanApiKey) missing.add('shodan')
+        if (!settings.serpApiKey) missing.add('google_dork')
+        setMissingApiKeys(missing)
+      })
+      .catch(() => {})
+  }, [userId])
+
+  useEffect(() => { fetchApiKeyStatus() }, [fetchApiKeyStatus])
+
+  const API_KEY_INFO: Record<string, { field: string; label: string; hint: string; url: string }> = {
+    web_search: { field: 'tavilyApiKey', label: 'Tavily', hint: 'Enables web_search tool for CVE research and exploit lookups', url: 'https://app.tavily.com/home' },
+    shodan: { field: 'shodanApiKey', label: 'Shodan', hint: 'Enables the shodan tool for internet-wide OSINT (search, host info, DNS, count)', url: 'https://account.shodan.io/' },
+    google_dork: { field: 'serpApiKey', label: 'SerpAPI', hint: 'Enables google_dork tool for Google dorking OSINT (site:, inurl:, filetype:)', url: 'https://serpapi.com/manage-api-key' },
+  }
+
+  const openApiKeyModal = useCallback((toolId: string) => {
+    setApiKeyModal(toolId)
+    setApiKeyValue('')
+    setApiKeyVisible(false)
+  }, [])
+
+  const closeApiKeyModal = useCallback(() => {
+    setApiKeyModal(null)
+    setApiKeyValue('')
+    setApiKeyVisible(false)
+  }, [])
+
+  const saveApiKey = useCallback(async () => {
+    if (!userId || !apiKeyModal || !apiKeyValue.trim()) return
+    const info = API_KEY_INFO[apiKeyModal]
+    if (!info) return
+    setApiKeySaving(true)
+    try {
+      const resp = await fetch(`/api/users/${userId}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [info.field]: apiKeyValue.trim() }),
+      })
+      if (resp.ok) {
+        closeApiKeyModal()
+        fetchApiKeyStatus()
+      }
+    } catch { /* silent */ } finally {
+      setApiKeySaving(false)
+    }
+  }, [userId, apiKeyModal, apiKeyValue, closeApiKeyModal, fetchApiKeyStatus])
+
+  // Settings dropdown & modal state
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
+  const [settingsModal, setSettingsModal] = useState<'agent' | 'toolmatrix' | 'attack' | null>(null)
+  const [projectFormData, setProjectFormData] = useState<Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'> | null>(null)
+  const settingsDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close settings dropdown on outside click
+  useEffect(() => {
+    if (!showSettingsDropdown) return
+    const handler = (e: MouseEvent) => {
+      if (settingsDropdownRef.current && !settingsDropdownRef.current.contains(e.target as Node)) {
+        setShowSettingsDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showSettingsDropdown])
+
+  // Debounced save refs (must be before flushPendingSave)
+  const pendingSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestFormDataRef = useRef(projectFormData)
+  latestFormDataRef.current = projectFormData
+
+  // Flush any pending save before clearing data
+  const flushPendingSave = useCallback(() => {
+    if (pendingSaveRef.current) {
+      clearTimeout(pendingSaveRef.current)
+      pendingSaveRef.current = null
+      const data = latestFormDataRef.current
+      if (data && projectId) {
+        fetch(`/api/projects/${projectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        }).catch(() => {})
+      }
+    }
+  }, [projectId])
+
+  // Fetch project data when modal opens; clear stale data on switch
+  useEffect(() => {
+    if (!settingsModal || !projectId) {
+      flushPendingSave()
+      setProjectFormData(null)
+      return
+    }
+    flushPendingSave()
+    setProjectFormData(null)
+    let cancelled = false
+    fetch(`/api/projects/${projectId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!cancelled && data) {
+          const { id, userId: _u, createdAt, updatedAt, user, ...formData } = data
+          setProjectFormData(formData)
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [settingsModal, projectId, flushPendingSave])
+
+  // Debounced save for project field updates from modal
+  const updateProjectField = useCallback(<K extends keyof Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>>(
+    field: K,
+    value: Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>[K]
+  ) => {
+    setProjectFormData(prev => {
+      if (!prev) return prev
+      return { ...prev, [field]: value }
+    })
+    // Debounce the PUT request
+    if (pendingSaveRef.current) clearTimeout(pendingSaveRef.current)
+    pendingSaveRef.current = setTimeout(() => {
+      const data = latestFormDataRef.current
+      if (!data || !projectId) return
+      fetch(`/api/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }).catch(() => {})
+    }, 500)
+  }, [projectId])
 
   // Attack skill data for badge tooltip
   const [skillData, setSkillData] = useState<{
@@ -1215,6 +1369,20 @@ export function AIAssistantDrawer({
           }
           return prev
         })
+        break
+      }
+
+      case MessageType.DEEP_THINK: {
+        const deepThinkItem: DeepThinkItem = {
+          type: 'deep_think',
+          id: `deep-think-${Date.now()}-${itemIdCounter.current++}`,
+          timestamp: new Date(),
+          trigger_reason: message.payload.trigger_reason,
+          analysis: message.payload.analysis,
+          iteration: message.payload.iteration,
+          phase: message.payload.phase,
+        }
+        setChatItems(prev => [...prev, deepThinkItem])
         break
       }
 
@@ -1613,6 +1781,18 @@ export function AIAssistantDrawer({
           })
           lines.push('')
           lines.push('</details>')
+          lines.push('')
+        }
+        lines.push('---')
+        lines.push('')
+      } else if (item.type === 'deep_think') {
+        const time = item.timestamp.toLocaleTimeString()
+        lines.push(`### Deep Think  \`${time}\``)
+        lines.push('')
+        lines.push(`> **Trigger:** ${item.trigger_reason}`)
+        lines.push('')
+        if (item.analysis) {
+          lines.push(item.analysis)
           lines.push('')
         }
         lines.push('---')
@@ -2037,6 +2217,16 @@ export function AIAssistantDrawer({
           tools: [],
           status: 'running',
         } as PlanWaveItem
+      } else if (msg.type === 'deep_think') {
+        return {
+          type: 'deep_think',
+          id: msg.id,
+          timestamp: new Date(msg.createdAt),
+          trigger_reason: data.trigger_reason || '',
+          analysis: data.analysis || '',
+          iteration: data.iteration || 0,
+          phase: data.phase || '',
+        } as DeepThinkItem
       } else if (msg.type === 'plan_complete') {
         // Skip — we handle plan_complete as a post-pass below
         return null
@@ -2214,9 +2404,9 @@ export function AIAssistantDrawer({
   }
 
   // Group timeline items by their sequence (between messages)
-  const groupedChatItems: Array<{ type: 'message' | 'timeline' | 'file_download', content: Message | Array<ThinkingItem | ToolExecutionItem | PlanWaveItem> | FileDownloadItem }> = []
+  const groupedChatItems: Array<{ type: 'message' | 'timeline' | 'file_download', content: Message | Array<ThinkingItem | ToolExecutionItem | PlanWaveItem | DeepThinkItem> | FileDownloadItem }> = []
 
-  let currentTimelineGroup: Array<ThinkingItem | ToolExecutionItem | PlanWaveItem> = []
+  let currentTimelineGroup: Array<ThinkingItem | ToolExecutionItem | PlanWaveItem | DeepThinkItem> = []
 
   chatItems.forEach((item) => {
     if ('role' in item) {
@@ -2234,7 +2424,7 @@ export function AIAssistantDrawer({
         currentTimelineGroup = []
       }
       groupedChatItems.push({ type: 'file_download', content: item })
-    } else if ('type' in item && (item.type === 'thinking' || item.type === 'tool_execution' || item.type === 'plan_wave')) {
+    } else if ('type' in item && (item.type === 'thinking' || item.type === 'tool_execution' || item.type === 'plan_wave' || item.type === 'deep_think')) {
       // It's a timeline item - add to current group
       currentTimelineGroup.push(item)
     }
@@ -2574,7 +2764,6 @@ export function AIAssistantDrawer({
             }
           >
             <StealthIcon size={11} />
-            <span>STEALTH</span>
           </button>
         ) : stealthMode ? (
           <span className={styles.stealthBadge} title="Stealth Mode — passive/low-noise techniques only">
@@ -2582,10 +2771,91 @@ export function AIAssistantDrawer({
           </span>
         ) : null}
 
+        {onToggleDeepThink ? (
+          <button
+            className={`${styles.deepThinkToggle} ${deepThinkEnabled ? styles.deepThinkToggleActive : ''}`}
+            onClick={() => onToggleDeepThink(!deepThinkEnabled)}
+            title={deepThinkEnabled
+              ? 'Deep Think ON — the agent performs strategic reasoning at key decision points (start, phase transitions, failure loops) before acting. Click to disable.'
+              : 'Deep Think OFF — click to enable strategic reasoning at key decision points. Adds ~1 extra LLM call at start, phase transitions, and failure loops to plan multi-step strategies.'
+            }
+          >
+            <Lightbulb size={11} />
+          </button>
+        ) : deepThinkEnabled ? (
+          <span className={styles.deepThinkBadge} title="Deep Think — strategic reasoning at key decision points">
+            <Lightbulb size={11} />
+          </span>
+        ) : null}
+
+        {/* Settings dropdown */}
+        <div className={styles.settingsWrapper} ref={settingsDropdownRef}>
+          <button
+            className={styles.settingsButton}
+            onClick={() => setShowSettingsDropdown(prev => !prev)}
+            title="Agent settings"
+          >
+            <Settings size={12} />
+          </button>
+          {showSettingsDropdown && (
+            <div className={styles.settingsDropdown}>
+              <button
+                className={styles.settingsDropdownItem}
+                onClick={() => { setSettingsModal('agent'); setShowSettingsDropdown(false) }}
+              >
+                Agent Behaviour
+              </button>
+              <button
+                className={styles.settingsDropdownItem}
+                onClick={() => { setSettingsModal('toolmatrix'); setShowSettingsDropdown(false) }}
+              >
+                Tool Matrix
+              </button>
+              <button
+                className={styles.settingsDropdownItem}
+                onClick={() => { setSettingsModal('attack'); setShowSettingsDropdown(false) }}
+              >
+                Attack Skills
+              </button>
+            </div>
+          )}
+        </div>
+
         {modelName && (
           <span className={styles.modelBadge}>{formatModelDisplay(modelName)}</span>
         )}
       </div>
+
+      {/* Settings Modal */}
+      {settingsModal && (
+        <div className={styles.settingsModalOverlay} onClick={() => setSettingsModal(null)}>
+          <div className={styles.settingsModal} onClick={e => e.stopPropagation()}>
+            <div className={styles.settingsModalHeader}>
+              <h2 className={styles.settingsModalTitle}>
+                {settingsModal === 'agent' ? 'Agent Behaviour' : settingsModal === 'toolmatrix' ? 'Tool Matrix' : 'Attack Skills'}
+              </h2>
+              <button className={styles.settingsModalClose} onClick={() => setSettingsModal(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className={styles.settingsModalBody}>
+              {projectFormData ? (
+                settingsModal === 'agent' ? (
+                  <AgentBehaviourSection data={projectFormData} updateField={updateProjectField} />
+                ) : settingsModal === 'toolmatrix' ? (
+                  <ToolMatrixSection data={projectFormData} updateField={updateProjectField} />
+                ) : (
+                  <AttackSkillsSection data={projectFormData} updateField={updateProjectField} />
+                )
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+                  <Loader2 size={24} className={styles.spinner} />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Todo List Widget */}
       {todoList.length > 0 && (
@@ -2794,12 +3064,14 @@ export function AIAssistantDrawer({
             )
           } else {
             // Render timeline group
-            const items = groupItem.content as Array<ThinkingItem | ToolExecutionItem | PlanWaveItem>
+            const items = groupItem.content as Array<ThinkingItem | ToolExecutionItem | PlanWaveItem | DeepThinkItem>
             return (
               <AgentTimeline
                 key={`timeline-${index}`}
                 items={items}
                 isStreaming={isLoading && index === groupedChatItems.length - 1}
+                missingApiKeys={missingApiKeys}
+                onAddApiKey={openApiKeyModal}
               />
             )
           }
@@ -3062,6 +3334,53 @@ export function AIAssistantDrawer({
             : 'Waiting for connection...'}
         </span>
       </div>
+
+      {/* API Key quick-add modal */}
+      {apiKeyModal && API_KEY_INFO[apiKeyModal] && (
+        <div className={styles.apiKeyOverlay} onClick={closeApiKeyModal}>
+          <div className={styles.apiKeyModal} onClick={e => e.stopPropagation()}>
+            <h3 className={styles.apiKeyModalTitle}>{API_KEY_INFO[apiKeyModal].label} API Key</h3>
+            <div className="formGroup">
+              <label className="formLabel">{API_KEY_INFO[apiKeyModal].label} API Key</label>
+              <div className={styles.apiKeyInputWrapper}>
+                <input
+                  className="textInput"
+                  type={apiKeyVisible ? 'text' : 'password'}
+                  value={apiKeyValue}
+                  onChange={e => setApiKeyValue(e.target.value)}
+                  placeholder={`Enter ${API_KEY_INFO[apiKeyModal].label.toLowerCase()} API key`}
+                  autoFocus
+                />
+                <button
+                  className={styles.apiKeyToggle}
+                  onClick={() => setApiKeyVisible(v => !v)}
+                  type="button"
+                >
+                  {apiKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <span className="formHint">
+                {API_KEY_INFO[apiKeyModal].hint}
+                {' — '}
+                <a href={API_KEY_INFO[apiKeyModal].url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>
+                  Get API key
+                </a>
+              </span>
+            </div>
+            <div className={styles.apiKeyModalActions}>
+              <button className="secondaryButton" onClick={closeApiKeyModal}>Cancel</button>
+              <button
+                className="primaryButton"
+                disabled={!apiKeyValue.trim() || apiKeySaving}
+                onClick={saveApiKey}
+              >
+                {apiKeySaving ? <Loader2 size={14} className={styles.spinner} /> : null}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -21,6 +21,8 @@ import { SecurityChecksSection } from './sections/SecurityChecksSection'
 import { GithubSection } from './sections/GithubSection'
 import { AgentBehaviourSection } from './sections/AgentBehaviourSection'
 import { AttackSkillsSection } from './sections/AttackSkillsSection'
+import { ShodanSection } from './sections/ShodanSection'
+import { ToolMatrixSection } from './sections/ToolMatrixSection'
 import { GvmScanSection } from './sections/GvmScanSection'
 import { CypherFixSettingsSection } from './sections/CypherFixSettingsSection'
 import { RoeSection } from './sections/RoeSection'
@@ -48,23 +50,48 @@ interface ProjectFormProps {
   mode: 'create' | 'edit'
 }
 
-const TABS = [
-  { id: 'roe', label: 'Rules of Engagement' },
-  { id: 'target', label: 'Target & Modules' },
-  { id: 'port', label: 'Port Scanning' },
-  { id: 'http', label: 'HTTP Probing' },
-  { id: 'resource', label: 'Resource Enumeration' },
-  { id: 'vuln', label: 'Vulnerability Scanning' },
-  { id: 'cve', label: 'CVE & MITRE' },
-  { id: 'security', label: 'Security Checks' },
-  { id: 'gvm', label: 'GVM Scan' },
-  { id: 'integrations', label: 'Integrations' },
-  { id: 'agent', label: 'Agent Behaviour' },
-  { id: 'attack', label: 'Attack Skills' },
-  { id: 'cypherfix', label: 'CypherFix' },
+const TAB_GROUPS = [
+  {
+    label: 'Scope',
+    style: 'tabGroupScope',
+    tabs: [
+      { id: 'roe', label: 'Rules of Engagement' },
+    ],
+  },
+  {
+    label: 'Recon Pipeline',
+    style: 'tabGroupRecon',
+    tabs: [
+      { id: 'target', label: 'Target & Modules' },
+      { id: 'port', label: 'Port Scanning' },
+      { id: 'http', label: 'HTTP Probing' },
+      { id: 'resource', label: 'Resource Enumeration' },
+      { id: 'vuln', label: 'Vulnerability Scanning' },
+      { id: 'cve', label: 'CVE & MITRE' },
+      { id: 'security', label: 'Security Checks' },
+      { id: 'gvm', label: 'GVM Scan' },
+      { id: 'integrations', label: 'Integrations' },
+    ],
+  },
+  {
+    label: 'AI Agent',
+    style: 'tabGroupAgent',
+    tabs: [
+      { id: 'agent', label: 'Agent Behaviour' },
+      { id: 'toolmatrix', label: 'Tool Matrix' },
+      { id: 'attack', label: 'Attack Skills' },
+    ],
+  },
+  {
+    label: 'Remediation',
+    style: 'tabGroupRemediation',
+    tabs: [
+      { id: 'cypherfix', label: 'CypherFix' },
+    ],
+  },
 ] as const
 
-type TabId = typeof TABS[number]['id']
+type TabId = typeof TAB_GROUPS[number]['tabs'][number]['id']
 
 // Minimal fallback defaults - only required fields
 // Full defaults are fetched from /api/projects/defaults (served by recon backend)
@@ -312,15 +339,24 @@ export function ProjectForm({
       ) : (
         <>
           <div className={styles.tabs}>
-            {TABS.map(tab => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`tab ${activeTab === tab.id ? 'tabActive' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </button>
+            {TAB_GROUPS.map((group, gi) => (
+              <div key={gi} className={group.style ? styles[group.style] : styles.tabGroup}>
+                {group.label && (
+                  <span className={styles.tabGroupLabel}>{group.label}</span>
+                )}
+                <div className={styles.tabGroupTabs}>
+                  {group.tabs.map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={`tab ${activeTab === tab.id ? 'tabActive' : ''}`}
+                      onClick={() => setActiveTab(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 
@@ -374,7 +410,10 @@ export function ProjectForm({
         )}
 
         {activeTab === 'integrations' && (
-          <GithubSection data={formData} updateField={updateField} />
+          <>
+            <GithubSection data={formData} updateField={updateField} />
+            <ShodanSection data={formData} updateField={updateField} />
+          </>
         )}
 
         {activeTab === 'gvm' && (
@@ -383,6 +422,10 @@ export function ProjectForm({
 
         {activeTab === 'agent' && (
           <AgentBehaviourSection data={formData} updateField={updateField} />
+        )}
+
+        {activeTab === 'toolmatrix' && (
+          <ToolMatrixSection data={formData} updateField={updateField} />
         )}
 
         {activeTab === 'attack' && (

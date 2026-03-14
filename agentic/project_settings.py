@@ -54,6 +54,9 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     # LLM Parse Retry
     'LLM_PARSE_MAX_RETRIES': 3,
 
+    # Deep Think (Strategic Reasoning)
+    'DEEP_THINK_ENABLED': True,
+
     # Debug
     'CREATE_GRAPH_IMAGE_ON_INIT': False,
 
@@ -65,15 +68,17 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'TOOL_PHASE_MAP': {
         'query_graph': ['informational', 'exploitation', 'post_exploitation'],
         'execute_curl': ['informational', 'exploitation', 'post_exploitation'],
-        'execute_naabu': ['informational', 'exploitation', 'post_exploitation'],
+        'execute_naabu': ['informational', 'exploitation'],
         'execute_nmap': ['informational', 'exploitation', 'post_exploitation'],
-        'execute_nuclei': ['informational', 'exploitation', 'post_exploitation'],
+        'execute_nuclei': ['informational', 'exploitation'],
         'kali_shell': ['informational', 'exploitation', 'post_exploitation'],
-        'execute_code': ['informational', 'exploitation', 'post_exploitation'],
+        'execute_code': ['exploitation', 'post_exploitation'],
         'execute_hydra': ['exploitation', 'post_exploitation'],
         'metasploit_console': ['exploitation', 'post_exploitation'],
         'msf_restart': ['exploitation', 'post_exploitation'],
         'web_search': ['informational', 'exploitation', 'post_exploitation'],
+        'shodan': ['informational', 'exploitation'],
+        'google_dork': ['informational'],
     },
 
     # Kali Shell Library Installation
@@ -90,6 +95,9 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'HYDRA_EXTRA_CHECKS': 'nsr',
     'HYDRA_VERBOSE': True,
     'HYDRA_MAX_WORDLIST_ATTEMPTS': 3,
+
+    # Shodan OSINT
+    'SHODAN_ENABLED': True,
 
     # Phishing / Social Engineering
     'PHISHING_SMTP_CONFIG': '',  # Free-text SMTP config for phishing email delivery (optional)
@@ -192,6 +200,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['TOOL_OUTPUT_MAX_CHARS'] = project.get('agentToolOutputMaxChars', DEFAULT_AGENT_SETTINGS['TOOL_OUTPUT_MAX_CHARS'])
     settings['CYPHER_MAX_RETRIES'] = project.get('agentCypherMaxRetries', DEFAULT_AGENT_SETTINGS['CYPHER_MAX_RETRIES'])
     settings['LLM_PARSE_MAX_RETRIES'] = project.get('agentLlmParseMaxRetries', DEFAULT_AGENT_SETTINGS['LLM_PARSE_MAX_RETRIES'])
+    settings['DEEP_THINK_ENABLED'] = project.get('agentDeepThinkEnabled', DEFAULT_AGENT_SETTINGS['DEEP_THINK_ENABLED'])
     settings['CREATE_GRAPH_IMAGE_ON_INIT'] = project.get('agentCreateGraphImageOnInit', DEFAULT_AGENT_SETTINGS['CREATE_GRAPH_IMAGE_ON_INIT'])
     settings['LOG_MAX_MB'] = project.get('agentLogMaxMb', DEFAULT_AGENT_SETTINGS['LOG_MAX_MB'])
     settings['LOG_BACKUP_COUNT'] = project.get('agentLogBackupCount', DEFAULT_AGENT_SETTINGS['LOG_BACKUP_COUNT'])
@@ -209,6 +218,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['HYDRA_EXTRA_CHECKS'] = project.get('hydraExtraChecks', DEFAULT_AGENT_SETTINGS['HYDRA_EXTRA_CHECKS'])
     settings['HYDRA_VERBOSE'] = project.get('hydraVerbose', DEFAULT_AGENT_SETTINGS['HYDRA_VERBOSE'])
     settings['HYDRA_MAX_WORDLIST_ATTEMPTS'] = project.get('hydraMaxWordlistAttempts', DEFAULT_AGENT_SETTINGS['HYDRA_MAX_WORDLIST_ATTEMPTS'])
+    settings['SHODAN_ENABLED'] = project.get('shodanEnabled', DEFAULT_AGENT_SETTINGS['SHODAN_ENABLED'])
     settings['STEALTH_MODE'] = project.get('stealthMode', DEFAULT_AGENT_SETTINGS['STEALTH_MODE'])
     settings['PHISHING_SMTP_CONFIG'] = project.get('phishingSmtpConfig', DEFAULT_AGENT_SETTINGS['PHISHING_SMTP_CONFIG'])
     settings['ATTACK_SKILL_CONFIG'] = project.get('attackSkillConfig', DEFAULT_AGENT_SETTINGS['ATTACK_SKILL_CONFIG'])

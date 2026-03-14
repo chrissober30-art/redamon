@@ -259,6 +259,19 @@ class OutputAnalysisInline(BaseModel):
 
 
 # =============================================================================
+# DEEP THINK MODEL
+# =============================================================================
+
+class DeepThinkResult(BaseModel):
+    """Deep Think reasoning output — structured analysis before complex decisions."""
+    situation_assessment: str = Field(description="Current state summary")
+    attack_vectors_identified: List[str] = Field(default_factory=list, description="All possible attack vectors")
+    recommended_approach: str = Field(description="Chosen approach and rationale")
+    priority_order: List[str] = Field(default_factory=list, description="Ordered action steps")
+    risks_and_mitigations: str = Field(description="Potential risks and how to handle them")
+
+
+# =============================================================================
 # TOOL PLAN MODELS (for parallel tool execution)
 # =============================================================================
 
@@ -313,6 +326,8 @@ class LLMDecision(BaseModel):
     # Tool plan fields (when action="plan_tools")
     tool_plan: Optional[ToolPlan] = Field(default=None, description="Wave of independent tools to execute")
 
+    # Deep Think self-request (only used when Deep Think is enabled)
+    need_deep_think: bool = Field(default=False, description="Set to true if you feel stuck or not progressing, to trigger strategic re-evaluation on next iteration")
 
 
 class OutputAnalysis(BaseModel):
@@ -473,6 +488,10 @@ class AgentState(TypedDict):
     # Response tier for adaptive formatting ("conversational", "summary", "full_report")
     _response_tier: Optional[str]
 
+    # Deep Think result (persists for chain, replaced on re-trigger)
+    deep_think_result: Optional[str]
+    _need_deep_think: bool  # LLM self-requested Deep Think for next iteration
+
     # Metasploit state tracking
     msf_session_reset_done: bool  # True if metasploit was reset at start of this session
 
@@ -589,6 +608,9 @@ def create_initial_state(
         "_last_chain_step_id": None,
         "_prior_chain_context": None,
         "_response_tier": None,
+        # Deep Think
+        "deep_think_result": None,
+        "_need_deep_think": False,
         # Metasploit state
         "msf_session_reset_done": False,
     }

@@ -69,6 +69,7 @@ class MessageType(str, Enum):
     PLAN_START = "plan_start"
     PLAN_COMPLETE = "plan_complete"
     PLAN_ANALYSIS = "plan_analysis"
+    DEEP_THINK = "deep_think"
 
 
 # =============================================================================
@@ -471,6 +472,18 @@ class StreamingCallback:
         }
         await self.connection.send_message(MessageType.PLAN_ANALYSIS, payload)
         self._persist("plan_analysis", payload)
+
+    async def on_deep_think(self, trigger_reason: str, analysis: str, iteration: int, phase: str):
+        """Called when Deep Think produces a strategic analysis."""
+        payload = {
+            "trigger_reason": trigger_reason,
+            "analysis": analysis,
+            "iteration": iteration,
+            "phase": phase,
+        }
+        await self.connection.send_message(MessageType.DEEP_THINK, payload)
+        self._persist("deep_think", payload)
+        logger.info(f"Deep Think analysis sent to session {self.connection.session_id}")
 
     async def on_phase_update(self, current_phase: str, iteration_count: int, attack_path_type: str = ""):
         """Called when phase changes"""

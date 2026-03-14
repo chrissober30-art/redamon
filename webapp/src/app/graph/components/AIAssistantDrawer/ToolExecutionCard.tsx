@@ -8,17 +8,25 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Wrench, ChevronDown, ChevronRight, Copy, Check, Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { Wrench, ChevronDown, ChevronRight, Copy, Check, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import styles from './ToolExecutionCard.module.css'
 import type { ToolExecutionItem } from './AgentTimeline'
+
+const TOOL_KEY_LABEL: Record<string, string> = {
+  web_search: 'Tavily',
+  shodan: 'Shodan',
+  google_dork: 'SerpAPI',
+}
 
 interface ToolExecutionCardProps {
   item: ToolExecutionItem
   isExpanded: boolean
   onToggleExpand: () => void
+  missingApiKey?: boolean
+  onAddApiKey?: () => void
 }
 
-export function ToolExecutionCard({ item, isExpanded, onToggleExpand }: ToolExecutionCardProps) {
+export function ToolExecutionCard({ item, isExpanded, onToggleExpand, missingApiKey, onAddApiKey }: ToolExecutionCardProps) {
   const [copied, setCopied] = useState(false)
   const [duration, setDuration] = useState(0)
 
@@ -108,7 +116,20 @@ export function ToolExecutionCard({ item, isExpanded, onToggleExpand }: ToolExec
           <div className={styles.cardIcon}>
             <Wrench size={14} className={styles.toolIcon} />
           </div>
-          <span className={styles.titleText}>{item.tool_name}</span>
+          <span className={styles.titleText}>
+            {item.tool_name}
+            {missingApiKey && (
+              <span
+                className={styles.apiKeyMissing}
+                title={`Set ${TOOL_KEY_LABEL[item.tool_name] || ''} API key`}
+                onClick={onAddApiKey ? (e) => { e.stopPropagation(); onAddApiKey() } : undefined}
+                role={onAddApiKey ? 'button' : undefined}
+                tabIndex={onAddApiKey ? 0 : undefined}
+              >
+                <AlertTriangle size={10} /> No {TOOL_KEY_LABEL[item.tool_name] || 'API'} key — Add
+              </span>
+            )}
+          </span>
           <div className={styles.cardActions}>
             <div className={styles.statusBadge}>
               {getStatusIcon()}
