@@ -1,1 +1,0 @@
-same of codefix agent but first scan the full repo... and propose all fixes (it check if already downloaded the repo on local)
