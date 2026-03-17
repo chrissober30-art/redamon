@@ -94,7 +94,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph Phase1["Phase 1: Reconnaissance"]
-        Domain[🌐 Domain] --> Subdomains[📋 Subdomains<br/>crt.sh, HackerTarget, Knockpy]
+        Domain[🌐 Domain] --> Subdomains[📋 Subdomains<br/>crt.sh, HackerTarget, Subfinder, Knockpy]
         Subdomains --> DNS[🔍 DNS Resolution]
         DNS --> Ports[🔌 Port Scan<br/>Naabu]
         Ports --> HTTP[🌍 HTTP Probe<br/>Httpx]
@@ -157,6 +157,7 @@ flowchart TB
                 ReconPy[Python Scripts]
                 Naabu1[Naabu]
                 Httpx[Httpx]
+                Subfinder[Subfinder]
                 Knockpy[Knockpy]
             end
 
@@ -264,6 +265,7 @@ flowchart TB
             WHOIS[whois_recon.py<br/>WHOIS Lookup]
             CRT[crt.sh API<br/>Certificate Transparency]
             HT[HackerTarget API<br/>Subdomain Search]
+            SF[Subfinder<br/>50+ Passive Sources]
             Knock[Knockpy<br/>Active Bruteforce]
             DNS[DNS Resolution<br/>A, AAAA, MX, NS, TXT]
         end

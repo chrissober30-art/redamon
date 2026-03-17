@@ -166,6 +166,64 @@ def run_knockpy(domain: str, proxychains_prefix: list, bruteforce: bool = False,
     return subdomains
 
 
+def run_subfinder(domain: str, settings: dict = None) -> set:
+    """Run Subfinder passive subdomain enumeration via Docker."""
+    if settings is None:
+        settings = {}
+
+    if not settings.get('SUBFINDER_ENABLED', True):
+        print(f"[-] Subfinder: disabled")
+        return set()
+
+    docker_image = settings.get('SUBFINDER_DOCKER_IMAGE', 'projectdiscovery/subfinder:latest')
+    max_results = settings.get('SUBFINDER_MAX_RESULTS', 5000)
+
+    print(f"[*] Running Subfinder (passive)...")
+
+    command = [
+        'docker', 'run', '--rm',
+        docker_image,
+        '-d', domain,
+        '-json', '-silent',
+        '-timeout', '30',
+        '-max-time', '10',
+    ]
+
+    subdomains = set()
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=720)
+
+        for line in result.stdout.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                host = entry.get('host', '').strip().lower()
+                if host:
+                    subdomains.add(host)
+            except json.JSONDecodeError:
+                continue
+
+        if len(subdomains) > max_results:
+            subdomains = set(sorted(subdomains)[:max_results])
+            print(f"[*] Subfinder: capped at {max_results} results")
+
+        if subdomains:
+            print(f"[+] Subfinder: {len(subdomains)} found")
+        else:
+            print(f"[*] Subfinder: 0 found")
+
+    except subprocess.TimeoutExpired:
+        print("[!] Subfinder timed out")
+    except FileNotFoundError:
+        print("[!] Docker not found — cannot run Subfinder")
+    except Exception as e:
+        print(f"[!] Subfinder error: {e}")
+
+    return subdomains
+
+
 def dns_lookup_single(hostname: str, rtype: str, max_retries: int = 3) -> list:
     """
     Perform DNS lookup for a single record type with retry logic.
@@ -374,10 +432,11 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
     
     # Subdomain Discovery
     passive = get_passive_subdomains(domain, session, settings=settings)
+    subfinder_subs = run_subfinder(domain, settings=settings)
     active = run_knockpy(domain, pc_prefix, bruteforce, settings=settings)
-    
+
     # Combine, filter, sort — collect out-of-scope domains for situational awareness
-    all_subs = passive.union(active)
+    all_subs = passive.union(subfinder_subs).union(active)
     filtered_subs = []
     external_domain_entries = []
     for s in all_subs:

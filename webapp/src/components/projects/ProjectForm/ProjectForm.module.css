@@ -246,6 +246,41 @@
   margin-top: var(--space-0-5);
 }
 
+.toggleRowCompact {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.toggleRowCompact:last-child {
+  border-bottom: none;
+}
+
+.toggleRowCompactInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.toggleRowCompactLabel {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.toggleRowCompactInput {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.toggleLabelLg {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
 .checkboxGroup {
   display: flex;
   flex-wrap: wrap;

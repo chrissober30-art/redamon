@@ -376,6 +376,9 @@ model Project {
   hackerTargetMaxResults                Int      @default(5000)  @map("hacker_target_max_results")
   knockpyReconEnabled                   Boolean  @default(true)  @map("knockpy_recon_enabled")
   knockpyReconMaxResults                Int      @default(5000)  @map("knockpy_recon_max_results")
+  subfinderEnabled                      Boolean  @default(true)  @map("subfinder_enabled")
+  subfinderMaxResults                   Int      @default(5000)  @map("subfinder_max_results")
+  subfinderDockerImage                  String   @default("projectdiscovery/subfinder:latest") @map("subfinder_docker_image")
 
   // ========== PHISHING / SOCIAL ENGINEERING SETTINGS ==========
   phishingSmtpConfig                    String   @default("") @map("phishing_smtp_config")

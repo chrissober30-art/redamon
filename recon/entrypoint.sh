@@ -107,6 +107,7 @@ IMAGES=(
     "projectdiscovery/httpx:latest"
     "projectdiscovery/katana:latest"
     "projectdiscovery/nuclei:latest"
+    "projectdiscovery/subfinder:latest"
     "sxcurity/gau:latest"
 )
 

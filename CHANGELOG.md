@@ -68,8 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Neo4j client**: new `update_graph_from_external_domains()` method for creating ExternalDomain nodes and HAS_EXTERNAL_DOMAIN relationships
   - **Graph schema docs**: `GRAPH.SCHEMA.md` updated with full ExternalDomain documentation
 
+- **Subfinder Integration** — new passive subdomain discovery source in the recon pipeline. Queries 50+ online sources (certificate transparency, DNS databases, web archives, threat intelligence feeds) via ProjectDiscovery's Subfinder Docker image. No API keys required for basic operation (20+ free sources). Full multi-layer integration:
+  - **Backend**: `run_subfinder()` in `domain_recon.py` using Docker-in-Docker pattern, JSONL parsing, max results capping
+  - **Settings**: `subfinderEnabled` (default: true), `subfinderMaxResults` (default: 5000), `subfinderDockerImage` across Prisma schema, project settings, and defaults
+  - **Frontend**: compact inline toggle with max results input in the Subdomain Discovery passive sources section
+  - **Stealth mode**: max results capped to 100 (consistent with other passive sources)
+  - **Entrypoint**: `projectdiscovery/subfinder:latest` added to Docker image pre-pull list
+  - Results merge into existing subdomain flow — no graph schema changes needed
+
+- **Compact Subdomain Discovery UI** — passive subdomain source toggles (crt.sh, HackerTarget, Subfinder, Knockpy) now display the tool name, max results input, and toggle on a single row instead of separate expandable sections
+
 - **Discovery & OSINT Tab** — new unified tab in the project form replacing the previous scattered tool placement. Groups all passive and active discovery tools in a single section:
-  - **Subdomain Discovery** — passive sources (crt.sh, HackerTarget, Knockpy Recon) and active brute-forcing (Knockpy Bruteforce), plus DNS settings (WHOIS/DNS retries)
+  - **Subdomain Discovery** — passive sources (crt.sh, HackerTarget, Subfinder, Knockpy Recon) and active brute-forcing (Knockpy Bruteforce), plus DNS settings (WHOIS/DNS retries)
   - **Shodan OSINT Enrichment** — moved from the Integrations tab into Discovery & OSINT, reflecting its role as a core discovery tool rather than an external integration. All four toggles (Host Lookup, Reverse DNS, Domain DNS, Passive CVEs) remain unchanged
   - **URLScan.io Enrichment** — new section with passive badge, max results config, and API key status
   - **Node Info Tooltips** — each section header now has a waypoints icon that shows which graph node types the tool creates (via `NodeInfoTooltip` component and `nodeMapping.ts`)

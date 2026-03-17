@@ -213,7 +213,7 @@ sequenceDiagram
 
     Note over Recon: Phase 1: Domain Discovery (Python native)
     Recon->>Recon: WHOIS lookup
-    Recon->>Recon: crt.sh + HackerTarget API
+    Recon->>Recon: crt.sh + HackerTarget + Subfinder
     Recon->>Recon: DNS resolution
 
     Note over Recon: Phase 1b: OSINT Enrichment (Python native)
@@ -328,15 +328,18 @@ flowchart TB
         subgraph SubSources["Subdomain Sources"]
             CRT[crt.sh<br/>Certificate Transparency]
             HT[HackerTarget API<br/>DNS records]
+            SF[Subfinder<br/>50+ passive sources]
             Knock[Knockpy<br/>Bruteforce]
         end
 
         SubD --> CRT
         SubD --> HT
+        SubD --> SF
         SubD --> Knock
 
         CRT --> Merge[Merge & Dedupe]
         HT --> Merge
+        SF --> Merge
         Knock --> Merge
 
         Merge --> DNS[DNS Resolution<br/>A, AAAA, MX, NS, TXT, CNAME]
@@ -529,6 +532,7 @@ flowchart LR
         WHOIS[WHOIS<br/>Registrar info]
         CRT[crt.sh<br/>CT logs]
         HT[HackerTarget<br/>DNS search]
+        SF[Subfinder<br/>50+ sources]
         Knock[Knockpy<br/>Bruteforce]
         DNS[DNS Resolver<br/>All record types]
     end

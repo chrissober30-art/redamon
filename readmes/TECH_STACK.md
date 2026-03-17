@@ -66,6 +66,7 @@
 | **Katana** | Web Crawling | Active web crawler with JavaScript rendering — discovers URLs, endpoints, forms, and parameters |
 | **GAU** (GetAllUrls) | Passive Recon | Passive URL discovery from Wayback Machine, Common Crawl, AlienVault OTX, and URLScan.io |
 | **Kiterunner** | API Discovery | API endpoint brute-forcer using real-world Swagger/OpenAPI-derived wordlists |
+| **Subfinder** | Subdomain Discovery | Passive subdomain enumeration using 50+ online sources (certificate logs, DNS databases, web archives) |
 | **Knockpy** | Subdomain Discovery | Active subdomain brute-forcing tool |
 | **Wappalyzer** | Fingerprinting | Technology fingerprinting engine with 6,000+ detection rules |
 | **Interactsh** | Out-of-Band Detection | Callback server for detecting blind vulnerabilities (SSRF, XXE, blind SQLi) |

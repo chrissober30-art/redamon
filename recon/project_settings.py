@@ -310,6 +310,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'HACKER_TARGET_MAX_RESULTS': 5000,
     'KNOCKPY_RECON_ENABLED': True,
     'KNOCKPY_RECON_MAX_RESULTS': 5000,
+    'SUBFINDER_ENABLED': True,
+    'SUBFINDER_MAX_RESULTS': 5000,
+    'SUBFINDER_DOCKER_IMAGE': 'projectdiscovery/subfinder:latest',
 
     # Rules of Engagement (recon-relevant fields only)
     'ROE_ENABLED': False,
@@ -597,6 +600,9 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['HACKERTARGET_MAX_RESULTS'] = project.get('hackerTargetMaxResults', DEFAULT_SETTINGS['HACKER_TARGET_MAX_RESULTS'])
     settings['KNOCKPY_RECON_ENABLED'] = project.get('knockpyReconEnabled', DEFAULT_SETTINGS['KNOCKPY_RECON_ENABLED'])
     settings['KNOCKPY_RECON_MAX_RESULTS'] = project.get('knockpyReconMaxResults', DEFAULT_SETTINGS['KNOCKPY_RECON_MAX_RESULTS'])
+    settings['SUBFINDER_ENABLED'] = project.get('subfinderEnabled', DEFAULT_SETTINGS['SUBFINDER_ENABLED'])
+    settings['SUBFINDER_MAX_RESULTS'] = project.get('subfinderMaxResults', DEFAULT_SETTINGS['SUBFINDER_MAX_RESULTS'])
+    settings['SUBFINDER_DOCKER_IMAGE'] = project.get('subfinderDockerImage', DEFAULT_SETTINGS['SUBFINDER_DOCKER_IMAGE'])
 
     # Fetch Shodan API key from user's global settings
     shodan_any = any([
@@ -774,6 +780,7 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     settings['CRTSH_MAX_RESULTS'] = min(settings.get('CRTSH_MAX_RESULTS', 5000), 100)
     settings['HACKERTARGET_MAX_RESULTS'] = min(settings.get('HACKERTARGET_MAX_RESULTS', 5000), 100)
     settings['KNOCKPY_RECON_MAX_RESULTS'] = min(settings.get('KNOCKPY_RECON_MAX_RESULTS', 5000), 100)
+    settings['SUBFINDER_MAX_RESULTS'] = min(settings.get('SUBFINDER_MAX_RESULTS', 5000), 100)
 
     # --- Security Checks: disable active checks, keep passive ones ---
     # Active checks (make network connections to target)

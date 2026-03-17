@@ -275,7 +275,7 @@ The platform is built around six pillars:
 
 ### Reconnaissance Pipeline
 
-A fully automated, six-phase scanning engine running inside a Kali Linux container. Given a root domain, subdomain list, or IP/CIDR ranges, it maps the complete external attack surface: subdomain discovery (crt.sh, HackerTarget, Knockpy), DNS resolution, port scanning (Naabu), HTTP probing with technology fingerprinting (httpx + Wappalyzer), resource enumeration (Katana, GAU, Kiterunner), and vulnerability scanning (Nuclei with 9,000+ templates + DAST fuzzing). Results are stored as JSON and imported into the Neo4j graph.
+A fully automated, six-phase scanning engine running inside a Kali Linux container. Given a root domain, subdomain list, or IP/CIDR ranges, it maps the complete external attack surface: subdomain discovery (crt.sh, HackerTarget, Subfinder, Knockpy), DNS resolution, port scanning (Naabu), HTTP probing with technology fingerprinting (httpx + Wappalyzer), resource enumeration (Katana, GAU, Kiterunner), and vulnerability scanning (Nuclei with 9,000+ templates + DAST fuzzing). Results are stored as JSON and imported into the Neo4j graph.
 
 > **[Wiki: Running Reconnaissance](https://github.com/samugit83/redamon/wiki/Running-Reconnaissance)** | **[Technical: README.RECON.md](readmes/README.RECON.md)**
 

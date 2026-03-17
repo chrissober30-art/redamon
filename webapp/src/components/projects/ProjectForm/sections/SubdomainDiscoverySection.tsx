@@ -43,92 +43,109 @@ export function SubdomainDiscoverySection({ data, updateField }: SubdomainDiscov
           <div className={styles.subSection}>
             <h3 className={styles.subSectionTitle}>Sources <span className={styles.badgePassive}>Passive</span></h3>
 
-            <div className={styles.toggleRow}>
-              <div>
-                <span className={styles.toggleLabel}>crt.sh</span>
+            <div className={styles.toggleRowCompact}>
+              <div className={styles.toggleRowCompactInfo}>
+                <span className={styles.toggleLabelLg}>crt.sh</span>
                 <p className={styles.toggleDescription}>
                   Certificate transparency logs — discovers subdomains from SSL/TLS certificates
                 </p>
               </div>
-              <Toggle
-                checked={data.crtshEnabled}
-                onChange={(checked) => updateField('crtshEnabled', checked)}
-              />
-            </div>
-            {data.crtshEnabled && (
-              <div className={styles.fieldRow}>
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Max Results</label>
+              {data.crtshEnabled && (
+                <>
+                  <span className={styles.toggleRowCompactLabel}>Max</span>
                   <input
                     type="number"
-                    className="textInput"
+                    className={`textInput ${styles.toggleRowCompactInput}`}
                     value={data.crtshMaxResults}
                     onChange={(e) => updateField('crtshMaxResults', parseInt(e.target.value) || 5000)}
                     min={1}
                     max={50000}
                   />
-                  <span className={styles.fieldHint}>Maximum subdomains to collect from crt.sh</span>
-                </div>
-              </div>
-            )}
+                </>
+              )}
+              <Toggle
+                checked={data.crtshEnabled}
+                onChange={(checked) => updateField('crtshEnabled', checked)}
+              />
+            </div>
 
-            <div className={styles.toggleRow}>
-              <div>
-                <span className={styles.toggleLabel}>HackerTarget</span>
+            <div className={styles.toggleRowCompact}>
+              <div className={styles.toggleRowCompactInfo}>
+                <span className={styles.toggleLabelLg}>HackerTarget</span>
                 <p className={styles.toggleDescription}>
                   DNS lookup database — discovers subdomains from HackerTarget&apos;s host search API
                 </p>
               </div>
-              <Toggle
-                checked={data.hackerTargetEnabled}
-                onChange={(checked) => updateField('hackerTargetEnabled', checked)}
-              />
-            </div>
-            {data.hackerTargetEnabled && (
-              <div className={styles.fieldRow}>
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Max Results</label>
+              {data.hackerTargetEnabled && (
+                <>
+                  <span className={styles.toggleRowCompactLabel}>Max</span>
                   <input
                     type="number"
-                    className="textInput"
+                    className={`textInput ${styles.toggleRowCompactInput}`}
                     value={data.hackerTargetMaxResults}
                     onChange={(e) => updateField('hackerTargetMaxResults', parseInt(e.target.value) || 5000)}
                     min={1}
                     max={50000}
                   />
-                  <span className={styles.fieldHint}>Maximum subdomains to collect from HackerTarget</span>
-                </div>
-              </div>
-            )}
+                </>
+              )}
+              <Toggle
+                checked={data.hackerTargetEnabled}
+                onChange={(checked) => updateField('hackerTargetEnabled', checked)}
+              />
+            </div>
 
-            <div className={styles.toggleRow}>
-              <div>
-                <span className={styles.toggleLabel}>Knockpy Recon</span>
+            <div className={styles.toggleRowCompact}>
+              <div className={styles.toggleRowCompactInfo}>
+                <span className={styles.toggleLabelLg}>Subfinder</span>
+                <p className={styles.toggleDescription}>
+                  Passive subdomain enumeration using 50+ online sources (certificate logs, DNS databases, web archives)
+                </p>
+              </div>
+              {data.subfinderEnabled && (
+                <>
+                  <span className={styles.toggleRowCompactLabel}>Max</span>
+                  <input
+                    type="number"
+                    className={`textInput ${styles.toggleRowCompactInput}`}
+                    value={data.subfinderMaxResults}
+                    onChange={(e) => updateField('subfinderMaxResults', parseInt(e.target.value) || 5000)}
+                    min={1}
+                    max={50000}
+                  />
+                </>
+              )}
+              <Toggle
+                checked={data.subfinderEnabled}
+                onChange={(checked) => updateField('subfinderEnabled', checked)}
+              />
+            </div>
+
+            <div className={styles.toggleRowCompact}>
+              <div className={styles.toggleRowCompactInfo}>
+                <span className={styles.toggleLabelLg}>Knockpy Recon</span>
                 <p className={styles.toggleDescription}>
                   Passive wordlist-based subdomain enumeration using Knockpy&apos;s recon mode
                 </p>
               </div>
-              <Toggle
-                checked={data.knockpyReconEnabled}
-                onChange={(checked) => updateField('knockpyReconEnabled', checked)}
-              />
-            </div>
-            {data.knockpyReconEnabled && (
-              <div className={styles.fieldRow}>
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Max Results</label>
+              {data.knockpyReconEnabled && (
+                <>
+                  <span className={styles.toggleRowCompactLabel}>Max</span>
                   <input
                     type="number"
-                    className="textInput"
+                    className={`textInput ${styles.toggleRowCompactInput}`}
                     value={data.knockpyReconMaxResults}
                     onChange={(e) => updateField('knockpyReconMaxResults', parseInt(e.target.value) || 5000)}
                     min={1}
                     max={50000}
                   />
-                  <span className={styles.fieldHint}>Maximum subdomains to collect from Knockpy</span>
-                </div>
-              </div>
-            )}
+                </>
+              )}
+              <Toggle
+                checked={data.knockpyReconEnabled}
+                onChange={(checked) => updateField('knockpyReconEnabled', checked)}
+              />
+            </div>
           </div>
 
           <div className={styles.subSection}>
