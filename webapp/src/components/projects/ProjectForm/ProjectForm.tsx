@@ -13,6 +13,8 @@ import { NaabuSection } from './sections/NaabuSection'
 import { HttpxSection } from './sections/HttpxSection'
 import { NucleiSection } from './sections/NucleiSection'
 import { KatanaSection } from './sections/KatanaSection'
+import { HakrawlerSection } from './sections/HakrawlerSection'
+import { JsluiceSection } from './sections/JsluiceSection'
 import { GauSection } from './sections/GauSection'
 import { KiterunnerSection } from './sections/KiterunnerSection'
 import { CveLookupSection } from './sections/CveLookupSection'
@@ -400,6 +402,8 @@ export function ProjectForm({
         {activeTab === 'resource' && (
           <>
             <KatanaSection data={formData} updateField={updateField} />
+            <HakrawlerSection data={formData} updateField={updateField} />
+            <JsluiceSection data={formData} updateField={updateField} />
             <GauSection data={formData} updateField={updateField} />
             <KiterunnerSection data={formData} updateField={updateField} />
           </>

@@ -225,6 +225,25 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'GAU_METHOD_DETECT_THREADS': 25,
     'GAU_FILTER_DEAD_ENDPOINTS': True,
 
+    # Hakrawler Web Crawler
+    'HAKRAWLER_ENABLED': False,
+    'HAKRAWLER_DOCKER_IMAGE': 'jauderho/hakrawler:latest',
+    'HAKRAWLER_DEPTH': 2,
+    'HAKRAWLER_THREADS': 5,
+    'HAKRAWLER_TIMEOUT': 30,
+    'HAKRAWLER_MAX_URLS': 500,
+    'HAKRAWLER_INCLUDE_SUBS': False,
+    'HAKRAWLER_INSECURE': True,
+    'HAKRAWLER_CUSTOM_HEADERS': [],
+
+    # jsluice JavaScript Analyzer
+    'JSLUICE_ENABLED': True,
+    'JSLUICE_MAX_FILES': 100,
+    'JSLUICE_TIMEOUT': 300,
+    'JSLUICE_EXTRACT_URLS': True,
+    'JSLUICE_EXTRACT_SECRETS': True,
+    'JSLUICE_CONCURRENCY': 5,
+
     # Kiterunner API Discovery
     'KITERUNNER_ENABLED': True,
     'KITERUNNER_WORDLISTS': ['routes-large'],
@@ -308,8 +327,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Subdomain Discovery Tool Toggles
     'CRTSH_ENABLED': True,
     'CRTSH_MAX_RESULTS': 5000,
-    'HACKER_TARGET_ENABLED': True,
-    'HACKER_TARGET_MAX_RESULTS': 5000,
+    'HACKERTARGET_ENABLED': True,
+    'HACKERTARGET_MAX_RESULTS': 5000,
     'KNOCKPY_RECON_ENABLED': True,
     'KNOCKPY_RECON_MAX_RESULTS': 5000,
     'SUBFINDER_ENABLED': True,
@@ -513,6 +532,25 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['KATANA_EXCLUDE_PATTERNS'] = project.get('katanaExcludePatterns', DEFAULT_SETTINGS['KATANA_EXCLUDE_PATTERNS'])
     settings['KATANA_CUSTOM_HEADERS'] = project.get('katanaCustomHeaders', DEFAULT_SETTINGS['KATANA_CUSTOM_HEADERS'])
 
+    # Hakrawler Web Crawler
+    settings['HAKRAWLER_ENABLED'] = project.get('hakrawlerEnabled', DEFAULT_SETTINGS['HAKRAWLER_ENABLED'])
+    settings['HAKRAWLER_DOCKER_IMAGE'] = project.get('hakrawlerDockerImage', DEFAULT_SETTINGS['HAKRAWLER_DOCKER_IMAGE'])
+    settings['HAKRAWLER_DEPTH'] = project.get('hakrawlerDepth', DEFAULT_SETTINGS['HAKRAWLER_DEPTH'])
+    settings['HAKRAWLER_THREADS'] = project.get('hakrawlerThreads', DEFAULT_SETTINGS['HAKRAWLER_THREADS'])
+    settings['HAKRAWLER_TIMEOUT'] = project.get('hakrawlerTimeout', DEFAULT_SETTINGS['HAKRAWLER_TIMEOUT'])
+    settings['HAKRAWLER_MAX_URLS'] = project.get('hakrawlerMaxUrls', DEFAULT_SETTINGS['HAKRAWLER_MAX_URLS'])
+    settings['HAKRAWLER_INCLUDE_SUBS'] = project.get('hakrawlerIncludeSubs', DEFAULT_SETTINGS['HAKRAWLER_INCLUDE_SUBS'])
+    settings['HAKRAWLER_INSECURE'] = project.get('hakrawlerInsecure', DEFAULT_SETTINGS['HAKRAWLER_INSECURE'])
+    settings['HAKRAWLER_CUSTOM_HEADERS'] = project.get('hakrawlerCustomHeaders', DEFAULT_SETTINGS['HAKRAWLER_CUSTOM_HEADERS'])
+
+    # jsluice JavaScript Analyzer
+    settings['JSLUICE_ENABLED'] = project.get('jsluiceEnabled', DEFAULT_SETTINGS['JSLUICE_ENABLED'])
+    settings['JSLUICE_MAX_FILES'] = project.get('jsluiceMaxFiles', DEFAULT_SETTINGS['JSLUICE_MAX_FILES'])
+    settings['JSLUICE_TIMEOUT'] = project.get('jsluiceTimeout', DEFAULT_SETTINGS['JSLUICE_TIMEOUT'])
+    settings['JSLUICE_EXTRACT_URLS'] = project.get('jsluiceExtractUrls', DEFAULT_SETTINGS['JSLUICE_EXTRACT_URLS'])
+    settings['JSLUICE_EXTRACT_SECRETS'] = project.get('jsluiceExtractSecrets', DEFAULT_SETTINGS['JSLUICE_EXTRACT_SECRETS'])
+    settings['JSLUICE_CONCURRENCY'] = project.get('jsluiceConcurrency', DEFAULT_SETTINGS['JSLUICE_CONCURRENCY'])
+
     # GAU Passive URL Discovery
     settings['GAU_ENABLED'] = project.get('gauEnabled', DEFAULT_SETTINGS['GAU_ENABLED'])
     settings['GAU_DOCKER_IMAGE'] = project.get('gauDockerImage', DEFAULT_SETTINGS['GAU_DOCKER_IMAGE'])
@@ -616,8 +654,8 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     # Subdomain Discovery Tool Toggles
     settings['CRTSH_ENABLED'] = project.get('crtshEnabled', DEFAULT_SETTINGS['CRTSH_ENABLED'])
     settings['CRTSH_MAX_RESULTS'] = project.get('crtshMaxResults', DEFAULT_SETTINGS['CRTSH_MAX_RESULTS'])
-    settings['HACKERTARGET_ENABLED'] = project.get('hackerTargetEnabled', DEFAULT_SETTINGS['HACKER_TARGET_ENABLED'])
-    settings['HACKERTARGET_MAX_RESULTS'] = project.get('hackerTargetMaxResults', DEFAULT_SETTINGS['HACKER_TARGET_MAX_RESULTS'])
+    settings['HACKERTARGET_ENABLED'] = project.get('hackerTargetEnabled', DEFAULT_SETTINGS['HACKERTARGET_ENABLED'])
+    settings['HACKERTARGET_MAX_RESULTS'] = project.get('hackerTargetMaxResults', DEFAULT_SETTINGS['HACKERTARGET_MAX_RESULTS'])
     settings['KNOCKPY_RECON_ENABLED'] = project.get('knockpyReconEnabled', DEFAULT_SETTINGS['KNOCKPY_RECON_ENABLED'])
     settings['KNOCKPY_RECON_MAX_RESULTS'] = project.get('knockpyReconMaxResults', DEFAULT_SETTINGS['KNOCKPY_RECON_MAX_RESULTS'])
     settings['SUBFINDER_ENABLED'] = project.get('subfinderEnabled', DEFAULT_SETTINGS['SUBFINDER_ENABLED'])
@@ -800,6 +838,12 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     existing_exclude = settings.get('NUCLEI_EXCLUDE_TAGS', [])
     stealth_exclude = ['dos', 'fuzz', 'intrusive', 'sqli', 'rce']
     settings['NUCLEI_EXCLUDE_TAGS'] = list(set(existing_exclude + stealth_exclude))
+
+    # --- Hakrawler: DISABLED (active crawler, no rate-limit control) ---
+    settings['HAKRAWLER_ENABLED'] = False
+
+    # --- jsluice: keep enabled (passive) but reduce file count ---
+    settings['JSLUICE_MAX_FILES'] = 20
 
     # --- Kiterunner: DISABLED (active brute-force API discovery) ---
     settings['KITERUNNER_ENABLED'] = False

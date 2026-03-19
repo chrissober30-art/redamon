@@ -138,6 +138,7 @@ IMAGES=(
     "sxcurity/gau:latest"
     "caffix/amass:latest"
     "frost19k/puredns:latest"
+    "jauderho/hakrawler:latest"
 )
 
 for IMAGE in "${IMAGES[@]}"; do

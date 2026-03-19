@@ -4,6 +4,14 @@
 # Supports Docker-in-Docker for ProjectDiscovery tools
 # Includes Tor/Proxychains for anonymous scanning
 
+# Stage 1: Build jsluice binary (Go-based JS analyzer, requires CGO for tree-sitter)
+# Static linking required: Alpine uses musl but the final image uses Debian/glibc
+FROM golang:1.22-alpine AS jsluice-builder
+RUN apk add --no-cache gcc musl-dev && \
+    CGO_ENABLED=1 go install -ldflags='-linkmode external -extldflags "-static"' \
+        github.com/BishopFox/jsluice/cmd/jsluice@latest
+
+# Stage 2: Main recon image
 FROM python:3.11-slim-bookworm
 
 LABEL maintainer="RedAmon Team"
@@ -95,6 +103,9 @@ COPY recon/requirements.txt /app/recon/requirements.txt
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /app/recon/requirements.txt
+
+# Copy jsluice binary from build stage
+COPY --from=jsluice-builder /go/bin/jsluice /usr/local/bin/jsluice
 
 # Copy the application code
 # Copy recon module (includes recon/params.py and helpers/anonymity.py)

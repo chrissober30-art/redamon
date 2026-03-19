@@ -219,6 +219,25 @@ model Project {
   katanaScope                 String   @default("dn") @map("katana_scope")
   katanaCustomHeaders         String[] @default([]) @map("katana_custom_headers")
 
+  // ========== HAKRAWLER WEB CRAWLER ==========
+  hakrawlerEnabled            Boolean  @default(false) @map("hakrawler_enabled")
+  hakrawlerDockerImage        String   @default("jauderho/hakrawler:latest") @map("hakrawler_docker_image")
+  hakrawlerDepth              Int      @default(2) @map("hakrawler_depth")
+  hakrawlerThreads            Int      @default(5) @map("hakrawler_threads")
+  hakrawlerTimeout            Int      @default(30) @map("hakrawler_timeout")
+  hakrawlerMaxUrls            Int      @default(500) @map("hakrawler_max_urls")
+  hakrawlerIncludeSubs        Boolean  @default(false) @map("hakrawler_include_subs")
+  hakrawlerInsecure           Boolean  @default(true) @map("hakrawler_insecure")
+  hakrawlerCustomHeaders      String[] @default([]) @map("hakrawler_custom_headers")
+
+  // ========== JSLUICE JS ANALYZER ==========
+  jsluiceEnabled              Boolean  @default(true) @map("jsluice_enabled")
+  jsluiceMaxFiles             Int      @default(100) @map("jsluice_max_files")
+  jsluiceTimeout              Int      @default(300) @map("jsluice_timeout")
+  jsluiceExtractUrls          Boolean  @default(true) @map("jsluice_extract_urls")
+  jsluiceExtractSecrets       Boolean  @default(true) @map("jsluice_extract_secrets")
+  jsluiceConcurrency          Int      @default(5) @map("jsluice_concurrency")
+
   // ========== GAU PASSIVE URL DISCOVERY ==========
   gauEnabled                  Boolean  @default(false) @map("gau_enabled")
   gauDockerImage              String   @default("sxcurity/gau:latest") @map("gau_docker_image")

@@ -6,15 +6,18 @@ Discovers all endpoints (GET, POST, APIs) and organizes them by base URL.
 
 Features:
 - Katana crawling for endpoint discovery (active)
+- Hakrawler crawling for complementary endpoint discovery (active)
 - GAU passive URL discovery from archives (passive)
   - Wayback Machine, Common Crawl, OTX, URLScan
+- jsluice JavaScript analysis for hidden URLs and secrets (passive)
 - HTML form parsing for POST endpoints
 - Parameter extraction and classification
 - Endpoint categorization (auth, file_access, api, dynamic, static, admin)
 - Parameter type detection (id, file, search, auth params)
-- Parallel execution of Katana + GAU with merged results
+- Parallel execution of Katana + Hakrawler + GAU with merged results
+- jsluice post-crawl analysis on discovered JS files
 
-Pipeline: http_probe -> resource_enum (Katana + GAU parallel) -> vuln_scan
+Pipeline: http_probe -> resource_enum (Katana + Hakrawler + GAU parallel, then jsluice) -> vuln_scan
 """
 
 import json
@@ -54,6 +57,13 @@ from recon.helpers.resource_enum import (
     # Katana helpers
     run_katana_crawler,
     pull_katana_docker_image,
+    # Hakrawler helpers
+    run_hakrawler_crawler,
+    pull_hakrawler_docker_image,
+    merge_hakrawler_into_by_base_url,
+    # jsluice helpers
+    run_jsluice_analysis,
+    merge_jsluice_into_by_base_url,
     # Endpoint organization
     organize_endpoints,
 )
@@ -83,7 +93,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     """
     print("\n" + "=" * 70)
     print("[*][ResourceEnum] RedAmon - Resource Enumeration")
-    print("[*][ResourceEnum] (Katana + GAU + Kiterunner Parallel Discovery)")
+    print("[*][ResourceEnum] (Katana + Hakrawler + GAU + jsluice + Kiterunner)")
     print("=" * 70)
 
     # Use passed settings or empty dict as fallback
@@ -102,6 +112,25 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     KATANA_PARAMS_ONLY = settings.get('KATANA_PARAMS_ONLY', False)
     KATANA_CUSTOM_HEADERS = settings.get('KATANA_CUSTOM_HEADERS', [])
     KATANA_EXCLUDE_PATTERNS = settings.get('KATANA_EXCLUDE_PATTERNS', [])
+
+    # Hakrawler settings
+    HAKRAWLER_ENABLED = settings.get('HAKRAWLER_ENABLED', False)
+    HAKRAWLER_DOCKER_IMAGE = settings.get('HAKRAWLER_DOCKER_IMAGE', 'jauderho/hakrawler:latest')
+    HAKRAWLER_DEPTH = settings.get('HAKRAWLER_DEPTH', 2)
+    HAKRAWLER_THREADS = settings.get('HAKRAWLER_THREADS', 5)
+    HAKRAWLER_TIMEOUT = settings.get('HAKRAWLER_TIMEOUT', 30)
+    HAKRAWLER_MAX_URLS = settings.get('HAKRAWLER_MAX_URLS', 500)
+    HAKRAWLER_INCLUDE_SUBS = settings.get('HAKRAWLER_INCLUDE_SUBS', False)
+    HAKRAWLER_INSECURE = settings.get('HAKRAWLER_INSECURE', True)
+    HAKRAWLER_CUSTOM_HEADERS = settings.get('HAKRAWLER_CUSTOM_HEADERS', [])
+
+    # jsluice settings
+    JSLUICE_ENABLED = settings.get('JSLUICE_ENABLED', True)
+    JSLUICE_MAX_FILES = settings.get('JSLUICE_MAX_FILES', 100)
+    JSLUICE_TIMEOUT = settings.get('JSLUICE_TIMEOUT', 300)
+    JSLUICE_EXTRACT_URLS = settings.get('JSLUICE_EXTRACT_URLS', True)
+    JSLUICE_EXTRACT_SECRETS = settings.get('JSLUICE_EXTRACT_SECRETS', True)
+    JSLUICE_CONCURRENCY = settings.get('JSLUICE_CONCURRENCY', 5)
 
     # GAU settings - disable in IP mode (archives index by domain, not IP)
     ip_mode = recon_data.get("metadata", {}).get("ip_mode", False)
@@ -168,16 +197,19 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     print("\n[*][ResourceEnum] Setting up tools...")
     kr_binary_path = None
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         if KATANA_ENABLED:
             katana_future = executor.submit(pull_katana_docker_image, KATANA_DOCKER_IMAGE)
+        if HAKRAWLER_ENABLED:
+            hakrawler_future = executor.submit(pull_hakrawler_docker_image, HAKRAWLER_DOCKER_IMAGE)
         if GAU_ENABLED:
             gau_future = executor.submit(pull_gau_docker_image, GAU_DOCKER_IMAGE)
         if KITERUNNER_ENABLED and KITERUNNER_WORDLISTS:
-            # Ensure binary is available
             kr_future = executor.submit(ensure_kiterunner_binary, KITERUNNER_WORDLISTS[0])
         if KATANA_ENABLED:
             katana_future.result()
+        if HAKRAWLER_ENABLED:
+            hakrawler_future.result()
         if GAU_ENABLED:
             gau_future.result()
         if KITERUNNER_ENABLED and KITERUNNER_WORDLISTS:
@@ -247,6 +279,23 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             print(f"[*][Katana] Custom headers: {len(KATANA_CUSTOM_HEADERS)}")
         if KATANA_EXCLUDE_PATTERNS:
             print(f"[*][Katana] Exclude patterns: {len(KATANA_EXCLUDE_PATTERNS)}")
+    # Hakrawler settings
+    print(f"[*][Hakrawler] Enabled: {HAKRAWLER_ENABLED}")
+    if HAKRAWLER_ENABLED:
+        print(f"[*][Hakrawler] Crawl depth: {HAKRAWLER_DEPTH}")
+        print(f"[*][Hakrawler] Threads: {HAKRAWLER_THREADS}")
+        print(f"[*][Hakrawler] Per-URL timeout: {HAKRAWLER_TIMEOUT}s")
+        print(f"[*][Hakrawler] Max URLs: {HAKRAWLER_MAX_URLS}")
+        print(f"[*][Hakrawler] Include subdomains: {HAKRAWLER_INCLUDE_SUBS}")
+        if HAKRAWLER_CUSTOM_HEADERS:
+            print(f"[*][Hakrawler] Custom headers: {len(HAKRAWLER_CUSTOM_HEADERS)}")
+    # jsluice settings
+    print(f"[*][jsluice] Enabled: {JSLUICE_ENABLED}")
+    if JSLUICE_ENABLED:
+        print(f"[*][jsluice] Max files: {JSLUICE_MAX_FILES}")
+        print(f"[*][jsluice] Timeout: {JSLUICE_TIMEOUT}s")
+        print(f"[*][jsluice] Extract URLs: {JSLUICE_EXTRACT_URLS}")
+        print(f"[*][jsluice] Extract secrets: {JSLUICE_EXTRACT_SECRETS}")
     # GAU settings
     print(f"[*][GAU] Enabled: {GAU_ENABLED}")
     if GAU_ENABLED:
@@ -280,22 +329,27 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     # Initialize results
     katana_urls = []
     katana_meta = {}
+    hakrawler_urls = []
+    hakrawler_meta = {}
     gau_urls = []
     gau_urls_by_domain = {}
     kr_results = []
+    jsluice_result = {"urls": [], "secrets": [], "external_domains": []}
 
-    # Run Katana and GAU in parallel first (if enabled)
-    if KATANA_ENABLED or GAU_ENABLED:
+    # Run Katana, Hakrawler, and GAU in parallel first (if enabled)
+    if KATANA_ENABLED or HAKRAWLER_ENABLED or GAU_ENABLED:
         tools_running = []
         if KATANA_ENABLED:
             tools_running.append("Katana")
+        if HAKRAWLER_ENABLED:
+            tools_running.append("Hakrawler")
         if GAU_ENABLED:
             tools_running.append("GAU")
         print(f"\n[*][ResourceEnum] Running URL discovery ({' + '.join(tools_running)})...")
     elif not KITERUNNER_ENABLED:
-        print("\n[-][ResourceEnum] All URL discovery tools disabled (Katana, GAU, Kiterunner)")
+        print("\n[-][ResourceEnum] All URL discovery tools disabled (Katana, Hakrawler, GAU, Kiterunner)")
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {}
 
         # Submit Katana crawler if enabled
@@ -312,6 +366,24 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 KATANA_PARAMS_ONLY,
                 target_domains,
                 KATANA_CUSTOM_HEADERS,
+                KATANA_EXCLUDE_PATTERNS,
+                use_proxy
+            )
+
+        # Submit Hakrawler crawler if enabled
+        if HAKRAWLER_ENABLED:
+            futures['hakrawler'] = executor.submit(
+                run_hakrawler_crawler,
+                target_urls,
+                HAKRAWLER_DOCKER_IMAGE,
+                HAKRAWLER_DEPTH,
+                HAKRAWLER_THREADS,
+                HAKRAWLER_TIMEOUT,
+                HAKRAWLER_MAX_URLS,
+                HAKRAWLER_INCLUDE_SUBS,
+                HAKRAWLER_INSECURE,
+                target_domains,
+                HAKRAWLER_CUSTOM_HEADERS,
                 KATANA_EXCLUDE_PATTERNS,
                 use_proxy
             )
@@ -339,6 +411,9 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 if name == 'katana':
                     katana_urls, katana_meta = future.result(timeout=KATANA_TIMEOUT + 120)
                     print(f"\n[+][Katana] Completed: {len(katana_urls)} URLs")
+                elif name == 'hakrawler':
+                    hakrawler_urls, hakrawler_meta = future.result(timeout=HAKRAWLER_TIMEOUT * 2 + 120)
+                    print(f"[+][Hakrawler] Completed: {len(hakrawler_urls)} URLs")
                 elif name == 'gau':
                     gau_urls, gau_urls_by_domain = future.result(timeout=GAU_TIMEOUT * len(GAU_PROVIDERS) + 180)
                     print(f"[+][GAU] Completed: {len(gau_urls)} URLs")
@@ -391,6 +466,58 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     for base_url, base_data in organized_data['by_base_url'].items():
         for path, endpoint in base_data['endpoints'].items():
             endpoint['sources'] = ['katana']
+
+    # Merge Hakrawler results if available
+    hakrawler_stats = {
+        "hakrawler_total": 0,
+        "hakrawler_new": 0,
+        "hakrawler_overlap": 0,
+    }
+
+    if HAKRAWLER_ENABLED and hakrawler_urls:
+        print("\n[*][Hakrawler] Organizing and merging endpoints...")
+        hakrawler_organized = organize_endpoints(hakrawler_urls, use_proxy=use_proxy)
+        organized_data['by_base_url'], hakrawler_stats = merge_hakrawler_into_by_base_url(
+            hakrawler_organized['by_base_url'],
+            organized_data['by_base_url'],
+        )
+        organized_data['forms'].extend(hakrawler_organized.get('forms', []))
+
+        print(f"[+][Hakrawler] Total endpoints: {hakrawler_stats['hakrawler_total']}")
+        print(f"[+][Hakrawler] New endpoints: {hakrawler_stats['hakrawler_new']}")
+        print(f"[+][Hakrawler] Overlap with Katana: {hakrawler_stats['hakrawler_overlap']}")
+
+    # jsluice post-crawl JS analysis (runs after crawlers complete)
+    jsluice_stats = {
+        "jsluice_total": 0,
+        "jsluice_parsed": 0,
+        "jsluice_new": 0,
+        "jsluice_overlap": 0,
+    }
+
+    if JSLUICE_ENABLED and (JSLUICE_EXTRACT_URLS or JSLUICE_EXTRACT_SECRETS):
+        all_crawl_urls = list(set(katana_urls + hakrawler_urls))
+        if all_crawl_urls:
+            jsluice_result = run_jsluice_analysis(
+                all_crawl_urls,
+                JSLUICE_MAX_FILES,
+                JSLUICE_TIMEOUT,
+                JSLUICE_EXTRACT_URLS,
+                JSLUICE_EXTRACT_SECRETS,
+                JSLUICE_CONCURRENCY,
+                target_domains,
+                use_proxy
+            )
+
+            if jsluice_result.get("urls"):
+                print("\n[*][jsluice] Merging extracted URLs into results...")
+                organized_data['by_base_url'], jsluice_stats = merge_jsluice_into_by_base_url(
+                    jsluice_result["urls"],
+                    organized_data['by_base_url'],
+                )
+                print(f"[+][jsluice] Total URLs: {jsluice_stats['jsluice_total']}")
+                print(f"[+][jsluice] New endpoints: {jsluice_stats['jsluice_new']}")
+                print(f"[+][jsluice] Overlap: {jsluice_stats['jsluice_overlap']}")
 
     # Merge GAU results if available
     gau_stats = {
@@ -548,7 +675,10 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             print(f"[-][ResourceEnum] URLScan skipped {urlscan_skipped} out-of-scope URLs")
 
     # Combine all discovered URLs (deduplicated, in-scope only)
-    all_discovered_urls = sorted(set(katana_urls + in_scope_gau + urlscan_urls))
+    jsluice_in_scope_urls = jsluice_result.get("urls", []) if JSLUICE_ENABLED else []
+    all_discovered_urls = sorted(set(
+        katana_urls + hakrawler_urls + in_scope_gau + urlscan_urls + jsluice_in_scope_urls
+    ))
 
     # Build result structure
     resource_enum_result = {
@@ -564,6 +694,19 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             'katana_js_crawl': KATANA_JS_CRAWL if KATANA_ENABLED else None,
             'katana_params_only': KATANA_PARAMS_ONLY if KATANA_ENABLED else None,
             'katana_urls_found': len(katana_urls) if KATANA_ENABLED else 0,
+            # Hakrawler metadata
+            'hakrawler_enabled': HAKRAWLER_ENABLED,
+            'hakrawler_docker_image': HAKRAWLER_DOCKER_IMAGE if HAKRAWLER_ENABLED else None,
+            'hakrawler_depth': HAKRAWLER_DEPTH if HAKRAWLER_ENABLED else None,
+            'hakrawler_threads': HAKRAWLER_THREADS if HAKRAWLER_ENABLED else None,
+            'hakrawler_urls_found': len(hakrawler_urls) if HAKRAWLER_ENABLED else 0,
+            'hakrawler_stats': hakrawler_stats,
+            # jsluice metadata
+            'jsluice_enabled': JSLUICE_ENABLED,
+            'jsluice_max_files': JSLUICE_MAX_FILES if JSLUICE_ENABLED else None,
+            'jsluice_urls_found': len(jsluice_in_scope_urls),
+            'jsluice_secrets_found': len(jsluice_result.get("secrets", [])),
+            'jsluice_stats': jsluice_stats,
             # GAU metadata
             'gau_enabled': GAU_ENABLED,
             'gau_docker_image': GAU_DOCKER_IMAGE if GAU_ENABLED else None,
@@ -605,6 +748,13 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             'total_forms': len(organized_data['forms']),
             # Source breakdown
             'from_katana': len(katana_urls),
+            'from_hakrawler': len(hakrawler_urls) if HAKRAWLER_ENABLED else 0,
+            'hakrawler_new_endpoints': hakrawler_stats['hakrawler_new'],
+            'hakrawler_overlap': hakrawler_stats['hakrawler_overlap'],
+            'from_jsluice_urls': len(jsluice_in_scope_urls),
+            'jsluice_new_endpoints': jsluice_stats['jsluice_new'],
+            'jsluice_overlap': jsluice_stats['jsluice_overlap'],
+            'jsluice_secrets_count': len(jsluice_result.get("secrets", [])),
             'from_gau_total': len(gau_urls),  # All URLs found by GAU
             'from_gau_in_scope': len(in_scope_gau),  # Only in-scope URLs
             'gau_new_endpoints': gau_stats['gau_new'],
@@ -617,7 +767,13 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             'methods': {},
             'categories': {}
         },
-        'external_domains': gau_external_domains + katana_meta.get("external_domains", []),
+        'jsluice_secrets': jsluice_result.get("secrets", []),
+        'external_domains': (
+            gau_external_domains
+            + katana_meta.get("external_domains", [])
+            + hakrawler_meta.get("external_domains", [])
+            + jsluice_result.get("external_domains", [])
+        ),
     }
 
     # Aggregate methods and categories across all base URLs
@@ -643,6 +799,13 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     print(f"[+][ResourceEnum] Duration: {duration:.2f} seconds")
     print(f"[+][ResourceEnum] Total URLs discovered: {len(all_discovered_urls)}")
     print(f"[+][Katana] Active crawl: {len(katana_urls) if KATANA_ENABLED else 'disabled'}")
+    print(f"[+][Hakrawler] Active crawl: {len(hakrawler_urls) if HAKRAWLER_ENABLED else 'disabled'}")
+    if HAKRAWLER_ENABLED and hakrawler_urls:
+        print(f"[+][Hakrawler] New endpoints: {hakrawler_stats['hakrawler_new']}")
+        print(f"[+][Hakrawler] Overlap: {hakrawler_stats['hakrawler_overlap']}")
+    print(f"[+][jsluice] JS analysis: {len(jsluice_in_scope_urls)} URLs, {len(jsluice_result.get('secrets', []))} secrets" if JSLUICE_ENABLED else "[+][jsluice] JS analysis: disabled")
+    if JSLUICE_ENABLED and jsluice_in_scope_urls:
+        print(f"[+][jsluice] New endpoints: {jsluice_stats['jsluice_new']}")
     print(f"[+][GAU] Passive archive: {len(gau_urls) if GAU_ENABLED else 'disabled'}")
     if GAU_ENABLED and gau_urls:
         print(f"[+][GAU] New endpoints: {gau_stats['gau_new']}")

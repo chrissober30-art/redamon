@@ -53,6 +53,19 @@ from .katana_helpers import (
     pull_katana_docker_image,
 )
 
+# Hakrawler helpers
+from .hakrawler_helpers import (
+    run_hakrawler_crawler,
+    pull_hakrawler_docker_image,
+    merge_hakrawler_into_by_base_url,
+)
+
+# jsluice helpers
+from .jsluice_helpers import (
+    run_jsluice_analysis,
+    merge_jsluice_into_by_base_url,
+)
+
 # Endpoint organization
 from .endpoint_helpers import (
     organize_endpoints,
@@ -85,6 +98,13 @@ __all__ = [
     "run_katana_crawler",
     "fetch_forms_from_urls",
     "pull_katana_docker_image",
+    # Hakrawler
+    "run_hakrawler_crawler",
+    "pull_hakrawler_docker_image",
+    "merge_hakrawler_into_by_base_url",
+    # jsluice
+    "run_jsluice_analysis",
+    "merge_jsluice_into_by_base_url",
     # Endpoint organization
     "organize_endpoints",
 ]
