@@ -41,20 +41,20 @@ const BUILT_IN_SKILLS: BuiltInSkillDef[] = [
   },
   {
     id: 'brute_force_credential_guess',
-    name: 'Brute Force',
-    description: 'Password and credential attacks using Hydra against login services',
+    name: 'Credential Testing',
+    description: 'Credential policy validation using Hydra against login services',
     icon: <KeyRound size={16} />,
   },
   {
     id: 'phishing_social_engineering',
-    name: 'Phishing / Social Engineering',
-    description: 'Payload generation, malicious documents, and email delivery to human targets',
+    name: 'Social Engineering Simulation',
+    description: 'Payload generation, document crafting, and email delivery for authorized awareness testing',
     icon: <Mail size={16} />,
   },
   {
     id: 'denial_of_service',
-    name: 'Denial of Service (DoS)',
-    description: 'Disrupt service availability using flooding, resource exhaustion, and crash exploits',
+    name: 'Availability Testing',
+    description: 'Assess service resilience using flooding, resource exhaustion, and crash vectors',
     icon: <Zap size={16} />,
   },
 ]
@@ -67,9 +67,9 @@ type AttackSkillConfig = {
 const DEFAULT_CONFIG: AttackSkillConfig = {
   builtIn: {
     cve_exploit: true,
-    brute_force_credential_guess: true,
-    phishing_social_engineering: true,
-    denial_of_service: true,
+    brute_force_credential_guess: false,
+    phishing_social_engineering: false,
+    denial_of_service: false,
   },
   user: {},
 }
@@ -136,12 +136,12 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
 
   return (
     <>
-      {/* Built-in Attack Skills */}
+      {/* Built-in Agent Skills */}
       <div className={styles.section}>
         <div className={styles.sectionHeader} onClick={() => setBuiltInOpen(!builtInOpen)}>
           <h2 className={styles.sectionTitle}>
             <Bug size={16} />
-            Built-in Attack Skills
+            Built-in Agent Skills
             <span className={styles.badgeActive}>Active</span>
           </h2>
           <ChevronDown
@@ -153,8 +153,8 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
         {builtInOpen && (
           <div className={styles.sectionContent}>
             <p className={styles.sectionDescription}>
-              Core attack skills with specialized workflows. Disable a skill to prevent the agent
-              from classifying requests into that attack type and using its prompts.
+              Core agent skills with specialized workflows. Disable a skill to prevent the agent
+              from classifying requests into that skill type and using its prompts.
             </p>
 
             {BUILT_IN_SKILLS.map(skill => {
@@ -223,12 +223,12 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
         )}
       </div>
 
-      {/* User Attack Skills */}
+      {/* User Agent Skills */}
       <div className={styles.section}>
         <div className={styles.sectionHeader} onClick={() => setUserOpen(!userOpen)}>
           <h2 className={styles.sectionTitle}>
             <Swords size={16} />
-            User Attack Skills
+            User Agent Skills
           </h2>
           <ChevronDown
             size={16}
@@ -239,7 +239,7 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
         {userOpen && (
           <div className={styles.sectionContent}>
             <p className={styles.sectionDescription}>
-              Custom attack skills uploaded from Global Settings. Enable a skill to let the agent
+              Custom agent skills uploaded from Global Settings. Enable a skill to let the agent
               classify requests into it and use its workflow.
             </p>
 

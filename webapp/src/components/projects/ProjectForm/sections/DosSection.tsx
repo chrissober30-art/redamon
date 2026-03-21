@@ -15,7 +15,7 @@ export function DosSection({ data, updateField }: DosSectionProps) {
   return (
     <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
       <p className={styles.sectionDescription}>
-        Configure Denial of Service attack settings. These control attack intensity,
+        Configure availability testing settings. These control test intensity,
         duration limits, and whether to perform assessment-only (non-destructive) checks.
       </p>
 
@@ -32,7 +32,7 @@ export function DosSection({ data, updateField }: DosSectionProps) {
             max={300}
           />
           <span className={styles.fieldHint}>
-            Max seconds per individual DoS attempt. Caps hping3, MSF modules, slowhttptest.
+            Max seconds per individual availability test. Caps hping3, MSF modules, slowhttptest.
           </span>
         </div>
         <div className={styles.fieldGroup}>
@@ -64,7 +64,7 @@ export function DosSection({ data, updateField }: DosSectionProps) {
             max={10000}
           />
           <span className={styles.fieldHint}>
-            Connections for app-layer DoS (slowloris sockets, slowhttptest -c). Controls intensity.
+            Connections for app-layer testing (slowloris sockets, slowhttptest -c). Controls intensity.
           </span>
         </div>
       </div>
@@ -82,7 +82,7 @@ export function DosSection({ data, updateField }: DosSectionProps) {
             Assessment Only
           </label>
           <span className={styles.fieldHint}>
-            Only check for DoS vulnerabilities (nmap scripts, nuclei) without actually attacking.
+            Only check for availability vulnerabilities (nmap scripts, nuclei) without active testing.
           </span>
         </div>
       </div>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ChevronDown, Bot, Search, Loader2 } from 'lucide-react'
+import { ChevronDown, Bot, Search, Loader2, AlertTriangle } from 'lucide-react'
 import { Toggle } from '@/components/ui'
 import { useProject } from '@/providers/ProjectProvider'
 import type { Project } from '@prisma/client'
@@ -391,6 +391,20 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
           {/* Approval Gates */}
           <div className={styles.subSection}>
             <h3 className={styles.subSectionTitle}>Approval Gates</h3>
+
+            {(!data.agentRequireApprovalForExploitation || !data.agentRequireApprovalForPostExploitation || !(data.agentGuardrailEnabled ?? true)) && (
+              <div className={styles.shodanWarning} style={{ borderColor: 'rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.08)' }}>
+                <AlertTriangle size={14} style={{ color: '#ef4444' }} />
+                <span>
+                  <strong>Autonomous operation risk:</strong> One or more safety gates are disabled.
+                  The AI agent may perform exploitation, post-exploitation, or out-of-scope actions without human approval.
+                  This significantly increases the risk of unintended damage to target systems.
+                  You assume full responsibility for all autonomous agent actions.
+                  See <a href="https://github.com/samugit83/redamon/blob/master/DISCLAIMER.md" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>DISCLAIMER.md</a> for details.
+                </span>
+              </div>
+            )}
+
             <div className={styles.toggleRow}>
               <div>
                 <span className={styles.toggleLabel}>Require Approval for Exploitation</span>

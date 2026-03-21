@@ -29,12 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **NVD API key fallback**: project-level `nvdApiKey` falls back to user-level global setting from UserSettings
   - **Bug fix**: NVD API key was never actually passed to CVE lookup function — now correctly wired through
 
-- **Denial of Service (DoS) Attack Skill** — new built-in attack skill for disrupting service availability. Includes LLM prompt templates for DoS vector selection, resource exhaustion, flooding, and crash exploits. Full integration across the stack:
+- **Availability Testing Attack Skill** — new built-in attack skill for disrupting service availability. Includes LLM prompt templates for DoS vector selection, resource exhaustion, flooding, and crash exploits. Full integration across the stack:
   - **Backend**: `denial_of_service_prompts.py` with DoS-specific workflow guidance, vector classification, and impact assessment prompts
   - **Orchestrator**: DoS attack path type (`denial_of_service`) integrated into classification, phase transitions, and tool registry
   - **Database**: Prisma schema updated with DoS configuration fields and project-level toggle
   - **Frontend**: `DosSection.tsx` configuration component in the project form for enabling/disabling and tuning DoS parameters
-  - **API**: attack skills endpoint updated to expose DoS as a built-in skill
+  - **API**: agent skills endpoint updated to expose DoS as a built-in skill
 
 - **Expanded Finding Types** — 8 new goal/outcome `finding_type` values for ChainFinding nodes, covering real-world pentesting outcomes beyond the original 10 types:
   - `data_exfiltration` — data successfully stolen/exfiltrated
@@ -219,10 +219,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **State management**: new `ToolPlan` and `ToolPlanStep` Pydantic models, `_current_plan` field in `AgentState`
   - **Graceful fallback**: empty `tool_plan` objects or plans with no steps are automatically downgraded to sequential `use_tool` execution
 
-- **Attack Skills System** — modular attack path management with built-in and user-uploaded skills:
-  - **Built-in Attack Skills** — four core skills (CVE (MSF), Brute Force, Phishing / Social Engineering, Denial of Service) can now be individually enabled or disabled per project via toggles in the new Attack Skills section of Project Settings. Disabling a skill prevents the agent from classifying requests into that attack type and removes its prompts from the system prompt. Sub-settings (Hydra config, SMTP config, DoS parameters) are shown inline when the corresponding skill is enabled
-  - **User Attack Skills** — upload custom `.md` files defining attack workflows from Global Settings. Each skill file contains a full workflow description that the agent follows across all three phases (informational, exploitation, post-exploitation). User skills are stored per-user in the database (`UserAttackSkill` model) and become available as toggles in all project settings
-  - **Skill Management in Global Settings** — dedicated "Attack Skills" section with upload button (accepts `.md` files, max 50KB), skill list with download and delete actions, and a name-entry modal on upload
+- **Agent Skills System** — modular attack path management with built-in and user-uploaded skills:
+  - **Built-in Agent Skills** — four core skills (CVE (MSF), Credential Testing, Social Engineering Simulation, Availability Testing) can now be individually enabled or disabled per project via toggles in the new Agent Skills section of Project Settings. Disabling a skill prevents the agent from classifying requests into that attack type and removes its prompts from the system prompt. Sub-settings (Hydra config, SMTP config, DoS parameters) are shown inline when the corresponding skill is enabled
+  - **User Agent Skills** — upload custom `.md` files defining attack workflows from Global Settings. Each skill file contains a full workflow description that the agent follows across all three phases (informational, exploitation, post-exploitation). User skills are stored per-user in the database (`UserAttackSkill` model) and become available as toggles in all project settings
+  - **Skill Management in Global Settings** — dedicated "Agent Skills" section with upload button (accepts `.md` files, max 50KB), skill list with download and delete actions, and a name-entry modal on upload
   - **Per-project skill toggles** — `attackSkillConfig` JSON field in the project stores `{ builtIn: { skill_id: bool }, user: { skill_id: bool } }` controlling which skills are active. Built-in skills default to enabled; user skills default to enabled when present
   - **Agent integration** — LLM classifier routes requests to user skills via `user_skill:<id>` attack path type. Skill `.md` content is injected into the system prompt for all three phases with phase-appropriate guidance. Falls back to unclassified workflow if skill content is missing
   - **API endpoints** — `GET/POST /api/users/[id]/attack-skills` (list/create), `GET/DELETE /api/users/[id]/attack-skills/[skillId]` (read/delete), `GET /api/users/[id]/attack-skills/available` (with content for agent consumption)
@@ -252,7 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Frontend card**: `DeepThinkCard` in the Agent Timeline displays the analysis with trigger reason, situation assessment, attack vectors, recommended approach, priority steps, and risks — collapsible with a lightbulb icon
   - **WebSocket event**: `deep_think` event streams the analysis result to the frontend in real-time
 
-- **Inline Agent Settings** — Agent Behaviour, Tool Matrix, and Attack Skills sections are now accessible directly from the AI Assistant drawer via a gear icon in the toolbar. Opens a modal overlay for quick configuration changes without navigating away from the graph page. Changes are saved to the project and take effect on the next agent iteration
+- **Inline Agent Settings** — Agent Behaviour, Tool Matrix, and Agent Skills sections are now accessible directly from the AI Assistant drawer via a gear icon in the toolbar. Opens a modal overlay for quick configuration changes without navigating away from the graph page. Changes are saved to the project and take effect on the next agent iteration
 
 - **Inline API Key Configuration** — when an agent tool is unavailable due to a missing API key (web_search, shodan, google_dork), the AI Assistant drawer shows a warning badge with a one-click modal to enter the key directly. No need to navigate to Global Settings
 
@@ -302,7 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `CHISEL_SERVER_URL` and `CHISEL_AUTH` env vars added to `.env.example` and `docker-compose.yml`
   - `_query_chisel_tunnel()` utility in `agentic/utils.py` with `get_session_config_prompt()` integration
   - `agentChiselTunnelEnabled` Prisma field with database migration
-- **Phishing / Social Engineering Attack Path** (`phishing_social_engineering`) — third classified attack path with a mandatory 6-step workflow: target platform selection, handler setup, payload generation, verification, delivery, and session callback:
+- **Social Engineering Simulation Attack Path** (`phishing_social_engineering`) — third classified attack path with a mandatory 6-step workflow: target platform selection, handler setup, payload generation, verification, delivery, and session callback:
   - **Standalone Payloads** (Method A): msfvenom-based payload generation for Windows (exe, psh, psh-reflection, vba, hta-psh), Linux (elf, bash, python), macOS (macho), Android (apk), Java (war), and cross-platform (python) — with optional AV evasion via shikata_ga_nai encoding
   - **Malicious Documents** (Method B): Metasploit fileformat modules for weaponized Word macro (.docm), Excel macro (.xlsm), PDF (Adobe Reader exploit), RTF (CVE-2017-0199 HTA handler), and LNK shortcut files
   - **Web Delivery** (Method C): fileless one-liner delivery via `exploit/multi/script/web_delivery` supporting Python, PHP, PowerShell, Regsvr32 (AppLocker bypass), pubprn, SyncAppvPublishingServer, and PSH Binary targets
@@ -431,8 +431,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pagination (10/25/50/100 per page) and XLSX Excel export
 - **User Selector in Global Header** — switch between users directly from the top bar without navigating away, with two-letter avatar initials, dropdown user list, and "Manage Users" link
 - **OpenAI-Compatible Provider** — fifth AI provider supporting any OpenAI API-compatible endpoint (Ollama, LM Studio, vLLM, local proxies) via `OPENAI_COMPAT_BASE_URL` and `OPENAI_COMPAT_API_KEY` env vars, with `openai_compat/` prefix convention for model detection
-- **Hydra Brute Force Attack Path** — dedicated brute force attack path powered by THC Hydra, replacing Metasploit for credential-guessing operations with significantly higher performance. Supports 50+ protocols (SSH, FTP, RDP, SMB, MySQL, HTTP forms, and more) with configurable threads, timeouts, extra checks, and wordlist strategies. After credentials are discovered, the agent establishes access via `sshpass`, database clients, or protocol-specific tools
-- **Unclassified Attack Paths** — agent orchestrator now supports attack paths that don't fit the CVE (MSF) or Hydra Brute Force categories, with dedicated prompts in `unclassified_prompts.py`
+- **Hydra Credential Testing Attack Path** — dedicated credential testing attack path powered by THC Hydra, replacing Metasploit for credential-guessing operations with significantly higher performance. Supports 50+ protocols (SSH, FTP, RDP, SMB, MySQL, HTTP forms, and more) with configurable threads, timeouts, extra checks, and wordlist strategies. After credentials are discovered, the agent establishes access via `sshpass`, database clients, or protocol-specific tools
+- **Unclassified Attack Paths** — agent orchestrator now supports attack paths that don't fit the CVE (MSF) or Hydra Credential Testing categories, with dedicated prompts in `unclassified_prompts.py`
 - **GitHub Wiki** — 13-page documentation wiki covering getting started, user management, project creation, graph dashboard, reconnaissance, GVM scanning, GitHub secret hunting, AI agent guide, project settings reference, AI model providers, attack surface graph, data export/import, and troubleshooting
 
 ### Changed
@@ -482,7 +482,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Prompt Token Optimization** — lazy no-module fallback injection (saves ~1.1K tokens), compact formatting for older execution trace steps (full output only for last 5), trimmed rarely-used wordlist tables
 - **Metasploit Prewarm** — pre-initializes Metasploit console on agent startup to reduce first-use latency
 - **Markdown Report Export** — download the full agent conversation as a formatted Markdown file
-- **Hydra Brute Force & CVE (MSF) Settings** — new Project Settings sections for configuring Hydra brute force (threads, timeouts, extra checks, wordlist limits) and CVE exploit attack path parameters
+- **Hydra Credential Testing & CVE (MSF) Settings** — new Project Settings sections for configuring Hydra credential testing (threads, timeouts, extra checks, wordlist limits) and CVE exploit attack path parameters
 - **Node.js Deserialization Guinea Pig** — new test environment for CVE-2017-5941 (node-serialize RCE)
 - **Phase Tools Tooltip** — hover on phase badges to see which MCP tools are available in that phase
 - **GitHub Secrets Suggestion** — new suggestion button in AI Assistant to leverage discovered GitHub secrets during exploitation
@@ -491,7 +491,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Agent Orchestrator** — rewritten `_setup_llm()` with 4-way provider detection (OpenAI, Anthropic, OpenRouter via ChatOpenAI + custom base_url, Bedrock via ChatBedrockConverse with lazy import)
 - **Model Display** — `formatModelDisplay()` helper cleans up prefixed model names in the AI Assistant badge and markdown export (e.g., `openrouter/meta-llama/llama-4-maverick` → `llama-4-maverick (OR)`)
-- **Prompt Architecture** — tool registry extracted into dedicated `tool_registry.py`, attack path prompts (CVE exploit, brute force, post-exploitation) significantly reworked for better token efficiency and exploitation success rates
+- **Prompt Architecture** — tool registry extracted into dedicated `tool_registry.py`, attack path prompts (CVE exploit, credential testing, post-exploitation) significantly reworked for better token efficiency and exploitation success rates
 - **curl-based Exploitation** — expanded curl-based vulnerability probing and no-module fallback workflows for when Metasploit modules aren't available
 - **kali_shell & execute_nuclei** — expanded to all phases (previously restricted)
 - **GVM Button** — disabled in stealth mode with tooltip explaining why
@@ -551,7 +551,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Attack Path System** — agent now supports dynamic attack path selection with two built-in paths:
   - **CVE (MSF)** — automated Metasploit module search, payload configuration, and exploit execution
-  - **Hydra Brute Force** — THC Hydra-based credential guessing with configurable threads, timeouts, extra checks, and wordlist retry strategies
+  - **Hydra Credential Testing** — THC Hydra-based credential guessing with configurable threads, timeouts, extra checks, and wordlist retry strategies
 - **Agent Guidance** — send real-time steering messages to the agent while it works, injected into the system prompt before the next reasoning step
 - **Agent Stop & Resume** — stop the agent at any point and resume from the last LangGraph checkpoint with full context preserved
 - **Project Creation UI** — full frontend project form with all configurable settings sections:

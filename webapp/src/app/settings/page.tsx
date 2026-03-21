@@ -491,10 +491,10 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Section 4: Attack Skills */}
+      {/* Section 4: Agent Skills */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}><Swords size={16} /> Attack Skills</h2>
+          <h2 className={styles.sectionTitle}><Swords size={16} /> Agent Skills</h2>
           <label className="primaryButton" style={{ cursor: 'pointer' }}>
             <Upload size={14} /> Upload Skill
             <input

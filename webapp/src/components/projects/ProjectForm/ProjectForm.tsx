@@ -84,7 +84,7 @@ const TAB_GROUPS = [
     tabs: [
       { id: 'agent', label: 'Agent Behaviour' },
       { id: 'toolmatrix', label: 'Tool Matrix' },
-      { id: 'attack', label: 'Attack Skills' },
+      { id: 'attack', label: 'Agent Skills' },
     ],
   },
   {

@@ -171,9 +171,20 @@ This software shall **NOT** be used for:
 - Circumventing security measures on systems you do not own
 - Any activity that could cause harm to individuals or organizations
 
+### Autonomous AI Agent — Unintended Effects
+
+RedAmon's AI agent operates **autonomously**, making real-time decisions about which tools to invoke, which vulnerabilities to exploit, and how to chain attack steps — with minimal or no human intervention. By using this tool in autonomous mode (i.e., with approval gates disabled), you acknowledge and accept that:
+
+- **Unpredictable behavior**: The AI agent may take actions that were not explicitly anticipated, including targeting services, ports, or endpoints outside the user's intended scope, depending on the information it discovers during operation
+- **Collateral impact**: Autonomous exploitation, brute-force attacks, and post-exploitation activities can cause **service degradation, data corruption, account lockouts, or unintended denial-of-service** on target systems
+- **Scope drift**: The agent's autonomous reasoning may lead it to explore attack paths that extend beyond the originally intended scope, especially when chaining multiple exploits or pivoting through networks
+- **No guaranteed containment**: While Rules of Engagement (RoE) and the Target Guardrail provide constraints, they are best-effort safeguards — not absolute guarantees. The AI agent's behavior depends on the underlying LLM, which may not perfectly follow all restrictions in all circumstances
+- **User assumes all risk**: The authors and contributors accept **no liability** for any damage, data loss, service disruption, or legal consequences arising from the autonomous operation of the AI agent. You are solely responsible for supervising the agent's actions and ensuring they remain within your authorized scope
+- **Recommendation**: Keep **approval gates enabled** (the default) for exploitation and post-exploitation phases. Disabling them grants the agent full autonomy over offensive operations and significantly increases the risk of unintended consequences
+
 ### Exploitation Capabilities and Scope Boundaries
 
-This tool integrates with **Metasploit Framework** and other exploitation tools capable of active exploitation, including reverse shells, Meterpreter sessions, and brute force attacks. Users must understand the following:
+This tool integrates with **Metasploit Framework** and other exploitation tools capable of active exploitation, including reverse shells, Meterpreter sessions, and credential testing. Users must understand the following:
 
 - **Authorization scope**: Your written authorization document should explicitly specify the **exact services, CVEs, IP ranges, and timeframes** permitted for exploitation. Do not exploit targets or vulnerabilities outside the defined scope
 - **Session management**: Meterpreter and shell sessions establish persistent access to compromised systems. Users must ensure that sessions do not **exceed the authorized time window** and are properly terminated after testing
@@ -216,6 +227,7 @@ RedAmon integrates, bundles, or invokes the following third-party open-source to
 
 - **No warranty on third-party behavior**: The authors make no guarantees about the accuracy, reliability, or safety of any third-party tool's output
 - **License compliance**: Some tools use **AGPL-3.0** or **GPL** licenses, which impose specific obligations on distribution and modification. Users must review and comply with each license independently
+- **AGPL-3.0 source code availability**: Several tools bundled in RedAmon's Docker images (including Nuclei, Naabu, Katana, HTTPx, Subfinder, Hydra, GVM/OpenVAS, and Kiterunner) are licensed under AGPL-3.0. The complete corresponding source code for all AGPL-licensed components is available at their respective upstream repositories. See **[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)** for the full list of tools, their licenses, and source code locations
 - **Tool updates**: Third-party tools may update their templates, modules, or databases automatically (e.g., Nuclei templates, Metasploit modules). The authors are not responsible for changes introduced by upstream tool updates
 
 ### AI Regulation and EU AI Act
@@ -234,6 +246,8 @@ This software is a "dual-use" technology similar to:
 - Network scanners (used by IT administrators daily)
 
 The authors release this tool for **defensive and educational purposes**. Like Metasploit, Nmap, Burp Suite, and other industry-standard tools, this software is intended for legitimate security professionals.
+
+This software is publicly available open-source code. Users are responsible for ensuring compliance with applicable export control regulations (e.g., US EAR, EU Dual-Use Regulation 2021/821, Wassenaar Arrangement) in their jurisdiction.
 
 ### Acceptance of Terms
 

@@ -30,7 +30,7 @@ export function HydraSection({ data, updateField }: HydraSectionProps) {
   return (
     <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
       <p className={styles.sectionDescription}>
-        Configure THC Hydra brute force password cracking settings. Hydra supports 50+ protocols
+        Configure THC Hydra credential testing settings. Hydra supports 50+ protocols
         including SSH, FTP, RDP, SMB, HTTP forms, databases, and more.
       </p>
 

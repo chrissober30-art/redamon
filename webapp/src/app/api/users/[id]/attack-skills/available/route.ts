@@ -13,18 +13,18 @@ const BUILT_IN_SKILLS = [
   },
   {
     id: 'brute_force_credential_guess',
-    name: 'Brute Force',
-    description: 'Password and credential attacks using Hydra against login services',
+    name: 'Credential Testing',
+    description: 'Credential policy validation using Hydra against login services',
   },
   {
     id: 'phishing_social_engineering',
-    name: 'Phishing / Social Engineering',
-    description: 'Payload generation, malicious documents, and email delivery to human targets',
+    name: 'Social Engineering Simulation',
+    description: 'Payload generation, document crafting, and email delivery for authorized awareness testing',
   },
   {
     id: 'denial_of_service',
-    name: 'Denial of Service (DoS)',
-    description: 'Disrupt service availability using flooding, resource exhaustion, and crash exploits',
+    name: 'Availability Testing',
+    description: 'Assess service resilience using flooding, resource exhaustion, and crash vectors',
   },
 ]
 

@@ -14,8 +14,8 @@ export function PhishingSection({ data, updateField }: PhishingSectionProps) {
   return (
     <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
       <p className={styles.sectionDescription}>
-        Configure SMTP settings for phishing email delivery. The agent uses these when sending
-        payloads or malicious documents via email. Leave empty to be asked at runtime.
+        Configure SMTP settings for social engineering simulation email delivery. The agent uses these when sending
+        payloads or documents via email. Leave empty to be asked at runtime.
       </p>
 
       {/* SMTP Configuration Textarea */}
@@ -31,8 +31,8 @@ export function PhishingSection({ data, updateField }: PhishingSectionProps) {
             style={{ fontFamily: 'monospace', fontSize: '13px', resize: 'vertical' }}
           />
           <span className={styles.fieldHint}>
-            Free-text SMTP settings injected into the agent prompt for phishing email delivery.
-            The agent reads this as-is when the phishing attack skill is active.
+            Free-text SMTP settings injected into the agent prompt for social engineering email delivery.
+            The agent reads this as-is when the social engineering simulation skill is active.
           </span>
         </div>
       </div>

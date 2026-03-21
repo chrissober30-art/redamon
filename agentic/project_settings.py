@@ -89,7 +89,7 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'KALI_INSTALL_ALLOWED_PACKAGES': '',
     'KALI_INSTALL_FORBIDDEN_PACKAGES': '',
 
-    # Hydra Brute Force
+    # Hydra Credential Testing
     'HYDRA_ENABLED': True,
     'HYDRA_THREADS': 16,
     'HYDRA_WAIT_BETWEEN_CONNECTIONS': 0,
@@ -102,10 +102,10 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     # Shodan OSINT
     'SHODAN_ENABLED': True,
 
-    # Phishing / Social Engineering
+    # Social Engineering Simulation
     'PHISHING_SMTP_CONFIG': '',  # Free-text SMTP config for phishing email delivery (optional)
 
-    # Denial of Service
+    # Availability Testing
     'DOS_MAX_DURATION': 60,             # Max seconds per DoS attempt
     'DOS_MAX_ATTEMPTS': 3,              # Max different vectors to try
     'DOS_CONCURRENT_CONNECTIONS': 1000, # Connections for app-layer DoS (slowloris etc.)
@@ -115,9 +115,9 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'ATTACK_SKILL_CONFIG': {
         'builtIn': {
             'cve_exploit': True,
-            'brute_force_credential_guess': True,
-            'phishing_social_engineering': True,
-            'denial_of_service': True,
+            'brute_force_credential_guess': False,
+            'phishing_social_engineering': False,
+            'denial_of_service': False,
         },
         'user': {},
     },

@@ -24,10 +24,10 @@ _BRUTE_FORCE_SECTION = """### brute_force_credential_guess
 """
 
 _PHISHING_SECTION = """### phishing_social_engineering
-- Attack where a HUMAN VICTIM must execute, open, click, or install something (payload, document, link, one-liner)
-- Includes: msfvenom payloads, malicious documents, web delivery, email delivery, handler setup
-- Key distinction: victim runs artifact on THEIR machine (vs cve_exploit which hits a service directly)
-- Keywords: payload, reverse shell, msfvenom, backdoor, phishing, malicious document, handler
+- Attack where a target user must execute, open, click, or install something (payload, document, link, one-liner)
+- Includes: msfvenom payloads, document-based payloads, web delivery, email delivery, handler setup
+- Key distinction: target user runs artifact on THEIR machine (vs cve_exploit which hits a service directly)
+- Keywords: payload, reverse shell, msfvenom, payload delivery, phishing, document payload, handler
 """
 
 _DOS_SECTION = """### denial_of_service
@@ -40,9 +40,9 @@ _DOS_SECTION = """### denial_of_service
 _UNCLASSIFIED_SECTION = """### <descriptive_term>-unclassified
 - ANY exploitation request that does NOT clearly fit the enabled attack skills above
 - The agent has no specialized workflow for these — it will use available tools generically
-- **Key distinction from phishing:** the attacker directly interacts with a SERVICE/APPLICATION, NOT generating a payload for a human victim
+- **Key distinction from phishing:** the attacker directly interacts with a SERVICE/APPLICATION, NOT generating a payload for a target user to execute
   - "Try SQL injection on the web app" → unclassified (attacker sends crafted input to a web service)
-  - "Generate a reverse shell payload" → phishing (attacker creates a file for a victim to execute)
+  - "Generate a reverse shell payload" → phishing (attacker creates a file for a target user to execute)
 - You MUST create a short, descriptive snake_case term followed by "-unclassified"
 - Format: `<term>-unclassified` where term is 1-4 lowercase words joined by underscores
 - Example values: "sql_injection-unclassified", "ssrf-unclassified", "xss-unclassified", "file_upload-unclassified", "directory_traversal-unclassified"
@@ -68,7 +68,7 @@ _BUILTIN_SKILL_MAP = {
 _PRIORITY_INSTRUCTIONS = {
     'phishing_social_engineering': """   {letter}. **phishing_social_engineering** (check FIRST — highest priority):
       - Is the request asking to GENERATE, CREATE, or SET UP a payload, malicious file, document, backdoor, reverse shell, one-liner, or delivery server?
-      - Will the output be something a HUMAN VICTIM must execute, open, click, or install on their machine?
+      - Will the output be something a target user must execute, open, click, or install on their machine?
       - Does it mention msfvenom, handler, multi/handler, web delivery, HTA server, encoding for AV evasion?
       - Does it mention sending something via email to a target person?
       - If YES to any → "phishing_social_engineering" """,
@@ -78,7 +78,7 @@ _PRIORITY_INSTRUCTIONS = {
       - If YES → "brute_force_credential_guess" """,
     'cve_exploit': """   {letter}. **cve_exploit**:
       - Does the request mention a specific CVE ID or Metasploit exploit module to use DIRECTLY against a service?
-      - Does it describe exploiting a service vulnerability where NO human victim interaction is needed?
+      - Does it describe exploiting a service vulnerability where NO target user interaction is needed?
       - If YES → "cve_exploit" """,
     'denial_of_service': """   {letter}. **denial_of_service**:
       - Is the goal to DISRUPT, CRASH, or make a service UNAVAILABLE (not to gain access)?
@@ -130,7 +130,7 @@ def build_classification_prompt(objective: str) -> str:
 ### exploitation
 - Active exploitation of vulnerabilities
 - Brute force / credential attacks
-- Generating payloads, malicious files, reverse shells, or backdoors for victim execution
+- Generating payloads, reverse shells, or delivery mechanisms for target user execution
 - Setting up handlers, listeners, or delivery servers
 - Any request that involves gaining unauthorized access
 - Example requests:

@@ -3,10 +3,10 @@
   <br/>
   <img src="assets/title.svg" alt="RedAmon" width="340"/>
   <br/>
-  <b><i><big><big>Unmask the hidden before the world does.</big></big></i></b>
+  <b><i><big><big>AI-powered security testing — from reconnaissance to remediation.</big></big></i></b>
 </p>
 <p align="center" style="font-size: 120%;">
-  An autonomous AI framework that chains reconnaissance, exploitation, and post-exploitation into a single pipeline, then goes further by triaging every finding, implementing code fixes, and opening pull requests on your repository. From first packet to merged patch, no human intervention required.
+  An autonomous AI framework that chains reconnaissance, exploitation, and post-exploitation into a single pipeline, then goes further by triaging every finding, implementing code fixes, and opening pull requests on your repository. From first packet to merged patch, with human oversight at every critical step.
 </p>
 
 <br/>
@@ -15,13 +15,13 @@
   <img height="24" src="https://img.shields.io/badge/v3.0.0-release-2E8B57?style=flat" alt="Version 3.0.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
-  <img height="24" src="https://img.shields.io/badge/FULL-KILL%20CHAIN-A01025?style=flat" alt="Full Kill Chain"/>
+  <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
   <img height="24" src="https://img.shields.io/badge/AI-AUTONOMOUS%20AGENT-6A5ACD?style=flat&logo=openai&logoColor=white" alt="AI Powered"/>
-  <img height="24" src="https://img.shields.io/badge/ZERO-HUMAN%20INTERVENTION-CC7722?style=flat" alt="Zero Click"/>
+  <img height="24" src="https://img.shields.io/badge/CONFIGURABLE-AUTONOMY-CC7722?style=flat" alt="Configurable Autonomy"/>
   <img height="24" src="https://img.shields.io/badge/Kali-Powered-466A7A?style=flat&logo=kalilinux&logoColor=white" alt="Kali Powered"/>
   <img height="24" src="https://img.shields.io/badge/Docker-Compose-1A7EC2?style=flat&logo=docker&logoColor=white" alt="Docker"/>
   <img height="24" src="https://img.shields.io/badge/IP%2FCIDR-TARGETING-0D7377?style=flat" alt="IP/CIDR Targeting"/>
-  <img height="24" src="https://img.shields.io/badge/Stealth-Mode-5B21B6?style=flat&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MDAgNjAwIiBmaWxsPSJ3aGl0ZSI+PHBvbHlnb24gcG9pbnRzPSI0MDAsODAgODAwLDQyMCA3MjAsNDIwIDY4MCwzODAgNjIwLDQyMCA1NjAsMzgwIDUwMCw0MjAgNDQwLDM4MCAzODAsNDIwIDMyMCwzODAgMjYwLDQyMCAyMDAsMzgwIDEyMCw0MjAgMCw0MjAiLz48L3N2Zz4=&logoColor=white" alt="Stealth Mode"/>
+
   <img height="24" src="https://img.shields.io/badge/30+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="30+ Security Tools"/>
   <img height="24" src="https://img.shields.io/badge/185,000+-DETECTION%20RULES-8B1142?style=flat" alt="185,000+ Detection Rules"/>
   <img height="24" src="https://img.shields.io/badge/190+-PROJECT%20SETTINGS-00899B?style=flat" alt="190+ Settings"/>
@@ -32,7 +32,7 @@
   <img height="24" src="https://img.shields.io/badge/Nmap-Scanner-4682B4?style=flat" alt="Nmap Scanner"/>
   <img height="24" src="https://img.shields.io/badge/Nuclei-Scanner-7B42BC?style=flat" alt="Nuclei Scanner"/>
   <img height="24" src="https://img.shields.io/badge/SQLMap-Injection-C0392B?style=flat" alt="SQLMap"/>
-  <img height="24" src="https://img.shields.io/badge/Hydra-Brute%20Force-E67E22?style=flat" alt="Hydra Brute Force"/>
+  <img height="24" src="https://img.shields.io/badge/Hydra-Credential%20Testing-E67E22?style=flat" alt="Hydra Credential Testing"/>
   <img height="24" src="https://img.shields.io/badge/CypherFix-Auto%20Remediation-00B894?style=flat" alt="CypherFix Auto Remediation"/>
   <img height="24" src="https://img.shields.io/badge/AI-PENTEST%20REPORTS-8B5CF6?style=flat" alt="AI Pentest Reports"/>
   <img height="24" src="https://img.shields.io/badge/RoE-Guardrails-3B82F6?style=flat" alt="RoE Guardrails"/>
@@ -48,16 +48,16 @@
   <a href="https://youtu.be/afViJUit0xE"><img height="24" src="https://img.shields.io/badge/▶_WATCH_DEMO-3_Parallel_Agents-FF0000?style=flat&logo=youtube&logoColor=white" alt="Watch Demo"/></a>
 </p>
 <p align="center">
-  <em>Three AI agents attack simultaneously — one brute-forces SSH credentials with Hydra, one chains a CVE to escalate to root and defaces the homepage, one hunts down every XSS vulnerability on the frontend.</em>
+  <em>Three AI agents test in parallel — one validates credential policies via Hydra, one verifies a CVE exploit path through privilege escalation, one maps XSS vulnerabilities across the frontend.</em>
 </p>
 
 <br/>
 
-<h1 align="center"><span style="color:#D48A8A">Offense</span> meets <span style="color:#8AAED4">defense</span>, one pipeline, zero handoffs.</h1>
+<h1 align="center"><span style="color:#D48A8A">Offense</span> meets <span style="color:#8AAED4">defense</span> — one pipeline, full visibility.</h1>
 <p align="center">
 <b><samp><big>Reconnaissance ➜ Exploitation ➜ Post-Exploitation ➜ AI Triage ➜ CodeFix Agent ➜ GitHub PR</big></samp></b>
 <br/><br/>
-RedAmon doesn't stop at finding vulnerabilities, it fixes them. The pipeline starts with a 6-phase reconnaissance engine that maps your target's entire attack surface, then hands control to an autonomous AI agent that exploits CVEs, brute-forces credentials, and pivots through networks. Every finding is recorded in a Neo4j knowledge graph. When the offensive phase completes, CypherFix takes over: an AI triage agent correlates hundreds of findings, deduplicates them, and ranks them by exploitability. Then a CodeFix agent clones your repository, navigates the codebase with 11 code-aware tools, implements targeted fixes, and opens a GitHub pull request, ready for review and merge.
+RedAmon doesn't stop at finding vulnerabilities, it fixes them. The pipeline starts with a 6-phase reconnaissance engine that maps your target's entire attack surface, then hands control to an autonomous AI agent that validates CVE exploitability, tests credential policies, and maps lateral movement paths. Every finding is recorded in a Neo4j knowledge graph. When the offensive phase completes, CypherFix takes over: an AI triage agent correlates hundreds of findings, deduplicates them, and ranks them by exploitability. Then a CodeFix agent clones your repository, navigates the codebase with 11 code-aware tools, implements targeted fixes, and opens a GitHub pull request, ready for review and merge.
 </p>
 
 <p align="center">
@@ -90,8 +90,8 @@ Videos, writeups, and real-world experiences from security professionals using R
 
 | Title | Link |
 |-------|------|
-| RedAmon v2.2.0 — Phishing Social Engineering: From Payload to Root Shell in 2 Minutes | [Watch](https://youtu.be/kVjV9K_eks4) |
-| My AI Agent Exploited a CVE That Metasploit Couldn't — RedAmon Full Demo | [Watch](https://youtu.be/rypmP1SJon8) |
+| RedAmon v2.2.0 — Social Engineering Test: Payload Delivery to Shell Access | [Watch](https://youtu.be/kVjV9K_eks4) |
+| AI Agent CVE Validation — Beyond Standard Tooling | [Watch](https://youtu.be/rypmP1SJon8) |
 | RedAmon 2.0 — From 0 to 1000 GitHub Stars in 10 Days: Multi-Agent Parallel Attacks | [Watch](https://youtu.be/afViJUit0xE) |
 | Build an Autonomous AI Red Team Agent from Scratch — LangGraph + Metasploit + Neo4j Full Tutorial | [Watch](https://youtu.be/mO5CCkYlY94) |
 
@@ -291,7 +291,7 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 
 ### AI Agent Orchestrator
 
-A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progresses through three phases — **Informational** (intelligence gathering, graph queries, Shodan, Google dorking), **Exploitation** (Metasploit, Hydra brute force, phishing/social engineering), and **Post-Exploitation** (enumeration, lateral movement). The agent executes 13 security tools via MCP servers inside a Kali sandbox, supports parallel tool execution via **Wave Runner**, and provides real-time chat interaction with guidance, stop/resume, and approval workflows. **Deep Think** mode enables structured strategic analysis before acting.
+A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progresses through three phases — **Informational** (intelligence gathering, graph queries, Shodan, Google dorking), **Exploitation** (Metasploit, Hydra credential testing, social engineering simulation), and **Post-Exploitation** (enumeration, lateral movement). The agent executes 13 security tools via MCP servers inside a Kali sandbox, supports parallel tool execution via **Wave Runner**, and provides real-time chat interaction with guidance, stop/resume, and approval workflows. **Deep Think** mode enables structured strategic analysis before acting.
 
 > **[Wiki: AI Agent Guide](https://github.com/samugit83/redamon/wiki/AI-Agent-Guide)** | **[Technical: README.PENTEST_AGENT.md](readmes/README.PENTEST_AGENT.md)**
 
@@ -335,11 +335,11 @@ Two-agent pipeline: a **Triage Agent** runs 9 hardcoded Cypher queries then uses
 
 > **[Wiki: CypherFix](https://github.com/samugit83/redamon/wiki/CypherFix-Automated-Remediation)** | **[Technical: README.CYPHERFIX_AGENTS.md](readmes/README.CYPHERFIX_AGENTS.md)**
 
-### Attack Skills
+### Agent Skills
 
-An **LLM-powered Intent Router** classifies user requests into attack skills: CVE (MSF), Brute Force, Phishing, Denial of Service, or custom user-defined skills uploaded as Markdown files.
+An **LLM-powered Intent Router** classifies user requests into agent skills: CVE (MSF), Credential Testing, Social Engineering, Availability Testing, or custom user-defined skills uploaded as Markdown files.
 
-> **[Wiki: Attack Skills](https://github.com/samugit83/redamon/wiki/Attack-Skills)**
+> **[Wiki: Agent Skills](https://github.com/samugit83/redamon/wiki/Attack-Skills)**
 
 ### GitHub Secret Hunter
 
@@ -516,6 +516,7 @@ flowchart TB
 | Troubleshooting | [readmes/TROUBLESHOOTING.md](readmes/TROUBLESHOOTING.md) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | Full Disclaimer | [DISCLAIMER.md](DISCLAIMER.md) |
+| Third-Party Licenses | [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) |
 | License | [LICENSE](LICENSE) |
 
 ---
@@ -591,6 +592,8 @@ For questions, feedback, or collaboration inquiries: **devergo.sam@gmail.com**
 ## Legal
 
 This project is released under the [MIT License](LICENSE).
+
+RedAmon integrates several third-party tools under their own licenses (AGPL-3.0, GPL, BSD, and others). Source code for all AGPL-licensed components is available at their upstream repositories. See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for the complete list.
 
 See [DISCLAIMER.md](DISCLAIMER.md) for full terms of use, acceptable use policy, and legal compliance requirements.
 

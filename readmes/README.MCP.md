@@ -442,7 +442,7 @@ If `curl http://localhost:8013/progress` returns "Connection refused":
    docker-compose exec kali-sandbox netstat -tlnp | grep 8013
    ```
 
-### Brute Force Command Not Completing
+### Credential Testing Command Not Completing
 
 **Note:** Brute force now uses THC Hydra (`execute_hydra`) which is stateless and has a 30-minute hard timeout. The troubleshooting below applies to legacy Metasploit brute force. If Hydra times out, reduce wordlist size or thread count.
 

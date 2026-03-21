@@ -6,6 +6,7 @@
 
 # Stage 1: Build jsluice binary (Go-based JS analyzer, requires CGO for tree-sitter)
 # Static linking required: Alpine uses musl but the final image uses Debian/glibc
+# Source: https://github.com/BishopFox/jsluice (MIT)
 FROM golang:1.22-alpine AS jsluice-builder
 RUN apk add --no-cache gcc musl-dev && \
     CGO_ENABLED=1 go install -ldflags='-linkmode external -extldflags "-static"' \

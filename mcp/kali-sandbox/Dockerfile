@@ -71,6 +71,8 @@ ENV PATH="${PATH}:/usr/local/go/bin:/root/go/bin"
 ENV GOPATH="/root/go"
 
 # Install ProjectDiscovery tools (naabu, nuclei)
+# Source: https://github.com/projectdiscovery/naabu (AGPL-3.0)
+# Source: https://github.com/projectdiscovery/nuclei (AGPL-3.0)
 RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest \
     && go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 
