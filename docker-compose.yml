@@ -302,6 +302,7 @@ services:
       - "4444:4444"
       - "4040:4040"
       - "8015:8015"
+      - "8016:8016"
     volumes:
       - ./mcp/servers:/opt/mcp_servers
       - ./mcp/output:/opt/output
@@ -318,6 +319,7 @@ services:
       HYDRA_PROGRESS_PORT: "8014"
       MSF_AUTO_UPDATE: "${MSF_AUTO_UPDATE:-true}"
       NUCLEI_AUTO_UPDATE: "${NUCLEI_AUTO_UPDATE:-true}"
+      TERMINAL_WS_PORT: "8016"
       # Webapp API for fetching tunnel config from Global Settings on boot
       WEBAPP_API_URL: http://webapp:3000
     restart: unless-stopped
@@ -351,6 +353,7 @@ services:
       MCP_METASPLOIT_URL: http://kali-sandbox:8003/sse
       MCP_METASPLOIT_PROGRESS_URL: http://kali-sandbox:8013/progress
       MCP_HYDRA_PROGRESS_URL: http://kali-sandbox:8014/progress
+      KALI_TERMINAL_WS_URL: ws://kali-sandbox:8016
       # Webapp API (internal docker network)
       WEBAPP_API_URL: http://webapp:3000
     extra_hosts:

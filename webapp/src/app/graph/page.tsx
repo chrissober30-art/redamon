@@ -14,6 +14,7 @@ import { ViewTabs, type ViewMode, type TunnelStatus } from './components/ViewTab
 import { DataTable } from './components/DataTable'
 import { ActiveSessions } from './components/ActiveSessions'
 import { RoeViewer } from './components/RoeViewer'
+import { KaliTerminal } from './components/KaliTerminal'
 import { useGraphData, useDimensions, useNodeSelection, useTableData } from './hooks'
 import { exportToExcel } from './utils/exportExcel'
 import { useTheme, useSession, useReconStatus, useReconSSE, useGvmStatus, useGvmSSE, useGithubHuntStatus, useGithubHuntSSE, useActiveSessions } from '@/hooks'
@@ -807,6 +808,8 @@ export default function GraphPage() {
               onKillSession={activeSessions.killSession}
               onKillJob={activeSessions.killJob}
             />
+          ) : activeView === 'terminal' ? (
+            <KaliTerminal />
           ) : activeView === 'roe' ? (
             <RoeViewer
               projectId={projectId || ''}

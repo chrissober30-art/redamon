@@ -11,6 +11,7 @@ Endpoints:
     GET /models - Available AI models from all configured providers
 """
 
+import asyncio
 import base64
 import logging
 import os
@@ -834,6 +835,70 @@ async def register_non_msf_session(body: dict):
     except Exception as e:
         logger.error(f"Non-MSF session register proxy error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=502)
+
+
+# =============================================================================
+# KALI TERMINAL — WebSocket PTY proxy to kali-sandbox terminal server
+# =============================================================================
+
+_KALI_TERMINAL_WS_URL = os.environ.get("KALI_TERMINAL_WS_URL", "ws://kali-sandbox:8016")
+
+
+@app.websocket("/ws/kali-terminal")
+async def kali_terminal_proxy(websocket: WebSocket):
+    """
+    Proxy WebSocket connection to the kali-sandbox PTY terminal server.
+
+    Bridges the browser ↔ agent ↔ kali-sandbox terminal for interactive shell access.
+    """
+    await websocket.accept()
+
+    try:
+        import websockets
+
+        async with websockets.connect(
+            _KALI_TERMINAL_WS_URL,
+            ping_interval=30,
+            ping_timeout=60,
+            max_size=2**20,
+        ) as kali_ws:
+
+            async def browser_to_kali():
+                try:
+                    while True:
+                        data = await websocket.receive()
+                        if "text" in data:
+                            await kali_ws.send(data["text"])
+                        elif "bytes" in data:
+                            await kali_ws.send(data["bytes"])
+                except Exception:
+                    pass
+
+            async def kali_to_browser():
+                try:
+                    async for message in kali_ws:
+                        if isinstance(message, bytes):
+                            await websocket.send_bytes(message)
+                        else:
+                            await websocket.send_text(message)
+                except Exception:
+                    pass
+
+            upstream = asyncio.create_task(browser_to_kali())
+            downstream = asyncio.create_task(kali_to_browser())
+            await asyncio.wait(
+                [upstream, downstream], return_when=asyncio.FIRST_COMPLETED
+            )
+            upstream.cancel()
+            downstream.cancel()
+
+    except Exception as e:
+        logger.error(f"Kali terminal proxy error: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.websocket("/ws/agent")

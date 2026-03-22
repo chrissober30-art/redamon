@@ -111,8 +111,8 @@ RUN CHISEL_VERSION="1.11.4" && \
     | gunzip > /usr/local/bin/chisel && \
     chmod +x /usr/local/bin/chisel
 
-# Expose ports for MCP servers (SSE/HTTP transport) + tunnel manager + ngrok API
-EXPOSE 8000 8002 8003 8004 8014 8015 4040
+# Expose ports for MCP servers (SSE/HTTP transport) + tunnel manager + ngrok API + terminal WS
+EXPOSE 8000 8002 8003 8004 8014 8015 8016 4040
 
 # Initialize Metasploit database (speeds up first run)
 RUN msfdb init || true

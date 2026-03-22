@@ -68,5 +68,8 @@ else
     echo "[*] No tunnel credentials configured (set them in Global Settings → Tunneling)"
 fi
 
+echo "[*] Starting terminal WebSocket server..."
+python3 /opt/mcp_servers/terminal_server.py &
+
 echo "[*] Starting MCP servers..."
 exec python3 run_servers.py "$@"

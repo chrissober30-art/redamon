@@ -47,6 +47,11 @@
   border-bottom-color: var(--accent-primary);
 }
 
+.tabTerminal {
+  color: #ff3333;
+  border-bottom-color: #ff3333;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

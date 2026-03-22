@@ -1,10 +1,10 @@
 'use client'
 
 import { memo } from 'react'
-import { Waypoints, Table2, Terminal, Shield, Search, Download } from 'lucide-react'
+import { Waypoints, Table2, Terminal, Shield, Search, Download, SquareTerminal } from 'lucide-react'
 import styles from './ViewTabs.module.css'
 
-export type ViewMode = 'graph' | 'table' | 'sessions' | 'roe'
+export type ViewMode = 'graph' | 'table' | 'sessions' | 'terminal' | 'roe'
 
 export interface TunnelInfo {
   active: boolean
@@ -72,10 +72,19 @@ export const ViewTabs = memo(function ViewTabs({
           onClick={() => onViewChange('sessions')}
         >
           <Terminal size={14} />
-          <span>Remote Shells</span>
+          <span>Reverse Shell</span>
           {sessionCount != null && sessionCount > 0 && (
             <span className={styles.badge}>{sessionCount}</span>
           )}
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeView === 'terminal'}
+          className={`${styles.tab} ${activeView === 'terminal' ? styles.tabActive : ''} ${activeView === 'terminal' ? styles.tabTerminal : ''}`}
+          onClick={() => onViewChange('terminal')}
+        >
+          <SquareTerminal size={14} />
+          <span>RedAmon Terminal</span>
         </button>
         <button
           role="tab"
