@@ -168,6 +168,43 @@ def _filter_roe_excluded(hosts: list, settings: dict, label: str = "host") -> li
     return filtered
 
 
+def _check_roe_time_window(settings: dict, _now=None) -> tuple[bool, str]:
+    """Check if current time is within the RoE-allowed window.
+
+    Returns (allowed, reason_message). Always returns (True, "") if
+    RoE or its time window is disabled. Pass _now for testing.
+    """
+    if not settings.get('ROE_ENABLED') or not settings.get('ROE_TIME_WINDOW_ENABLED'):
+        return True, ""
+
+    from datetime import datetime as _dt
+    import zoneinfo as _zi
+
+    tz_name = settings.get('ROE_TIME_WINDOW_TIMEZONE', 'UTC')
+    try:
+        tz = _zi.ZoneInfo(tz_name)
+    except Exception:
+        print(f"[RoE] Unknown timezone '{tz_name}', falling back to UTC")
+        tz = _zi.ZoneInfo('UTC')
+
+    now = _now or _dt.now(tz)
+
+    # Check day of week
+    allowed_days = [d.lower() for d in settings.get('ROE_TIME_WINDOW_DAYS', [])]
+    current_day = now.strftime('%A').lower()
+    if current_day not in allowed_days:
+        return False, f"Current day ({current_day}) is not in allowed days: {', '.join(allowed_days)} ({tz_name})"
+
+    # Check time range
+    start = settings.get('ROE_TIME_WINDOW_START_TIME', '09:00')
+    end = settings.get('ROE_TIME_WINDOW_END_TIME', '18:00')
+    current_time = now.strftime('%H:%M')
+    if current_time < start or current_time >= end:
+        return False, f"Current time ({current_time} {tz_name}) is outside allowed window ({start}\u2013{end})"
+
+    return True, ""
+
+
 def _merge_external_domain(aggregated: dict, entry: dict):
     """Merge a single external domain entry into the aggregated dict."""
     domain = entry.get("domain", "").strip().lower()
@@ -1057,6 +1094,13 @@ def main():
     root_domain = target_info["root_domain"]
     full_subdomains = target_info["full_subdomains"]
 
+    # RoE: check if root domain itself is excluded
+    if _settings.get('ROE_ENABLED') and _settings.get('ROE_EXCLUDED_HOSTS'):
+        if _is_roe_excluded(TARGET_DOMAIN, _settings['ROE_EXCLUDED_HOSTS']):
+            print(f"\n[RoE] BLOCKED: Root domain '{TARGET_DOMAIN}' is in ROE excluded hosts list.")
+            print(f"[RoE] Reconnaissance aborted — target domain excluded by Rules of Engagement.")
+            return 1
+
     # RoE: filter out excluded hosts from subdomains
     full_subdomains = _filter_roe_excluded(full_subdomains, _settings, label="subdomain")
     target_info["full_subdomains"] = full_subdomains
@@ -1088,6 +1132,13 @@ def main():
         print("  ╚══════════════════════════════════════════════════════════╝")
 
     print()
+
+    # RoE: check time window before starting any scanning
+    allowed, reason = _check_roe_time_window(_settings)
+    if not allowed:
+        print(f"\n[RoE] BLOCKED: {reason}")
+        print(f"[RoE] Reconnaissance aborted — outside Rules of Engagement time window.")
+        return 1
 
     # Clear previous graph data for this project before starting new scan
     if UPDATE_GRAPH_DB:
@@ -1127,6 +1178,17 @@ def main():
             with open(output_file, 'r') as f:
                 domain_result = json.load(f)
             print(f"[*][Pipeline] Loaded existing recon file: {output_file}")
+
+            # RoE: filter excluded hosts from loaded recon data
+            if _settings.get('ROE_ENABLED') and _settings.get('ROE_EXCLUDED_HOSTS'):
+                roe_excluded = _settings['ROE_EXCLUDED_HOSTS']
+                dns_data = domain_result.get('dns', {})
+                subs = dns_data.get('subdomains', {})
+                excluded_subs = [s for s in subs if _is_roe_excluded(s, roe_excluded)]
+                for s in excluded_subs:
+                    del subs[s]
+                if excluded_subs:
+                    print(f"[RoE] Removed {len(excluded_subs)} excluded subdomain(s) from loaded recon file")
         else:
             print(f"[!][Pipeline] No existing recon file found: {output_file}")
             print(f"[!][Pipeline] Add 'domain_discovery' to SCAN_MODULES to create it first")

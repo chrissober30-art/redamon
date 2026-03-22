@@ -787,6 +787,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
             'KITERUNNER_RATE_LIMIT', 'KITERUNNER_METHOD_DETECT_RATE_LIMIT',
             'FFUF_RATE',
             'PUREDNS_RATE_LIMIT',
+            'HAKRAWLER_THREADS',
         ]
         for key in RATE_LIMIT_KEYS:
             if key not in settings:
