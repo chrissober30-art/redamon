@@ -141,7 +141,35 @@ The entry point for all queries. Contains project/user ownership.
     reseller: null,                          // Reseller if any
     
     // Name servers (moved from separate node)
-    name_servers: ["NS-105-A.GANDI.NET", "NS-105-B.GANDI.NET", "NS-105-C.GANDI.NET"]
+    name_servers: ["NS-105-A.GANDI.NET", "NS-105-B.GANDI.NET", "NS-105-C.GANDI.NET"],
+
+    // OSINT enrichment (set by VirusTotal and OTX)
+    vt_enriched: true,
+    vt_reputation: -5,                      // VirusTotal community reputation score
+    vt_malicious_count: 2,                  // Number of malicious engine detections
+    vt_suspicious_count: 1,                 // Suspicious engine detections
+    vt_harmless_count: 60,                  // Harmless engine detections
+    vt_undetected_count: 10,                // Undetected (no verdict) engine count
+    vt_categories: "{\"Forcepoint ThreatSeeker\": \"malicious\"}",  // JSON-serialised categories dict
+    vt_registrar: "MarkMonitor Inc.",       // Registrar from VirusTotal
+    vt_tags: ["malware", "phishing"],       // VirusTotal threat/category tags
+    vt_community_malicious: 5,             // Community malicious votes (distinct from engine count)
+    vt_community_harmless: 120,            // Community harmless votes
+    vt_last_analysis_date: 1704067200,     // Unix timestamp of last VirusTotal scan
+    vt_jarm: "27d40d40d00040d00042d43d000000aa99ce1b3cb6b454ab1b5c65c8df16f4",  // JARM TLS fingerprint
+    vt_popularity_alexa: 15234,            // Alexa popularity rank
+    vt_popularity_umbrella: 8901,          // Cisco Umbrella rank
+    otx_pulse_count: 3,                    // AlienVault OTX threat pulse count
+    otx_url_count: 12,                     // Number of URLs associated with domain (from OTX url_list)
+    otx_adversaries: ["APT28"],            // Named threat actors from OTX pulses
+    otx_malware_families: ["PlugX"],       // Malware family names from OTX pulses
+    otx_tlp: "white",                      // Most restrictive TLP across OTX pulses
+    otx_attack_ids: ["T1566"],             // MITRE ATT&CK IDs from OTX pulses
+    criminalip_enriched: true,
+    criminalip_risk_score: "high",         // Domain risk score from Criminal IP
+    criminalip_risk_grade: "A",            // Domain risk grade from Criminal IP
+    criminalip_abuse_count: 3,             // Number of abuse reports for this domain
+    criminalip_current_service: "web"      // Current service classification from Criminal IP
 })
 ```
 
@@ -167,7 +195,10 @@ Discovered subdomains/hostnames under a domain.
     status_codes: [200, 301],               // All unique HTTP status codes seen (set after HTTP probe)
     http_live_url_count: 3,                 // Count of URLs with status < 500
     http_probed_at: datetime,               // When last HTTP-probed
-    discovered_at: datetime
+    discovered_at: datetime,
+    source: "crt.sh"                        // Discovery source: "crt.sh", "hackertarget", "knockpy",
+                                            // "subfinder", "amass", "shodan_rdns", "shodan_dns",
+                                            // "urlscan", "fofa", "otx_passive_dns", "censys_rdns"
 })
 ```
 
@@ -194,7 +225,91 @@ IP addresses discovered through DNS resolution.
     is_cdn: true,
     cdn_name: "aws",
     asn: "AS16509",                         // Autonomous System Number
-    asn_org: "Amazon.com, Inc."
+    asn_org: "Amazon.com, Inc.",
+
+    // Geolocation (set by Shodan, Censys)
+    country: "United States",
+    country_code: "US",
+    city: "Ashburn",
+    timezone: "America/New_York",
+    registered_country: "United States",
+    latitude: 39.0469,
+    longitude: -77.4903,
+
+    // ASN enrichment (set by Censys)
+    autonomous_system_name: "AMAZON-AES",
+    autonomous_system_number: 14618,
+    asn_bgp_prefix: "44.224.0.0/11",
+    asn_description: "Amazon.com, Inc.",
+    asn_country_code: "US",
+    asn_rir: "ARIN",
+
+    // OSINT enrichment flags and metadata
+    censys_enriched: true,
+    censys_last_seen: "2026-03-01T12:00:00Z",
+    fofa_enriched: true,
+    fofa_last_seen: "2026-03-20T08:00:00Z",  // last time FOFA indexed this asset (lastupdatetime)
+    country_code: "US",                    // 2-letter country code (set by FOFA country field)
+    os: "Linux",                           // OS fingerprint (set by FOFA os field)
+    region: "Virginia",                    // Region/province (set by FOFA region field)
+    netlas_enriched: true,
+    isp: "Amazon.com, Inc.",               // set by Netlas (isp field) or FOFA (isp field)
+    country: "US",                         // set by Netlas (geo.country) or FOFA (country_name) — may also be set by Shodan/Censys
+    city: "Ashburn",                       // set by Netlas (geo.city) or FOFA (city)
+    latitude: 39.04,                       // set by Netlas (geo.latitude)
+    longitude: -77.49,                     // set by Netlas (geo.longitude)
+    timezone: "America/New_York",          // set by Netlas (geo.time_zone)
+    asn_org: "Amazon.com, Inc.",           // set by Netlas (whois.asn.name) or FOFA (as_organization)
+    asn: "AS16509",                        // set by Netlas (geo.asn.number) or FOFA (as_number, normalised to "AS<n>")
+    asn_bgp_prefix: "44.224.0.0/11",      // set by Netlas (geo.asn.route)
+    zoomeye_enriched: true,
+    zoomeye_last_seen: "2026-03-01T12:00:00Z",  // update_time from ZoomEye host record
+    // ZoomEye also sets (when available): os, country, city, latitude, longitude, asn, isp
+    otx_enriched: true,
+    otx_pulse_count: 3,
+    otx_reputation: 0,
+    otx_url_count: 8,                      // Number of URLs associated with this IP (from OTX url_list)
+    otx_adversaries: ["APT28"],            // Named threat actors from OTX pulses
+    otx_malware_families: ["PlugX"],       // Malware family names from OTX pulses
+    otx_tlp: "amber",                      // Most restrictive TLP across OTX pulses
+    otx_attack_ids: ["T1059", "T1566"],    // MITRE ATT&CK IDs from OTX pulses
+    country_name: "United States",         // Set by OTX geo (only when not already present)
+    vt_enriched: true,
+    vt_reputation: -5,
+    vt_malicious_count: 2,
+    vt_suspicious_count: 0,
+    vt_harmless_count: 55,
+    vt_undetected_count: 8,
+    vt_tags: ["scanner", "vpn"],            // VirusTotal threat tags
+    vt_community_malicious: 2,             // Community malicious votes
+    vt_community_harmless: 80,             // Community harmless votes
+    vt_last_analysis_date: 1704067200,     // Unix timestamp of last VirusTotal scan
+    vt_network: "44.224.0.0/11",           // CIDR network range from VirusTotal
+    vt_rir: "ARIN",                        // Regional Internet Registry (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC)
+    vt_continent: "NA",                    // Continent code from VirusTotal
+    vt_jarm: "27d40d40d00040d00042d43d000000aa99ce1b3cb6b454ab1b5c65c8df16f4",  // JARM TLS fingerprint
+    criminalip_enriched: true,
+    criminalip_score_inbound: "dangerous",     // Risk score for inbound traffic (integer 0-5 or label)
+    criminalip_score_outbound: "safe",         // Risk score for outbound traffic
+    criminalip_is_vpn: false,
+    criminalip_is_proxy: false,
+    criminalip_is_tor: false,
+    criminalip_is_hosting: false,              // Hosting/datacenter IP
+    criminalip_is_cloud: false,                // Cloud provider IP
+    criminalip_is_mobile: false,               // Mobile carrier IP
+    criminalip_is_darkweb: false,              // Associated with dark web activity
+    criminalip_is_scanner: false,              // Known scanning/crawling source
+    criminalip_is_snort: false,                // Listed in Snort/IDS rules
+    criminalip_org_name: "DMZHOST",           // Organization name (WHOIS)
+    criminalip_country: "nl",                  // Country code from WHOIS
+    criminalip_city: "Amsterdam",              // City from WHOIS
+    criminalip_latitude: 52.3716,              // Latitude from WHOIS
+    criminalip_longitude: 4.8883,              // Longitude from WHOIS
+    criminalip_asn_name: "Pptechnology Limited",  // AS name from WHOIS
+    criminalip_asn_no: 48090,                  // AS number from WHOIS
+    criminalip_ids_count: 2,                   // Count of IDS/Snort alerts for this IP
+    criminalip_scanning_count: 20,             // Count of inbound scanning events recorded
+    criminalip_categories: "[\"malware\", \"attack (Low)\"]"  // JSON list of IP category labels
 })
 ```
 
@@ -213,7 +328,9 @@ Open ports discovered on IPs/hosts.
 (:Port {
     number: 80,                             // Port number
     protocol: "tcp",                        // tcp or udp
-    state: "open"
+    state: "open",
+    source: "naabu"                         // Discovery source: "naabu", "masscan", "shodan",
+                                            // "censys", "fofa", "netlas", "zoomeye", "criminalip"
 })
 ```
 
@@ -233,10 +350,23 @@ Services running on ports.
 ```cypher
 (:Service {
     name: "http",                           // Service name
-    product: "nginx",                       // Product name (if detected)
-    version: "1.19.0",                      // Version (if detected)
-    banner: "nginx/1.19.0",                 // Raw banner
-    extra_info: "Ubuntu"
+    product: "nginx",                       // Product name (if detected) — set by ZoomEye (portinfo.product), Nmap, Netlas
+    version: "1.19.0",                      // Version (if detected) — set by ZoomEye (portinfo.version), Nmap, Netlas
+    banner: "nginx/1.19.0",                 // Raw banner (set by Censys, ZoomEye, Nmap, Netlas)
+    extra_info: "Ubuntu",
+    source: "censys",                       // Discovery source: "nmap", "censys", "fofa", "netlas", "zoomeye", "criminalip"
+
+    // Censys-specific enrichment
+    extended_service_name: "HTTPS",         // More specific service label (e.g. HTTPS vs HTTP)
+    labels: ["HTTPS", "TLS"],              // Service classification tags from Censys
+    http_title: "Example Domain",          // HTML title from HTTP response (Censys, Netlas, FOFA, ZoomEye portinfo.title)
+    http_status_code: 200,                 // HTTP status code from HTTP probe (Censys, Netlas)
+    software_products: ["nginx 1.23.4"],   // Detected software products and versions (Censys)
+
+    // FOFA-specific enrichment
+    app_protocol: "https",                 // Application-layer protocol (FOFA protocol field)
+    jarm: "27d40d40d00040d00042d43d000000", // JARM TLS fingerprint (FOFA jarm field)
+    tls_version: "TLSv1.3",               // TLS version (FOFA tls_version field)
 })
 ```
 
@@ -295,20 +425,25 @@ FOR (u:BaseURL) REQUIRE (u.url, u.user_id, u.project_id) IS UNIQUE;
 ---
 
 ### 7. Certificate
-TLS/SSL certificates discovered during HTTP probing or GVM scanning. Contains certificate metadata for security analysis.
+TLS/SSL certificates discovered during HTTP probing, GVM scanning, or Censys enrichment. Contains certificate metadata for security analysis.
 
 ```cypher
 (:Certificate {
     subject_cn: "*.beta80group.it",          // Common Name (UNIQUE per tenant)
     user_id: "samgiam",                       // Owner/user identifier
     project_id: "project_2",                  // Project identifier
-    issuer: "DigiCert Inc",                   // Certificate issuer
+    issuer: "DigiCert Inc",                   // Certificate issuer (CN + org)
     not_before: "2025-09-02T00:00:00Z",       // Valid from date
     not_after: "2026-10-03T23:59:59Z",        // Expiration date
     san: ["*.beta80group.it", "beta80group.it"],  // Subject Alternative Names
     cipher: "TLS_AES_128_GCM_SHA256",         // TLS cipher suite
     tls_version: "TLSv1.3",                   // TLS version (if detected)
-    source: "http_probe",                     // Discovery source ("http_probe" or "gvm")
+    subject_org: "Example Org",               // Certificate subject organization (set by FOFA certs_subject_org)
+    is_valid: true,                           // Certificate validity flag (set by FOFA certs_valid)
+    source: "http_probe",                     // Discovery source: "http_probe", "gvm", "censys", "fofa"
+
+    // Censys-specific properties (when source = "censys")
+    fingerprint: "sha256:A1B2C3...",          // Certificate fingerprint from Censys leaf_data
 
     // GVM-specific properties (when source = "gvm")
     serial: "01:AB:CD:...",                   // Certificate serial number
@@ -426,7 +561,7 @@ FOR (t:Technology) REQUIRE (t.name, t.version, t.user_id, t.project_id) IS UNIQU
 ---
 
 ### 10. Vulnerability
-Discovered vulnerabilities from active scanning. Three sources produce Vulnerability nodes, each with different property sets.
+Discovered vulnerabilities. Four sources produce Vulnerability nodes, each with different property sets.
 
 **Common properties (all sources):**
 ```cypher
@@ -434,7 +569,7 @@ Discovered vulnerabilities from active scanning. Three sources produce Vulnerabi
     id: String,                              // Unique identifier
     user_id: String,                         // Multi-tenant isolation
     project_id: String,                      // Multi-tenant isolation
-    source: "nuclei" | "gvm" | "security_check",  // Scanner source
+    source: "nuclei" | "gvm" | "security_check" | "netlas",  // Scanner source
     name: String,                            // Vulnerability name
     description: String,                     // Description
     severity: "critical" | "high" | "medium" | "low" | "info",  // Always lowercase
@@ -539,6 +674,19 @@ Discovered vulnerabilities from active scanning. Three sources produce Vulnerabi
     // Scanner metadata
     scanner: "OpenVAS",
     scan_timestamp: "2026-02-12T23:09:59.655089",
+})
+```
+
+**Netlas-specific properties (source = "netlas"):**
+```cypher
+(:Vulnerability {
+    // Example — passive NVD-based vulnerability detection (version fingerprinting)
+    id: "CVE-2021-44228",
+    source: "netlas",
+    name: "CVE-2021-44228",
+    severity: "critical",
+    cvss_score: 10.0,
+    has_exploit: true,               // Known public exploit exists (from Netlas NVD data)
 })
 ```
 
@@ -878,6 +1026,89 @@ CREATE CONSTRAINT secret_unique IF NOT EXISTS FOR (s:Secret) REQUIRE (s.id) IS U
 
 ---
 
+### ThreatPulse
+
+OTX threat intelligence pulses — named threat reports associating indicators (IPs, domains) with adversaries, malware families, and attack patterns. Each pulse represents a community-published threat report on AlienVault OTX. Up to 10 pulses per indicator are stored.
+
+**Created by:** `recon/otx_enrich.py` + `graph_db/mixins/osint_mixin.py::update_graph_from_otx()`
+
+```cypher
+(:ThreatPulse {
+    pulse_id: "5a5b3a4f7e09f83e10b4a123",     // OTX pulse ID (UNIQUE per tenant)
+    user_id: "...",
+    project_id: "...",
+    name: "Lazarus Group C2 Infrastructure",  // Pulse title
+    adversary: "Lazarus Group",               // Named threat actor (APT group, etc.)
+    malware_families: ["BLINDINGCAN", "HOPLIGHT"],  // Associated malware names
+    attack_ids: ["T1566", "T1059"],           // MITRE ATT&CK technique IDs
+    tags: ["apt", "north-korea", "banking"],  // Free-form community tags (up to 10)
+    tlp: "white",                             // Traffic Light Protocol: "white","green","amber","red"
+    author_name: "researcher@example.com",    // Pulse author
+    targeted_countries: ["US", "UK", "JP"],   // Countries targeted by this threat
+    modified: "2026-01-15T10:00:00Z",         // Last modified timestamp from OTX
+    created_at: datetime(),
+    updated_at: datetime()
+})
+```
+
+**Constraints:**
+```cypher
+CREATE CONSTRAINT threatpulse_unique IF NOT EXISTS
+FOR (tp:ThreatPulse) REQUIRE (tp.pulse_id, tp.user_id, tp.project_id) IS UNIQUE;
+
+CREATE INDEX idx_threatpulse_tenant IF NOT EXISTS
+FOR (tp:ThreatPulse) ON (tp.user_id, tp.project_id);
+```
+
+**Relationships:**
+```cypher
+(IP)-[:APPEARS_IN_PULSE]->(ThreatPulse)
+(Domain)-[:APPEARS_IN_PULSE]->(ThreatPulse)
+```
+
+**Visual:** Circle, red-orange (#dc4a22) — threat intelligence context.
+
+---
+
+### Malware
+
+Malware samples (file hashes) associated with IPs or domains as reported by OSINT tools (OTX, VirusTotal). This is a **cross-tool** node type: OTX malware and VirusTotal malware samples both produce `Malware` nodes, allowing correlation across sources.
+
+**Created by:** `graph_db/mixins/osint_mixin.py::update_graph_from_otx()` (source=otx), and future VirusTotal malware integration (source=virustotal)
+
+```cypher
+(:Malware {
+    hash: "d41d8cd98f00b204e9800998ecf8427e",  // File hash (MD5 or SHA256, UNIQUE per tenant)
+    user_id: "...",
+    project_id: "...",
+    hash_type: "md5",              // "md5", "sha256", "sha1", "unknown"
+    file_type: "pe32",             // File type/class (e.g., "pe32", "pdf", "elf")
+    file_name: "payload.exe",      // Original file name if available
+    source: "otx",                 // Discovery source: "otx", "virustotal"
+    first_seen: datetime(),
+    updated_at: datetime()
+})
+```
+
+**Constraints:**
+```cypher
+CREATE CONSTRAINT malware_unique IF NOT EXISTS
+FOR (m:Malware) REQUIRE (m.hash, m.user_id, m.project_id) IS UNIQUE;
+
+CREATE INDEX idx_malware_tenant IF NOT EXISTS
+FOR (m:Malware) ON (m.user_id, m.project_id);
+```
+
+**Relationships:**
+```cypher
+(IP)-[:ASSOCIATED_WITH_MALWARE]->(Malware)
+(Domain)-[:ASSOCIATED_WITH_MALWARE]->(Malware)
+```
+
+**Visual:** Circle, deep red (#991b1b) — confirmed malware indicator.
+
+---
+
 ---
 
 ## 🔗 Relationships
@@ -893,6 +1124,13 @@ CREATE CONSTRAINT secret_unique IF NOT EXISTS FOR (s:Secret) REQUIRE (s.id) IS U
 
 // Domain WHOIS contacts (if needed as separate nodes)
 (Domain)-[:REGISTERED_BY {registrar_url: "..."}]->(Registrar)
+
+// OTX: historical IP resolutions (domain/passive_dns endpoint)
+(Domain)-[:HISTORICALLY_RESOLVED_TO {first_seen: "...", last_seen: "...", record_type: "A"}]->(IP)
+
+// OTX threat intelligence
+(Domain)-[:APPEARS_IN_PULSE]->(ThreatPulse)
+(Domain)-[:ASSOCIATED_WITH_MALWARE]->(Malware)
 ```
 
 ---
@@ -924,6 +1162,10 @@ CREATE CONSTRAINT secret_unique IF NOT EXISTS FOR (s:Secret) REQUIRE (s.id) IS U
 // Subdomain links directly to BaseURL (fallback when Service -[:SERVES_URL]-> is absent,
 // e.g. port 80 redirected to HTTPS so httpx didn't probe it, but crawlers discovered URLs under it)
 (Subdomain)-[:HAS_BASE_URL]->(BaseURL)
+
+// OTX threat intelligence
+(IP)-[:APPEARS_IN_PULSE]->(ThreatPulse)
+(IP)-[:ASSOCIATED_WITH_MALWARE]->(Malware)
 ```
 
 ---

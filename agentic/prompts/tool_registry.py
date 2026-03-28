@@ -106,7 +106,8 @@ TOOL_REGISTRY = {
             '**kali_shell** (Kali Linux shell — bash -c)\n'
             '   - Full Kali toolset. Timeout: 120s.\n'
             '   - **CLI tools:** netcat, socat, rlwrap, msfvenom, searchsploit, sqlmap, '
-            'john, smbclient, sshpass, jq, git, wget, gcc/g++/make, perl, hping3, slowhttptest, interactsh-client, dalfox\n'
+            'john, smbclient, sshpass, jq, git, wget, gcc/g++/make, perl, hping3, slowhttptest, interactsh-client, '
+            'ffuf, httpx, jwt_tool, graphql-cop, graphqlmap, dalfox\n'
             '   - **Python libs** (for one-liners via `python3 -c`): '
             'requests, beautifulsoup4, pycryptodome, PyJWT, paramiko, impacket, pwntools\n'
             '   - For multi-line scripts use **execute_code** instead (avoids shell escaping)\n'
@@ -182,6 +183,79 @@ TOOL_REGISTRY = {
             '**msf_restart** (Full Metasploit reset)\n'
             '   - Kills ALL active sessions and clears module config. Takes 60-120s.\n'
             '   - Use only when you need a completely clean state'
+        ),
+    },
+    "censys": {
+        "purpose": "Censys internet search (hosts/services)",
+        "when_to_use": "Search for hosts by banner, cert, or get detailed host info",
+        "args_format": '"action": "search|host", "query": "...", "ip": "..."',
+        "description": (
+            '**censys** (Internet-wide host/service search)\n'
+            '   - **action="search"** — Search hosts by query (e.g. "services.port=443 AND location.country=US")\n'
+            '   - **action="host"** — Detailed IP info: services, TLS certs, OS, ASN\n'
+            '   - Paid API — requires Censys API ID + Secret'
+        ),
+    },
+    "fofa": {
+        "purpose": "FOFA cyberspace search (asset discovery)",
+        "when_to_use": "Search for assets by banner, certificate, domain, header, protocol",
+        "args_format": '"query": "FOFA query string"',
+        "description": (
+            '**fofa** (FOFA cyberspace search)\n'
+            '   - Query syntax: domain="example.com", ip="1.2.3.4", header="Apache", cert="example.com"\n'
+            '   - Returns IP, port, host, title, server, protocol, geo'
+        ),
+    },
+    "otx": {
+        "purpose": "AlienVault OTX threat intelligence",
+        "when_to_use": "Check IPs/domains against threat feeds, get pulse counts, adversary attribution, malware samples, and historical infrastructure",
+        "args_format": '"action": "ip_report|domain_report", "ip": "...", "domain": "..."',
+        "description": (
+            '**otx** (AlienVault Open Threat Exchange)\n'
+            '   - **action="ip_report"** — Threat pulses, adversary attribution, malware samples, reputation, geo for an IP\n'
+            '   - **action="domain_report"** — Threat pulses, adversary, malware samples, WHOIS, historical IPs for a domain\n'
+            '   - Works without API key (reduced rate); key provides private pulses and higher limits'
+        ),
+    },
+    "netlas": {
+        "purpose": "Netlas.io internet intelligence search",
+        "when_to_use": "Search for services by banner, certificate; get host details",
+        "args_format": '"action": "search|host", "query": "...", "ip": "..."',
+        "description": (
+            '**netlas** (Internet intelligence)\n'
+            '   - **action="search"** — Search responses index (e.g. "host:example.com", "port:443")\n'
+            '   - **action="host"** — Aggregated host info for an IP'
+        ),
+    },
+    "virustotal": {
+        "purpose": "VirusTotal reputation lookup",
+        "when_to_use": "Check IP/domain reputation against 70+ security vendors",
+        "args_format": '"action": "ip_report|domain_report", "ip": "...", "domain": "..."',
+        "description": (
+            '**virustotal** (Multi-engine reputation)\n'
+            '   - **action="ip_report"** — Detections, ASN, country for an IP\n'
+            '   - **action="domain_report"** — Detections, categories, popularity, registrar for a domain\n'
+            '   - Free tier: 4 lookups/min, 500/day — use sparingly'
+        ),
+    },
+    "zoomeye": {
+        "purpose": "ZoomEye cyberspace search",
+        "when_to_use": "Search for hosts/devices by port, app, banner, OS, country",
+        "args_format": '"query": "ZoomEye search query"',
+        "description": (
+            '**zoomeye** (Cyberspace search)\n'
+            '   - Query syntax: ip:"1.2.3.4", hostname:"example.com", port:8080, app:"Apache"\n'
+            '   - Returns ports, banners, OS, geo info'
+        ),
+    },
+    "criminalip": {
+        "purpose": "Criminal IP threat intelligence",
+        "when_to_use": "Get IP/domain risk scores, detect VPN/proxy/Tor, find vulnerabilities",
+        "args_format": '"action": "ip_report|domain_report", "ip": "...", "domain": "..."',
+        "description": (
+            '**criminalip** (AI threat intelligence)\n'
+            '   - **action="ip_report"** — Risk score, open ports, issues (VPN/proxy/Tor/hosting), vulnerabilities\n'
+            '   - **action="domain_report"** — Risk assessment, technologies, domain intel'
         ),
     },
 }

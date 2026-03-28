@@ -12,7 +12,7 @@ function maskSecret(value: string): string {
 }
 
 const TUNNEL_FIELDS = ['ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
-const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan'] as const
+const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan', 'censys', 'fofa', 'otx', 'netlas', 'virustotal', 'zoomeye', 'criminalip'] as const
 
 // GET /api/users/[id]/settings
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -49,6 +49,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         nvdApiKey: '',
         vulnersApiKey: '',
         urlscanApiKey: '',
+        censysApiId: '',
+        censysApiSecret: '',
+        fofaApiKey: '',
+        otxApiKey: '',
+        netlasApiKey: '',
+        virusTotalApiKey: '',
+        zoomEyeApiKey: '',
+        criminalIpApiKey: '',
         ngrokAuthtoken: '',
         chiselServerUrl: '',
         chiselAuth: '',
@@ -66,6 +74,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         nvdApiKey: maskSecret(settings.nvdApiKey),
         vulnersApiKey: maskSecret(settings.vulnersApiKey),
         urlscanApiKey: maskSecret(settings.urlscanApiKey),
+        censysApiId: maskSecret(settings.censysApiId),
+        censysApiSecret: maskSecret(settings.censysApiSecret),
+        fofaApiKey: maskSecret(settings.fofaApiKey),
+        otxApiKey: maskSecret(settings.otxApiKey),
+        netlasApiKey: maskSecret(settings.netlasApiKey),
+        virusTotalApiKey: maskSecret(settings.virusTotalApiKey),
+        zoomEyeApiKey: maskSecret(settings.zoomEyeApiKey),
+        criminalIpApiKey: maskSecret(settings.criminalIpApiKey),
         ngrokAuthtoken: maskSecret(settings.ngrokAuthtoken),
         chiselAuth: maskSecret(settings.chiselAuth),
       }
@@ -93,7 +109,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
 
     const data: Record<string, string> = {}
-    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
+    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiId', 'censysApiSecret', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
 
     for (const field of fields) {
       if (field in body) {
@@ -203,6 +219,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       nvdApiKey: maskSecret(settings.nvdApiKey),
       vulnersApiKey: maskSecret(settings.vulnersApiKey),
       urlscanApiKey: maskSecret(settings.urlscanApiKey),
+      censysApiId: maskSecret(settings.censysApiId),
+      censysApiSecret: maskSecret(settings.censysApiSecret),
+      fofaApiKey: maskSecret(settings.fofaApiKey),
+      otxApiKey: maskSecret(settings.otxApiKey),
+      netlasApiKey: maskSecret(settings.netlasApiKey),
+      virusTotalApiKey: maskSecret(settings.virusTotalApiKey),
+      zoomEyeApiKey: maskSecret(settings.zoomEyeApiKey),
+      criminalIpApiKey: maskSecret(settings.criminalIpApiKey),
       ngrokAuthtoken: maskSecret(settings.ngrokAuthtoken),
       chiselAuth: maskSecret(settings.chiselAuth),
       rotationConfigs,

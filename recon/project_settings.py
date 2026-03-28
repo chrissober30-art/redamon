@@ -373,6 +373,28 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'URLSCAN_ENABLED': True,
     'URLSCAN_MAX_RESULTS': 5000,
 
+    # OSINT & Threat Intelligence Enrichment
+    'CENSYS_ENABLED': False,
+    'CENSYS_API_ID': '',
+    'CENSYS_API_SECRET': '',
+    'FOFA_ENABLED': False,
+    'FOFA_MAX_RESULTS': 1000,
+    'FOFA_API_KEY': '',
+    'OTX_ENABLED': True,
+    'OTX_API_KEY': '',
+    'NETLAS_ENABLED': False,
+    'NETLAS_MAX_RESULTS': 1000,
+    'NETLAS_API_KEY': '',
+    'VIRUSTOTAL_ENABLED': False,
+    'VIRUSTOTAL_API_KEY': '',
+    'VIRUSTOTAL_RATE_LIMIT': 4,
+    'VIRUSTOTAL_MAX_TARGETS': 20,
+    'ZOOMEYE_ENABLED': False,
+    'ZOOMEYE_MAX_RESULTS': 1000,
+    'ZOOMEYE_API_KEY': '',
+    'CRIMINALIP_ENABLED': False,
+    'CRIMINALIP_API_KEY': '',
+
     # Subdomain Discovery Tool Toggles
     'CRTSH_ENABLED': True,
     'CRTSH_MAX_RESULTS': 5000,
@@ -762,6 +784,17 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['URLSCAN_ENABLED'] = project.get('urlscanEnabled', DEFAULT_SETTINGS['URLSCAN_ENABLED'])
     settings['URLSCAN_MAX_RESULTS'] = project.get('urlscanMaxResults', DEFAULT_SETTINGS['URLSCAN_MAX_RESULTS'])
 
+    # OSINT & Threat Intelligence Enrichment
+    settings['CENSYS_ENABLED'] = project.get('censysEnabled', DEFAULT_SETTINGS['CENSYS_ENABLED'])
+    settings['FOFA_ENABLED'] = project.get('fofaEnabled', DEFAULT_SETTINGS['FOFA_ENABLED'])
+    settings['FOFA_MAX_RESULTS'] = int(project.get('fofaMaxResults', DEFAULT_SETTINGS['FOFA_MAX_RESULTS']) or DEFAULT_SETTINGS['FOFA_MAX_RESULTS'])
+    settings['OTX_ENABLED'] = project.get('otxEnabled', DEFAULT_SETTINGS['OTX_ENABLED'])
+    settings['NETLAS_ENABLED'] = project.get('netlasEnabled', DEFAULT_SETTINGS['NETLAS_ENABLED'])
+    settings['VIRUSTOTAL_ENABLED'] = project.get('virusTotalEnabled', DEFAULT_SETTINGS['VIRUSTOTAL_ENABLED'])
+    settings['ZOOMEYE_ENABLED'] = project.get('zoomEyeEnabled', DEFAULT_SETTINGS['ZOOMEYE_ENABLED'])
+    settings['ZOOMEYE_MAX_RESULTS'] = project.get('zoomEyeMaxResults', DEFAULT_SETTINGS['ZOOMEYE_MAX_RESULTS'])
+    settings['CRIMINALIP_ENABLED'] = project.get('criminalIpEnabled', DEFAULT_SETTINGS['CRIMINALIP_ENABLED'])
+
     # Subdomain Discovery Tool Toggles
     settings['CRTSH_ENABLED'] = project.get('crtshEnabled', DEFAULT_SETTINGS['CRTSH_ENABLED'])
     settings['CRTSH_MAX_RESULTS'] = project.get('crtshMaxResults', DEFAULT_SETTINGS['CRTSH_MAX_RESULTS'])
@@ -831,6 +864,41 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
         settings['VULNERS_API_KEY'] = vulners_key
         settings['NVD_KEY_ROTATOR'] = _build_rotator(nvd_key, 'nvd')
         settings['VULNERS_KEY_ROTATOR'] = _build_rotator(vulners_key, 'vulners')
+
+    # OSINT & Threat Intelligence keys
+    if settings.get('CENSYS_ENABLED'):
+        settings['CENSYS_API_ID'] = user_global.get('censysApiId', '')
+        settings['CENSYS_API_SECRET'] = user_global.get('censysApiSecret', '')
+
+    if settings.get('FOFA_ENABLED'):
+        fofa_key = user_global.get('fofaApiKey', '')
+        settings['FOFA_API_KEY'] = fofa_key
+        settings['FOFA_KEY_ROTATOR'] = _build_rotator(fofa_key, 'fofa')
+
+    if settings.get('OTX_ENABLED'):
+        otx_key = user_global.get('otxApiKey', '')
+        settings['OTX_API_KEY'] = otx_key
+        settings['OTX_KEY_ROTATOR'] = _build_rotator(otx_key, 'otx')
+
+    if settings.get('NETLAS_ENABLED'):
+        netlas_key = user_global.get('netlasApiKey', '')
+        settings['NETLAS_API_KEY'] = netlas_key
+        settings['NETLAS_KEY_ROTATOR'] = _build_rotator(netlas_key, 'netlas')
+
+    if settings.get('VIRUSTOTAL_ENABLED'):
+        vt_key = user_global.get('virusTotalApiKey', '')
+        settings['VIRUSTOTAL_API_KEY'] = vt_key
+        settings['VIRUSTOTAL_KEY_ROTATOR'] = _build_rotator(vt_key, 'virustotal')
+
+    if settings.get('ZOOMEYE_ENABLED'):
+        ze_key = user_global.get('zoomEyeApiKey', '')
+        settings['ZOOMEYE_API_KEY'] = ze_key
+        settings['ZOOMEYE_KEY_ROTATOR'] = _build_rotator(ze_key, 'zoomeye')
+
+    if settings.get('CRIMINALIP_ENABLED'):
+        cip_key = user_global.get('criminalIpApiKey', '')
+        settings['CRIMINALIP_API_KEY'] = cip_key
+        settings['CRIMINALIP_KEY_ROTATOR'] = _build_rotator(cip_key, 'criminalip')
 
     # Rules of Engagement
     settings['ROE_ENABLED'] = project.get('roeEnabled', DEFAULT_SETTINGS['ROE_ENABLED'])

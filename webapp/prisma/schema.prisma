@@ -69,6 +69,16 @@ model UserSettings {
   vulnersApiKey   String   @default("") @map("vulners_api_key")
   urlscanApiKey   String   @default("") @map("urlscan_api_key")
 
+  // OSINT & Threat Intelligence API Keys
+  censysApiId      String  @default("") @map("censys_api_id")
+  censysApiSecret  String  @default("") @map("censys_api_secret")
+  fofaApiKey       String  @default("") @map("fofa_api_key")
+  otxApiKey        String  @default("") @map("otx_api_key")
+  netlasApiKey     String  @default("") @map("netlas_api_key")
+  virusTotalApiKey String  @default("") @map("virustotal_api_key")
+  zoomEyeApiKey    String  @default("") @map("zoomeye_api_key")
+  criminalIpApiKey String  @default("") @map("criminalip_api_key")
+
   // Tunneling & Infrastructure
   ngrokAuthtoken  String   @default("") @map("ngrok_authtoken")
   chiselServerUrl String   @default("") @map("chisel_server_url")
@@ -462,6 +472,17 @@ model Project {
   // URLScan.io Passive Enrichment
   urlscanEnabled                        Boolean  @default(true)  @map("urlscan_enabled")
   urlscanMaxResults                     Int      @default(5000)  @map("urlscan_max_results")
+
+  // OSINT & Threat Intelligence Pipeline Enrichment
+  censysEnabled                         Boolean  @default(false)  @map("censys_enabled_recon")
+  fofaEnabled                           Boolean  @default(false)  @map("fofa_enabled")
+  fofaMaxResults                        Int      @default(1000)   @map("fofa_max_results")
+  otxEnabled                            Boolean  @default(true)   @map("otx_enabled")
+  netlasEnabled                         Boolean  @default(false)  @map("netlas_enabled")
+  virusTotalEnabled                     Boolean  @default(false)  @map("virustotal_enabled")
+  zoomEyeEnabled                        Boolean  @default(false)  @map("zoomeye_enabled")
+  zoomEyeMaxResults                     Int      @default(1000)   @map("zoomeye_max_results")
+  criminalIpEnabled                     Boolean  @default(false)  @map("criminalip_enabled")
 
   // Subdomain Discovery Tool Toggles
   crtshEnabled                          Boolean  @default(true)  @map("crtsh_enabled")

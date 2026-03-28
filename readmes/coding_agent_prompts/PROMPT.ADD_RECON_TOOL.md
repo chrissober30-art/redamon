@@ -49,7 +49,7 @@ Integrate **[TOOL_NAME]** into the RedAmon recon pipeline.
 
 6. **API key handling** — Determine if the tool uses API keys (for external data sources, premium features, higher rate limits, etc.). If yes: check if the tool works **without** API keys (degraded/limited mode) and **with** them (full coverage). Follow the existing pattern: API keys are stored in the `UserSettings` model in Prisma (global, per-user, NOT per-project). At runtime, fetch via `_fetch_user_api_key()` in `recon/project_settings.py` using `?internal=true` for unmasked values. In the frontend section component, check key status via `/api/users/{userId}/settings` and show an info banner (like `ShodanSection.tsx` and `UrlscanSection.tsx` do): if key is set, use it; if empty, tool runs without it (reduced results but still functional). Study `webapp/src/app/api/users/[id]/settings/route.ts` for the GET/PUT pattern and the key masking logic.
 
-7. **Graph DB integration** — Read `readmes/GRAPH.SCHEMA.md` for the full node/relationship schema. Study `graph_db/neo4j_client.py` — find the `update_graph_from_*()` method closest to the new tool's output type. Understand MERGE keys (always `(name/address, user_id, project_id)`), `ON CREATE SET` vs unconditional `SET`, and deduplication with existing nodes from other tools.
+7. **Graph DB integration** — Read `readmes/GRAPH.SCHEMA.md` for the full node/relationship schema. `graph_db/neo4j_client.py` is now a **thin orchestrator** (30 lines) — the actual graph methods live in the mixin files under `graph_db/mixins/`. For a new OSINT enrichment tool, the method goes in `graph_db/mixins/osint_mixin.py`. For a new core recon phase, it goes in `graph_db/mixins/recon_mixin.py`. Find the `update_graph_from_*()` method in the relevant mixin that is closest to the new tool's output type. Understand MERGE keys (always `(name/address, user_id, project_id)`), `ON CREATE SET` vs unconditional `SET`, and deduplication with existing nodes from other tools.
 
 8. **RoE (Rules of Engagement) scope** — Study how the RoE settings affect tool execution. Check `recon/main.py` and the RoE tab in `ProjectForm.tsx` to understand how scope restrictions (allowed domains, IPs, excluded targets) are enforced. Determine if the new tool's output could include out-of-scope results (e.g., subdomains of unrelated domains, IPs outside allowed ranges) and ensure results are filtered against the RoE before being stored. Study how existing tools handle scope filtering — e.g., `domain_recon.py` splits results into in-scope `subdomains` vs out-of-scope `external_domains`.
 
@@ -63,7 +63,11 @@ Integrate **[TOOL_NAME]** into the RedAmon recon pipeline.
 
 ### Phase 2: Implementation checklist
 
-- [ ] Tool runner function in the appropriate `recon/*.py` file
+- [ ] Tool runner function in the appropriate `recon/*.py` file following the **enrichment module contract**:
+  - Main function `run_X_enrichment(combined_result: dict, settings: dict) -> dict` — mutates `combined_result` in place by writing to `combined_result["toolname"]` and returns it
+  - The top-level key **must match** the tool identifier used everywhere else in the pipeline (e.g. `combined_result["virustotal"]`, `combined_result["censys"]`) — never abbreviate or vary the name
+  - Isolated wrapper `run_X_enrichment_isolated(combined_result: dict, settings: dict) -> dict` — shallow-copies `combined_result`, calls the main runner on the copy, returns only the tool's payload dict (e.g. `snapshot.get("toolname", {})`). This is the **actual call path** used by GROUP 3b fan-out in `recon/main.py` and by all unit tests — it must be present
+  - If the tool uses API keys: follow the `_effective_key(api_key, key_rotator)` pattern. Copy this helper verbatim from an existing module (e.g. `censys_enrich.py`). Add a `TOOL_KEY_ROTATOR` settings key alongside `TOOL_API_KEY` so key rotation is supported from day one
 - [ ] Settings keys in `recon/project_settings.py` (`DEFAULT_SETTINGS` + `fetch_project_settings()` mapping)
 - [ ] Prisma schema fields in `webapp/prisma/schema.prisma`
 - [ ] Run `docker compose exec webapp npx prisma db push` (never use `prisma migrate`)
@@ -75,11 +79,12 @@ Integrate **[TOOL_NAME]** into the RedAmon recon pipeline.
 - [ ] Section exported from `sections/index.ts`
 - [ ] `SECTION_INPUT_MAP` and `SECTION_NODE_MAP` updated in `nodeMapping.ts` (if new section)
 - [ ] `/defaults` endpoint updated in `recon_orchestrator/api.py`
-- [ ] Graph DB: update or extend the appropriate `update_graph_from_*()` method in `graph_db/neo4j_client.py`
+- [ ] Graph DB: add or extend the appropriate `update_graph_from_*()` method in the correct mixin — `graph_db/mixins/osint_mixin.py` for OSINT enrichment tools, `graph_db/mixins/recon_mixin.py` for core recon phases. Do NOT edit `graph_db/neo4j_client.py` directly — it is a thin orchestrator that only imports the mixins.
+- [ ] **Graph completeness**: Cross-check every field stored in the enrichment output dict (`combined_result["toolname"]`) against the `update_graph_from_*()` method — every collected field must be written to a node property or relationship. Silently dropping a field (collecting it in the enrichment module but never reading it in the graph method) is a data loss bug. If a field doesn't fit any existing node, either map it to the closest existing property or document explicitly why it is intentionally omitted.
 - [ ] **Graph node reuse**: Before creating new node labels, check if the tool's output can be mapped to **existing** node types in `readmes/GRAPH.SCHEMA.md`. For example, discovered hostnames should go into `Subdomain`, not a new label. Only introduce new node labels if the data genuinely doesn't fit any existing type.
-- [ ] If the tool introduces **new node labels, relationship types, or node properties** to the graph, update **ALL** of these:
+- [ ] **Schema sync (mandatory for every tool)**: If the tool writes **any** data to Neo4j — new node labels, new relationships, or new properties on existing nodes — update **ALL** of these. This applies even when adding properties to existing node types (e.g., new enrichment flags on `IP`, new fields on `Service`):
   1. `readmes/GRAPH.SCHEMA.md` — the canonical schema reference
-  2. `agentic/prompts/base.py` — the `TEXT_TO_CYPHER_SYSTEM` prompt (LLM-facing schema for natural-language-to-Cypher). Missing this will cause the agent to generate incorrect queries or fail to expose new data.
+  2. `agentic/prompts/base.py` — the `TEXT_TO_CYPHER_SYSTEM` prompt (LLM-facing schema for natural-language-to-Cypher). Missing this will cause the AI agent to generate incorrect Cypher or fail to expose the new data in queries.
   3. `webapp/src/app/graph/config/colors.ts` — add entry to `NODE_COLORS` dict with an appropriate color for the new node type (read existing color families as reference)
   4. `webapp/src/app/graph/config/colors.ts` — add entry to `NODE_SIZES` if the new node type needs a non-default size
   5. `webapp/src/app/graph/components/DataTable/DataTableToolbar.tsx` — add the new node type to the type filter dropdown so users can filter by it

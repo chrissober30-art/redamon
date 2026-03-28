@@ -170,9 +170,19 @@ async def get_defaults():
         RUNTIME_ONLY_KEYS = {
             'PROJECT_ID',
             'USER_ID',
-            'TARGET_DOMAIN',  # Provided by user, not a default
-            'SHODAN_API_KEY',  # Fetched at runtime from user's global settings
-            'URLSCAN_API_KEY',  # Fetched at runtime from user's global settings
+            'TARGET_DOMAIN',   # Provided by user, not a default
+            # API keys fetched at runtime from user's global settings (not stored per-project)
+            'SHODAN_API_KEY',
+            'URLSCAN_API_KEY',
+            'CENSYS_API_ID',
+            'CENSYS_API_SECRET',
+            'OTX_API_KEY',
+            'NETLAS_API_KEY',
+            'VIRUSTOTAL_API_KEY',
+            'ZOOMEYE_API_KEY',
+            'CRIMINALIP_API_KEY',
+            'FOFA_EMAIL',
+            'FOFA_API_KEY',
         }
 
         # Convert snake_case keys to camelCase for frontend

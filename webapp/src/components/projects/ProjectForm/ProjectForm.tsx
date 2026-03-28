@@ -37,6 +37,7 @@ import { ToolMatrixSection } from './sections/ToolMatrixSection'
 import { GvmScanSection } from './sections/GvmScanSection'
 import { CypherFixSettingsSection } from './sections/CypherFixSettingsSection'
 import { RoeSection } from './sections/RoeSection'
+import { OsintEnrichmentSection } from './sections/OsintEnrichmentSection'
 
 type ProjectFormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -424,6 +425,7 @@ export function ProjectForm({
             <SubdomainDiscoverySection data={formData} updateField={updateField} />
             <ShodanSection data={formData} updateField={updateField} />
             <UrlscanSection data={formData} updateField={updateField} />
+            <OsintEnrichmentSection data={formData} updateField={updateField} />
           </>
         )}
 

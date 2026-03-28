@@ -93,6 +93,13 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'web_search': ['informational', 'exploitation', 'post_exploitation'],
         'shodan': ['informational', 'exploitation'],
         'google_dork': ['informational'],
+        'censys': ['informational', 'exploitation'],
+        'fofa': ['informational', 'exploitation'],
+        'otx': ['informational', 'exploitation'],
+        'netlas': ['informational', 'exploitation'],
+        'virustotal': ['informational', 'exploitation'],
+        'zoomeye': ['informational', 'exploitation'],
+        'criminalip': ['informational', 'exploitation'],
     },
 
     # Kali Shell Library Installation
@@ -112,6 +119,15 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
 
     # Shodan OSINT
     'SHODAN_ENABLED': True,
+
+    # OSINT & Threat Intelligence
+    'CENSYS_ENABLED': True,
+    'FOFA_ENABLED': True,
+    'OTX_ENABLED': True,
+    'NETLAS_ENABLED': True,
+    'VIRUSTOTAL_ENABLED': True,
+    'ZOOMEYE_ENABLED': True,
+    'CRIMINALIP_ENABLED': True,
 
     # Social Engineering Simulation
     'PHISHING_SMTP_CONFIG': '',  # Free-text SMTP config for phishing email delivery (optional)

@@ -1,11 +1,18 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ShieldAlert, ExternalLink } from 'lucide-react'
+import Image from 'next/image'
+import {
+  ShieldAlert, ExternalLink, Star, Github,
+  Rocket, UserPlus, FolderPlus,
+  Bot, Play, BookOpen,
+} from 'lucide-react'
 import {
   DISCLAIMER_VERSION,
   DISCLAIMER_STORAGE_KEY,
   DISCLAIMER_GITHUB_URL,
+  REDAMON_GITHUB_URL,
+  WIKI_URL,
 } from '@/lib/disclaimerVersion'
 import styles from './DisclaimerGate.module.css'
 
@@ -54,6 +61,7 @@ const CHECKBOXES = [
 export function DisclaimerGate({ children }: DisclaimerGateProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isAccepted, setIsAccepted] = useState(false)
+  const [step, setStep] = useState<'welcome' | 'disclaimer' | 'guide'>('welcome')
   const [checked, setChecked] = useState<boolean[]>(
     () => new Array(CHECKBOXES.length).fill(false)
   )
@@ -102,6 +110,164 @@ export function DisclaimerGate({ children }: DisclaimerGateProps) {
 
   if (isAccepted) {
     return <>{children}</>
+  }
+
+  if (step === 'welcome') {
+    return (
+      <div className={styles.overlay}>
+        <div className={styles.card}>
+          <Image src="/logo.png" alt="" aria-hidden width={520} height={520} className={styles.eyeBg} />
+          <div className={styles.welcomeHeader}>
+            <Image src="/logo.png" alt="RedAmon" width={36} height={36} style={{ objectFit: 'contain' }} />
+            <h1 className={styles.welcomeTitle}>
+              Welcome to <span className={styles.logoAccent}>Red</span>Amon
+            </h1>
+          </div>
+
+          <div className={styles.body}>
+            <p className={styles.welcomeThank}>
+              Thank you for downloading and installing <strong>RedAmon</strong>!
+            </p>
+
+            <p className={styles.welcomeDesc}>
+              <strong>RedAmon</strong> is an open-source, AI-powered
+              penetration testing platform that combines autonomous
+              reconnaissance, graph-based attack surface mapping, and an
+              intelligent agent to help security professionals work faster and
+              smarter, from initial footprinting to full engagement reporting.
+            </p>
+
+            <div className={styles.missionBox}>
+              <p className={styles.missionText}>
+                Our commitment is to keep RedAmon always up-to-date and make it
+                the <strong>#1 open-source pentesting platform</strong> in the
+                world. To get there, we need the community&apos;s help.
+              </p>
+              <p className={styles.missionText}>
+                We&apos;re not asking for money, just a ⭐ GitHub star to help us grow, gain visibility, and attract contributors. If you&apos;d like to go further, feel free to open a pull request or reach out to our maintainers directly.<br />Every contribution matters.
+              </p>
+              <p className={styles.footerSignature}>
+                Happy hunting!<br />Samuele &amp; Ritesh
+              </p>
+            </div>
+
+            <a
+              href={REDAMON_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.starLink}
+            >
+              <Github size={20} />
+              <Star size={18} className={styles.starIcon} />
+              <span>Star RedAmon on GitHub</span>
+              <ExternalLink size={13} className={styles.starExternal} />
+            </a>
+          </div>
+
+          <div className={styles.footer}>
+            <p className={styles.footerQuote}>
+              &ldquo;Open source is humanity&apos;s greatest collaborative experiment.&rdquo;
+            </p>
+            <button
+              className={styles.acceptButton}
+              onClick={() => setStep('disclaimer')}
+            >
+              OK, continue
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (step === 'guide') {
+    return (
+      <div className={styles.overlay}>
+        <div className={styles.card}>
+          <div className={styles.header}>
+            <div className={styles.headerLeft}>
+              <Rocket size={20} className={styles.headerIcon} />
+              <h1 className={styles.title}>Getting Started — Your First Steps</h1>
+            </div>
+          </div>
+
+          <div className={styles.body}>
+            <div className={styles.guideGroups}>
+              {/* Setup group */}
+              <div className={styles.guideGroup}>
+                <p className={styles.guideGroupLabel}>Setup</p>
+                <div className={styles.guideSteps}>
+                  <div className={styles.guideStep}>
+                    <div className={styles.guideStepLeft}>
+                      <span className={styles.guideStepNum}>1</span>
+                      <UserPlus size={18} className={styles.guideStepIcon} />
+                    </div>
+                    <div>
+                      <p className={styles.guideStepTitle}>Create a User</p>
+                      <p className={styles.guideStepDesc}>Go to the Users panel and create your profile. Each user can manage multiple independent projects.</p>
+                    </div>
+                  </div>
+                  <div className={styles.guideStep}>
+                    <div className={styles.guideStepLeft}>
+                      <span className={styles.guideStepNum}>2</span>
+                      <FolderPlus size={18} className={styles.guideStepIcon} />
+                    </div>
+                    <div>
+                      <p className={styles.guideStepTitle}>Create a Project</p>
+                      <p className={styles.guideStepDesc}>Set up a project to group all recon data, settings, and agent sessions for a single engagement.</p>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Run group */}
+              <div className={styles.guideGroup}>
+                <p className={styles.guideGroupLabel}>Run</p>
+                <div className={styles.guideSteps}>
+                  <div className={styles.guideStep}>
+                    <div className={styles.guideStepLeft}>
+                      <span className={styles.guideStepNum}>3</span>
+                      <Play size={18} className={styles.guideStepIcon} />
+                    </div>
+                    <div>
+                      <p className={styles.guideStepTitle}>Launch the Recon Pipeline</p>
+                      <p className={styles.guideStepDesc}>From the <strong>Red Zone</strong> press <strong>Start Recon</strong>. Wait for the pipeline to fully complete before starting the AI agent.</p>
+                    </div>
+                  </div>
+                  <div className={styles.guideStep}>
+                    <div className={styles.guideStepLeft}>
+                      <span className={styles.guideStepNum}>4</span>
+                      <Bot size={18} className={styles.guideStepIcon} />
+                    </div>
+                    <div>
+                      <p className={styles.guideStepTitle}>Start the AI Agent</p>
+                      <p className={styles.guideStepDesc}>Once recon is done, switch to <strong>Agent AI</strong> to interrogate findings, plan attack paths, and generate reports.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.footer}>
+            <a
+              href={WIKI_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.fullDisclaimerLink}
+            >
+              <BookOpen size={14} />
+              Read the complete manual on the Wiki
+              <ExternalLink size={12} />
+            </a>
+            <button className={styles.acceptButton} onClick={handleAccept}>
+              Let&apos;s Go →
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -155,7 +321,7 @@ export function DisclaimerGate({ children }: DisclaimerGateProps) {
           <button
             className={styles.acceptButton}
             disabled={!allChecked}
-            onClick={handleAccept}
+            onClick={() => setStep('guide')}
           >
             I Accept All Terms
           </button>

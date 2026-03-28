@@ -1035,7 +1035,7 @@ redamon/
 │       └── lib/recon-types.ts        # GvmStatus, GvmState, GVM_PHASES types
 │
 └── graph_db/
-    └── neo4j_client.py               # update_graph_from_gvm_scan() method
+    └── mixins/gvm_mixin.py           # update_graph_from_gvm_scan() method
 ```
 
 ---

@@ -7,6 +7,8 @@ export const NODE_COLORS: Record<string, string> = {
   // THREAT INTELLIGENCE (Orange family) - Attack context
   MitreData: '#f97316',      // Orange - CWE/MITRE techniques
   Capec: '#eab308',          // Yellow - Attack patterns
+  ThreatPulse: '#dc4a22',    // Red-orange - OTX threat intel pulses (adversary/campaign)
+  Malware: '#991b1b',        // Deep red-800 - Malware file samples (confirmed indicators)
 
   // DOMAIN HIERARCHY (Blue family) - Recon foundation
   Domain: '#1e3a8a',         // Deep navy - Root/foundation (most important)

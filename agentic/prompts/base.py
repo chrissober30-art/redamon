@@ -900,6 +900,26 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 - name (string): "example.com"
 - registrar, creation_date, expiration_date (WHOIS data)
 - gvm_critical, gvm_high, gvm_medium, gvm_low (GVM vulnerability counts)
+- vt_enriched (boolean), vt_reputation (int), vt_malicious_count (int), vt_categories (string): VirusTotal domain reputation
+- vt_suspicious_count, vt_harmless_count, vt_undetected_count (int): VirusTotal engine detection breakdown
+- vt_registrar (string): Registrar from VirusTotal
+- vt_tags (list): VirusTotal threat/category tags (e.g. ["malware", "phishing"])
+- vt_community_malicious, vt_community_harmless (int): VirusTotal community votes (distinct from engine count)
+- vt_last_analysis_date (int): Unix timestamp of last VirusTotal scan
+- vt_jarm (string): JARM TLS fingerprint from VirusTotal
+- vt_popularity_alexa (int): Alexa popularity rank from VirusTotal
+- vt_popularity_umbrella (int): Cisco Umbrella rank from VirusTotal
+- otx_pulse_count (int): AlienVault OTX threat pulse count
+- otx_url_count (int): number of URLs associated with domain from OTX url_list
+- otx_adversaries (list[string]): named threat actors from OTX pulses (e.g. ["APT28", "Lazarus Group"])
+- otx_malware_families (list[string]): malware family names from OTX pulses
+- otx_tlp (string): most restrictive Traffic Light Protocol across OTX pulses ("white","green","amber","red")
+- otx_attack_ids (list[string]): MITRE ATT&CK IDs from OTX pulses (e.g. ["T1566", "T1059"])
+- criminalip_enriched (boolean): whether Criminal IP domain report was fetched
+- criminalip_risk_score (string): domain risk score from Criminal IP
+- criminalip_risk_grade (string): domain risk grade from Criminal IP
+- criminalip_abuse_count (int): number of abuse reports for this domain from Criminal IP
+- criminalip_current_service (string): current service classification from Criminal IP
 
 **Subdomain** - Discovered subdomains
 - name (string): "api.example.com", "www.example.com"
@@ -908,22 +928,74 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 - status_codes (list[int]): all unique HTTP status codes seen e.g. [200, 301, 404]
 - http_live_url_count (int): count of URLs with status < 500
 - http_probed_at (datetime): when last HTTP-probed
-- source (string): discovery source ("crt.sh", "hackertarget", "knockpy", "shodan_rdns", "shodan_dns", "urlscan")
+- source (string): discovery source ("crt.sh", "hackertarget", "knockpy", "shodan_rdns", "shodan_dns", "urlscan", "fofa", "otx_passive_dns", "censys_rdns")
 
 **IP** - Resolved IP addresses
 - address (string): "192.168.1.1"
 - is_ipv6 (boolean)
 - asn, isp, country (IP enrichment data)
+- shodan_enriched, censys_enriched, fofa_enriched, netlas_enriched, zoomeye_enriched (boolean): which OSINT tools enriched this IP
+- zoomeye_last_seen (string): ISO timestamp of the ZoomEye host record update_time (e.g. "2026-03-01T12:00:00")
+- otx_enriched (boolean): whether OTX enrichment ran for this IP
+- otx_pulse_count (int): AlienVault OTX threat pulse count
+- otx_reputation (int): OTX reputation score (negative = more malicious)
+- otx_url_count (int): number of URLs associated with this IP from OTX url_list
+- otx_adversaries (list[string]): named threat actors from OTX pulses (e.g. ["APT28"])
+- otx_malware_families (list[string]): malware family names from OTX pulses
+- otx_tlp (string): most restrictive TLP across OTX pulses ("white","green","amber","red")
+- otx_attack_ids (list[string]): MITRE ATT&CK IDs from OTX pulses (e.g. ["T1059"])
+- country_name (string): country name from OTX geo (only set if not already populated by other enrichers)
+- vt_enriched (boolean), vt_reputation (int), vt_malicious_count (int): VirusTotal multi-engine reputation
+- vt_suspicious_count, vt_harmless_count, vt_undetected_count (int): VirusTotal engine detection breakdown
+- vt_tags (list): VirusTotal threat tags (e.g. ["scanner", "vpn"])
+- vt_community_malicious, vt_community_harmless (int): VirusTotal community votes
+- vt_last_analysis_date (int): Unix timestamp of last VirusTotal scan
+- vt_network (string): CIDR network range from VirusTotal (e.g. "44.224.0.0/11")
+- vt_rir (string): Regional Internet Registry (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC)
+- vt_continent (string): Continent code from VirusTotal
+- vt_jarm (string): JARM TLS fingerprint from VirusTotal
+- criminalip_enriched (boolean), criminalip_score_inbound, criminalip_score_outbound: Criminal IP risk scores (integer 0-5 or label string)
+- criminalip_is_vpn, criminalip_is_proxy, criminalip_is_tor (boolean): Criminal IP anonymisation flags
+- criminalip_is_hosting, criminalip_is_cloud (boolean): hosting/cloud infrastructure flags from Criminal IP
+- criminalip_is_mobile, criminalip_is_darkweb, criminalip_is_scanner, criminalip_is_snort (boolean): Criminal IP threat classification flags
+- criminalip_org_name (string): organization name from Criminal IP WHOIS
+- criminalip_country (string): country code from Criminal IP WHOIS
+- criminalip_city (string): city from Criminal IP WHOIS
+- criminalip_latitude, criminalip_longitude (float): geolocation from Criminal IP WHOIS
+- criminalip_asn_name (string): AS name from Criminal IP WHOIS
+- criminalip_asn_no (int): AS number from Criminal IP WHOIS
+- criminalip_ids_count (int): count of IDS/Snort alert records for this IP
+- criminalip_scanning_count (int): count of inbound scanning events recorded by Criminal IP
+- criminalip_categories (string): JSON list of IP threat category labels (e.g. '["malware", "scanner"]')
+- autonomous_system_name, autonomous_system_number, asn_bgp_prefix, asn_description, asn_country_code, asn_rir: ASN details from Censys
+- country_code, city, timezone, registered_country, latitude, longitude: geolocation from Censys or Netlas
+- censys_last_seen (datetime): last scan time from Censys
+- asn_org (string): ASN organization name from Netlas (whois.asn.name) or FOFA (as_organization)
+- asn (string): ASN identifier e.g. "AS14618" from Netlas (geo.asn.number) or FOFA (as_number, normalised to "AS<n>")
+- fofa_last_seen (string): last time FOFA indexed this asset (ISO datetime string)
+- os (string): OS fingerprint from FOFA (os field)
+- region (string): region/province from FOFA (region field)
 
 **Port** - Open ports on IPs
 - number (integer): 80, 443, 22
 - protocol (string): "tcp", "udp"
 - state (string): "open", "closed", "filtered"
+- source (string): which tool discovered it ("naabu", "masscan", "shodan", "censys", "fofa", "netlas", "zoomeye", "criminalip")
 
 **Service** - Services running on ports
 - name (string): "http", "ssh", "mysql"
 - version (string): service version
 - banner (string): raw banner
+- source (string): which tool detected it
+- extended_service_name (string): more specific label from Censys (e.g. "HTTPS")
+- labels (list[string]): service classification tags from Censys
+- http_title (string): HTML page title from HTTP response (Censys, Netlas, or FOFA title field)
+- http_status_code (integer): HTTP status code (Censys or Netlas)
+- software_products (list[string]): detected software and versions from Censys e.g. ["nginx 1.23"]
+- banner (string): raw service banner (Censys, ZoomEye, Nmap, or Netlas protocol banner)
+- app_protocol (string): application-layer protocol from FOFA (e.g. "http", "https", "ssh", "ftp")
+- jarm (string): JARM TLS fingerprint from FOFA — useful for identifying C2 infrastructure
+- tls_version (string): TLS version from FOFA (e.g. "TLSv1.3")
 
 ### Web Application Nodes (Hierarchy: BaseURL -> Endpoint -> Parameter)
 
@@ -960,6 +1032,17 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 - issuer, subject (string)
 - not_before, not_after (datetime)
 - is_expired (boolean)
+- source (string): "gvm", "censys", or "fofa"
+- subject_cn (string): certificate common name (Censys or FOFA certs_subject_cn)
+- subject_org (string): certificate subject organization (FOFA certs_subject_org)
+- tls_version (string): TLS version (FOFA tls_version)
+- is_valid (boolean): certificate validity flag (FOFA certs_valid)
+- issuer_cn (string): issuer common name (Censys)
+- issuer_org (string): issuer organization (Censys)
+- san (list[string]): Subject Alternative Names (Censys)
+- fingerprint (string): certificate fingerprint (Censys)
+- tls_version (string): TLS protocol version e.g. "TLSv1.3" (Censys)
+- cipher (string): cipher suite (Censys)
 
 **DNSRecord** - DNS records
 - record_type (string): "A", "AAAA", "CNAME", "MX", "TXT", "NS"
@@ -984,18 +1067,23 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 
 **IMPORTANT: "Vulnerabilities" can mean BOTH Vulnerability nodes AND CVE nodes!**
 - When user asks about "vulnerabilities" broadly, query BOTH node types
-- Vulnerability nodes = findings from scanners (nuclei, gvm, security_check)
+- Vulnerability nodes = findings from scanners (nuclei, gvm, security_check, netlas)
 - CVE nodes = known CVEs linked to technologies detected on the target
 
-**Vulnerability** - Scanner findings (from nuclei, gvm, security checks)
+**Vulnerability** - Scanner findings (from nuclei, gvm, security checks, netlas)
 
 Common properties (all sources):
 - id (string): unique identifier
 - name (string): vulnerability name
 - severity (string): "critical", "high", "medium", "low", "info" (lowercase!)
-- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), or **"security_check"**
+- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, or **"netlas"** (passive NVD-based)
 - description (string): vulnerability description
 - cvss_score (float): 0.0 to 10.0
+
+Netlas-specific properties (source="netlas"):
+- id (string): CVE identifier e.g. "CVE-2021-44228"
+- has_exploit (boolean): whether a known public exploit exists (from NVD data)
+- Relationship: `(svc:Service)-[:HAS_VULNERABILITY]->(v:Vulnerability)` — linked to the Service where the vulnerable software was detected
 
 Nuclei-specific properties (source="nuclei"):
 - template_id (string): nuclei template ID
@@ -1147,9 +1235,29 @@ GVM-specific properties (source="gvm"):
 - timestamp (string): commit timestamp
 - extra_data (string): JSON string with additional detector-specific data
 
+**ThreatPulse** - OTX threat intelligence pulses (named threat reports linking IPs/domains to adversaries)
+- pulse_id (string): OTX pulse ID (UNIQUE per tenant)
+- name (string): pulse title (e.g. "Lazarus Group C2 Infrastructure")
+- adversary (string): named threat actor (e.g. "APT28", "Lazarus Group", "Sandworm")
+- malware_families (list[string]): associated malware names (e.g. ["WannaCry", "BLINDINGCAN"])
+- attack_ids (list[string]): MITRE ATT&CK technique IDs (e.g. ["T1566", "T1059"])
+- tags (list[string]): free-form community tags (e.g. ["apt", "ransomware", "banking"])
+- tlp (string): Traffic Light Protocol ("white","green","amber","red")
+- author_name (string): pulse author
+- targeted_countries (list[string]): countries targeted by this threat
+- modified (string): last modified timestamp from OTX
+
+**Malware** - Malware file samples (hashes) associated with IPs or domains (from OTX malware endpoint)
+- hash (string): file hash — MD5 (32 chars) or SHA256 (64 chars); UNIQUE per tenant
+- hash_type (string): "md5", "sha256", "sha1", "unknown"
+- file_type (string): file class/type (e.g. "pe32", "pdf", "elf", "jar")
+- file_name (string): original file name if available
+- source (string): discovery tool ("otx", "virustotal")
+- first_seen (datetime): when first associated with this indicator
+
 **ExternalDomain** - Foreign domains encountered during recon (out-of-scope, informational only)
 - domain (string): foreign domain name
-- sources (string[]): discovery sources (http_probe_redirect, urlscan, gau, katana, hakrawler, jsluice, cert_discovery)
+- sources (string[]): discovery sources (http_probe_redirect, urlscan, gau, katana, hakrawler, jsluice, cert_discovery, otx_passive_dns)
 - redirect_from_urls (string[]): in-scope URLs that redirected to this domain
 - redirect_to_urls (string[]): foreign URLs encountered
 - status_codes_seen (string[]), titles_seen (string[]), servers_seen (string[])
@@ -1162,11 +1270,18 @@ GVM-specific properties (source="gvm"):
 ### Infrastructure Relationships
 - `(d:Domain)-[:HAS_EXTERNAL_DOMAIN]->(ed:ExternalDomain)` - Domain encountered foreign domain during recon
 - `(s:Subdomain)-[:BELONGS_TO]->(d:Domain)` - Subdomain belongs to Domain
-- `(s:Subdomain)-[:RESOLVES_TO]->(i:IP)` - Subdomain resolves to IP (DNS)
+- `(s:Subdomain)-[:RESOLVES_TO {record_type, first_seen, last_seen}]->(i:IP)` - Subdomain resolves to IP (DNS); OTX passive_dns adds first_seen/last_seen to this relationship
 - `(i:IP)-[:HAS_PORT]->(p:Port)` - IP has open Port
 - `(p:Port)-[:RUNS_SERVICE]->(svc:Service)` - Port runs Service
 - `(i:IP)-[:HAS_TRACEROUTE]->(tr:Traceroute)` - IP has network route data
-- `(i:IP)-[:HAS_CERTIFICATE]->(c:Certificate)` - IP has TLS certificate (GVM-discovered)
+- `(i:IP)-[:HAS_CERTIFICATE]->(c:Certificate)` - IP has TLS certificate (GVM, Censys, or FOFA)
+
+### OTX Threat Intelligence Relationships
+- `(d:Domain)-[:HISTORICALLY_RESOLVED_TO {first_seen, last_seen, record_type}]->(i:IP)` - Domain has historically resolved to this IP (from OTX domain/passive_dns)
+- `(i:IP)-[:APPEARS_IN_PULSE]->(tp:ThreatPulse)` - IP appears in OTX threat pulse
+- `(d:Domain)-[:APPEARS_IN_PULSE]->(tp:ThreatPulse)` - Domain appears in OTX threat pulse
+- `(i:IP)-[:ASSOCIATED_WITH_MALWARE]->(m:Malware)` - IP is associated with malware sample
+- `(d:Domain)-[:ASSOCIATED_WITH_MALWARE]->(m:Malware)` - Domain is associated with malware sample
 
 ### Web Application Relationships
 - `(svc:Service)-[:SERVES_URL]->(b:BaseURL)` - Service serves BaseURL (from httpx probe)
@@ -1500,6 +1615,7 @@ RETURN s.name, collect(t.name) as technologies
    - source="nuclei" -> web/DAST vulnerabilities (FOUND_AT, AFFECTS_PARAMETER)
    - source="gvm" -> network vulnerabilities (HAS_VULNERABILITY from IP/Subdomain)
    - source="security_check" -> DNS/email security checks (SPF, DMARC)
+   - source="netlas" -> passive CVE detection via NVD (HAS_VULNERABILITY from Service)
 7. **Case sensitivity**:
    - Vulnerability.severity is lowercase: "critical", "high", "medium", "low"
    - CVE.severity is uppercase: "CRITICAL", "HIGH", "MEDIUM", "LOW"

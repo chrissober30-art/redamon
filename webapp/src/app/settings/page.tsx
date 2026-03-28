@@ -17,6 +17,14 @@ interface UserSettings {
   nvdApiKey: string
   vulnersApiKey: string
   urlscanApiKey: string
+  censysApiId: string
+  censysApiSecret: string
+  fofaApiKey: string
+  otxApiKey: string
+  netlasApiKey: string
+  virusTotalApiKey: string
+  zoomEyeApiKey: string
+  criminalIpApiKey: string
   ngrokAuthtoken: string
   chiselServerUrl: string
   chiselAuth: string
@@ -30,6 +38,14 @@ const EMPTY_SETTINGS: UserSettings = {
   nvdApiKey: '',
   vulnersApiKey: '',
   urlscanApiKey: '',
+  censysApiId: '',
+  censysApiSecret: '',
+  fofaApiKey: '',
+  otxApiKey: '',
+  netlasApiKey: '',
+  virusTotalApiKey: '',
+  zoomEyeApiKey: '',
+  criminalIpApiKey: '',
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
@@ -48,6 +64,12 @@ const TOOL_NAME_MAP: Record<string, string> = {
   nvdApiKey: 'nvd',
   vulnersApiKey: 'vulners',
   urlscanApiKey: 'urlscan',
+  fofaApiKey: 'fofa',
+  otxApiKey: 'otx',
+  netlasApiKey: 'netlas',
+  virusTotalApiKey: 'virustotal',
+  zoomEyeApiKey: 'zoomeye',
+  criminalIpApiKey: 'criminalip',
 }
 
 function getProviderIcon(providerType: string): string {
@@ -249,6 +271,14 @@ export default function SettingsPage() {
           nvdApiKey: data.nvdApiKey || '',
           vulnersApiKey: data.vulnersApiKey || '',
           urlscanApiKey: data.urlscanApiKey || '',
+          censysApiId: data.censysApiId || '',
+          censysApiSecret: data.censysApiSecret || '',
+          fofaApiKey: data.fofaApiKey || '',
+          otxApiKey: data.otxApiKey || '',
+          netlasApiKey: data.netlasApiKey || '',
+          virusTotalApiKey: data.virusTotalApiKey || '',
+          zoomEyeApiKey: data.zoomEyeApiKey || '',
+          criminalIpApiKey: data.criminalIpApiKey || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -320,6 +350,14 @@ export default function SettingsPage() {
           nvdApiKey: data.nvdApiKey || '',
           vulnersApiKey: data.vulnersApiKey || '',
           urlscanApiKey: data.urlscanApiKey || '',
+          censysApiId: data.censysApiId || '',
+          censysApiSecret: data.censysApiSecret || '',
+          fofaApiKey: data.fofaApiKey || '',
+          otxApiKey: data.otxApiKey || '',
+          netlasApiKey: data.netlasApiKey || '',
+          virusTotalApiKey: data.virusTotalApiKey || '',
+          zoomEyeApiKey: data.zoomEyeApiKey || '',
+          criminalIpApiKey: data.criminalIpApiKey || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -485,7 +523,61 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Section 2: API Keys (User-Scoped) */}
+      {/* Section 2: Agent Skills */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}><Swords size={16} /> Agent Skills</h2>
+          <label className="primaryButton" style={{ cursor: 'pointer' }}>
+            <Upload size={14} /> Upload Skill
+            <input
+              type="file"
+              accept=".md"
+              style={{ display: 'none' }}
+              onChange={handleSkillUpload}
+            />
+          </label>
+        </div>
+        <p className={styles.sectionHint}>
+          Upload .md files defining custom attack skill workflows. Skills become available as toggles in all project settings.
+          {' '}Browse <a href="https://github.com/samugit83/redamon/wiki/Attack-Skills#community-skills" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }}>community skills</a> for ready-to-use templates.
+        </p>
+
+        {skillsLoading ? (
+          <div className={styles.emptyState}><Loader2 size={16} className={styles.spin} /> Loading...</div>
+        ) : attackSkills.length === 0 ? (
+          <div className={styles.emptyState}>No custom skills uploaded yet. Upload a .md file to get started.</div>
+        ) : (
+          <div className={styles.providerList}>
+            {attackSkills.map(skill => (
+              <div key={skill.id} className={styles.providerCard}>
+                <span className={styles.providerIcon}><Swords size={16} /></span>
+                <div className={styles.providerInfo}>
+                  <div className={styles.providerName}>{skill.name}</div>
+                  <div className={styles.providerMeta}>
+                    {skill.description || <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No description</span>}
+                  </div>
+                  <div className={styles.providerMeta}>
+                    Uploaded {new Date(skill.createdAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <div className={styles.providerActions}>
+                  <button className="iconButton" title="Edit description" onClick={() => openEditDescription(skill.id)}>
+                    <Pencil size={14} />
+                  </button>
+                  <button className="iconButton" title="Download" onClick={() => downloadSkill(skill.id, skill.name)}>
+                    <Download size={14} />
+                  </button>
+                  <button className="iconButton" title="Delete" onClick={() => deleteSkill(skill.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Section 3: API Keys (User-Scoped) */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>API Keys</h2>
@@ -576,6 +668,98 @@ export default function SettingsPage() {
               onConfigureRotation={() => openRotationModal('urlscanApiKey')}
               rotationInfo={rotationConfigs.urlscan || null}
             />
+
+            <SecretField
+              label="Censys API ID"
+              hint="Censys search engine — host/service discovery via banner and certificate data. Requires API ID + Secret pair"
+              signupUrl="https://accounts.censys.io/settings/personal-access-tokens"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.censysApiId}
+              visible={!!visibleFields.censysApiId}
+              onToggle={() => toggleFieldVisibility('censysApiId')}
+              onChange={v => updateSetting('censysApiId', v)}
+            />
+            <SecretField
+              label="Censys API Secret"
+              hint="Second half of Censys credentials — paired with API ID above"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.censysApiSecret}
+              visible={!!visibleFields.censysApiSecret}
+              onToggle={() => toggleFieldVisibility('censysApiSecret')}
+              onChange={v => updateSetting('censysApiSecret', v)}
+            />
+            <SecretField
+              label="FOFA API Key"
+              hint="FOFA cyberspace search — asset discovery by banner, certificate, domain. Key format: email:key"
+              signupUrl="https://en.fofa.info/"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.fofaApiKey}
+              visible={!!visibleFields.fofaApiKey}
+              onToggle={() => toggleFieldVisibility('fofaApiKey')}
+              onChange={v => updateSetting('fofaApiKey', v)}
+              onConfigureRotation={() => openRotationModal('fofaApiKey')}
+              rotationInfo={rotationConfigs.fofa || null}
+            />
+            <SecretField
+              label="AlienVault OTX Key"
+              hint="Open Threat Exchange — threat intelligence pulses, malware indicators, passive DNS, reputation scoring"
+              signupUrl="https://otx.alienvault.com/settings"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.otxApiKey}
+              visible={!!visibleFields.otxApiKey}
+              onToggle={() => toggleFieldVisibility('otxApiKey')}
+              onChange={v => updateSetting('otxApiKey', v)}
+              onConfigureRotation={() => openRotationModal('otxApiKey')}
+              rotationInfo={rotationConfigs.otx || null}
+            />
+            <SecretField
+              label="Netlas API Key"
+              hint="Netlas.io — internet-wide scan data with banners, certificates, and WHOIS info"
+              signupUrl="https://app.netlas.io/profile/"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.netlasApiKey}
+              visible={!!visibleFields.netlasApiKey}
+              onToggle={() => toggleFieldVisibility('netlasApiKey')}
+              onChange={v => updateSetting('netlasApiKey', v)}
+              onConfigureRotation={() => openRotationModal('netlasApiKey')}
+              rotationInfo={rotationConfigs.netlas || null}
+            />
+            <SecretField
+              label="VirusTotal API Key"
+              hint="Multi-engine reputation for IPs and domains. Free tier: 4 lookups/min, 500/day"
+              signupUrl="https://www.virustotal.com/gui/my-apikey"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.virusTotalApiKey}
+              visible={!!visibleFields.virusTotalApiKey}
+              onToggle={() => toggleFieldVisibility('virusTotalApiKey')}
+              onChange={v => updateSetting('virusTotalApiKey', v)}
+              onConfigureRotation={() => openRotationModal('virusTotalApiKey')}
+              rotationInfo={rotationConfigs.virustotal || null}
+            />
+            <SecretField
+              label="ZoomEye API Key"
+              hint="ZoomEye cyberspace search — host/device discovery with port, banner, and geo data"
+              signupUrl="https://www.zoomeye.ai/profile"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.zoomEyeApiKey}
+              visible={!!visibleFields.zoomEyeApiKey}
+              onToggle={() => toggleFieldVisibility('zoomEyeApiKey')}
+              onChange={v => updateSetting('zoomEyeApiKey', v)}
+              onConfigureRotation={() => openRotationModal('zoomEyeApiKey')}
+              rotationInfo={rotationConfigs.zoomeye || null}
+            />
+            <SecretField
+              label="Criminal IP API Key"
+              hint="AI-powered threat intelligence — IP/domain risk scoring, vulnerability detection, proxy/VPN/Tor identification"
+              signupUrl="https://search.criminalip.io/mypage/information"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.criminalIpApiKey}
+              visible={!!visibleFields.criminalIpApiKey}
+              onToggle={() => toggleFieldVisibility('criminalIpApiKey')}
+              onChange={v => updateSetting('criminalIpApiKey', v)}
+              onConfigureRotation={() => openRotationModal('criminalIpApiKey')}
+              rotationInfo={rotationConfigs.criminalip || null}
+            />
           </div>
         )}
         {settingsDirty && !settingsSaving && (
@@ -587,7 +771,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Section 3: Tunneling */}
+      {/* Section 4: Tunneling */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Tunneling</h2>
@@ -636,59 +820,6 @@ export default function SettingsPage() {
             <button className="primaryButton" onClick={saveSettings} disabled={settingsSaving}>
               Save Settings
             </button>
-          </div>
-        )}
-      </div>
-
-      {/* Section 4: Agent Skills */}
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}><Swords size={16} /> Agent Skills</h2>
-          <label className="primaryButton" style={{ cursor: 'pointer' }}>
-            <Upload size={14} /> Upload Skill
-            <input
-              type="file"
-              accept=".md"
-              style={{ display: 'none' }}
-              onChange={handleSkillUpload}
-            />
-          </label>
-        </div>
-        <p className={styles.sectionHint}>
-          Upload .md files defining custom attack skill workflows. Skills become available as toggles in all project settings.
-        </p>
-
-        {skillsLoading ? (
-          <div className={styles.emptyState}><Loader2 size={16} className={styles.spin} /> Loading...</div>
-        ) : attackSkills.length === 0 ? (
-          <div className={styles.emptyState}>No custom skills uploaded yet. Upload a .md file to get started.</div>
-        ) : (
-          <div className={styles.providerList}>
-            {attackSkills.map(skill => (
-              <div key={skill.id} className={styles.providerCard}>
-                <span className={styles.providerIcon}><Swords size={16} /></span>
-                <div className={styles.providerInfo}>
-                  <div className={styles.providerName}>{skill.name}</div>
-                  <div className={styles.providerMeta}>
-                    {skill.description || <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No description</span>}
-                  </div>
-                  <div className={styles.providerMeta}>
-                    Uploaded {new Date(skill.createdAt).toLocaleDateString()}
-                  </div>
-                </div>
-                <div className={styles.providerActions}>
-                  <button className="iconButton" title="Edit description" onClick={() => openEditDescription(skill.id)}>
-                    <Pencil size={14} />
-                  </button>
-                  <button className="iconButton" title="Download" onClick={() => downloadSkill(skill.id, skill.name)}>
-                    <Download size={14} />
-                  </button>
-                  <button className="iconButton" title="Delete" onClick={() => deleteSkill(skill.id)}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
         )}
       </div>

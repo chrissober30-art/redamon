@@ -416,6 +416,6 @@ def run_shodan_enrichment_isolated(combined_result: dict, settings: dict[str, An
         The 'shodan' data dictionary (just the enrichment payload)
     """
     import copy
-    snapshot = copy.copy(combined_result)  # shallow copy — safe for read-only access
+    snapshot = copy.deepcopy(combined_result)
     run_shodan_enrichment(snapshot, settings)
     return snapshot.get("shodan", {})

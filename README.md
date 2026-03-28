@@ -12,7 +12,7 @@
 <br/>
 
 <p align="center">
-  <img height="24" src="https://img.shields.io/badge/v3.0.0-release-2E8B57?style=flat" alt="Version 3.0.0"/>
+  <img height="24" src="https://img.shields.io/badge/v3.1.0-release-2E8B57?style=flat" alt="Version 3.0.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -21,7 +21,7 @@
   <img height="24" src="https://img.shields.io/badge/Kali-Powered-466A7A?style=flat&logo=kalilinux&logoColor=white" alt="Kali Powered"/>
   <img height="24" src="https://img.shields.io/badge/Docker-Compose-1A7EC2?style=flat&logo=docker&logoColor=white" alt="Docker"/>
   <img height="24" src="https://img.shields.io/badge/IP%2FCIDR-TARGETING-0D7377?style=flat" alt="IP/CIDR Targeting"/>
-  <img height="24" src="https://img.shields.io/badge/31+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="30+ Security Tools"/>
+  <img height="24" src="https://img.shields.io/badge/38+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="38+ Security Tools"/>
   <img height="24" src="https://img.shields.io/badge/185,000+-DETECTION%20RULES-8B1142?style=flat" alt="185,000+ Detection Rules"/>
   <img height="24" src="https://img.shields.io/badge/190+-PROJECT%20SETTINGS-00899B?style=flat" alt="190+ Settings"/>
   <img height="24" src="https://img.shields.io/badge/400+-AI%20MODELS-04A878?style=flat&logo=huggingface&logoColor=white" alt="400+ AI Models"/>
@@ -123,7 +123,7 @@ cd redamon
 After starting the stack, open **http://localhost:3000/settings** (gear icon in the header) to configure everything. No `.env` file is needed — all configuration is done from the UI.
 
 - **LLM Providers** — add API keys for OpenAI, Anthropic, OpenRouter, AWS Bedrock, or any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Each provider can be tested before saving. The model selector in project settings **dynamically fetches** available models from configured providers.
-- **API Keys** — Tavily, Shodan, SerpAPI, NVD, Vulners, and URLScan keys to enable extended agent capabilities (web search, OSINT, CVE lookups). Supports **key rotation** — configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
+- **API Keys** — Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). Supports **key rotation** — configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
 - **Tunneling** — configure ngrok or chisel for reverse shell tunneling. Changes apply immediately without container restarts.
 
 All settings are stored per-user in the database. See the **[AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)** wiki page for detailed setup instructions.
@@ -246,7 +246,7 @@ The platform is built around six pillars:
 
 ### Reconnaissance Pipeline
 
-A fully automated, **parallelized** scanning engine running inside a Kali Linux container. Given a root domain, subdomain list, or IP/CIDR ranges, it maps the complete external attack surface using a **fan-out / fan-in** pipeline architecture: subdomain discovery (crt.sh, HackerTarget, Subfinder, Amass, Knockpy — all 5 tools run concurrently), **puredns wildcard filtering** (validates subdomains against public DNS resolvers and removes wildcard/poisoned entries), parallel DNS resolution (20 workers), Shodan + port scanning (Masscan / Naabu — both run in parallel) in parallel, HTTP probing with technology fingerprinting (httpx + Wappalyzer), resource enumeration (Katana, Hakrawler, GAU, ParamSpider, Kiterunner — internally parallel, followed by jsluice JavaScript analysis, FFuf directory fuzzing with custom wordlist support, and Arjun hidden parameter discovery with multi-method parallel execution), and vulnerability scanning (Nuclei with 9,000+ templates + DAST fuzzing). Neo4j graph updates run in a dedicated background thread so the main pipeline is never blocked. Results are stored as JSON and imported into the Neo4j graph.
+A fully automated, **parallelized** scanning engine running inside a Kali Linux container. Given a root domain, subdomain list, or IP/CIDR ranges, it maps the complete external attack surface using a **fan-out / fan-in** pipeline architecture: subdomain discovery (crt.sh, HackerTarget, Subfinder, Amass, Knockpy — all 5 tools run concurrently), **puredns wildcard filtering** (validates subdomains against public DNS resolvers and removes wildcard/poisoned entries), parallel DNS resolution (20 workers), Shodan + port scanning (Masscan / Naabu — both run in parallel), passive threat intelligence enrichment (7 tools: Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP — all run in parallel with port scanning) in parallel, HTTP probing with technology fingerprinting (httpx + Wappalyzer), resource enumeration (Katana, Hakrawler, GAU, ParamSpider, Kiterunner — internally parallel, followed by jsluice JavaScript analysis, FFuf directory fuzzing with custom wordlist support, and Arjun hidden parameter discovery with multi-method parallel execution), and vulnerability scanning (Nuclei with 9,000+ templates + DAST fuzzing). Neo4j graph updates run in a dedicated background thread so the main pipeline is never blocked. Results are stored as JSON and imported into the Neo4j graph.
 
 > **[Wiki: Running Reconnaissance](https://github.com/samugit83/redamon/wiki/Running-Reconnaissance)** | **[Technical: README.RECON.md](readmes/README.RECON.md)**
 
@@ -260,8 +260,9 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 | | **Wildcard Filtering** | Puredns | Active | Sequential |
 | | **WHOIS + URLScan** | python-whois, URLScan.io API | Passive | Parallel |
 | | **DNS Resolution** | dnspython | Passive | 20 parallel workers |
-| **Port Scanning** | **Port Scanning** | Masscan, Naabu | Active | Both parallel with Shodan |
-| | **OSINT Enrichment** | Shodan / InternetDB | Passive | Parallel with port scanners |
+| | **OSINT Enrichment** | Shodan / InternetDB | Passive | Parallel with port scan |
+| | **Threat Intel Enrichment** | Censys, FOFA, OTX (AlienVault), Netlas, VirusTotal, ZoomEye, CriminalIP | Passive | 7 tools parallel (GROUP 3b) |
+| **Port Scanning** | **Port Scanning** | Masscan, Naabu | Active | Both parallel |
 | **HTTP Probing** | **HTTP Probing** | httpx | Active | Internal parallel |
 | | **Tech Detection** | Wappalyzer | Passive | Sequential (post-probe) |
 | | **Banner Grabbing** | Custom (Python sockets: SSH, FTP, SMTP, MySQL, etc.) | Active | Parallel workers |

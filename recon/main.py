@@ -703,6 +703,50 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
         if "port_scan" in combined_result:
             _graph_update_bg("update_graph_from_port_scan", combined_result, USER_ID, PROJECT_ID)
 
+    # OSINT Enrichment (parallel, same logic as domain recon Group 3b)
+    _ip_osint_tools = {
+        'censys': ('CENSYS_ENABLED', 'recon.censys_enrich', 'run_censys_enrichment_isolated', 'update_graph_from_censys'),
+        'fofa': ('FOFA_ENABLED', 'recon.fofa_enrich', 'run_fofa_enrichment_isolated', 'update_graph_from_fofa'),
+        'otx': ('OTX_ENABLED', 'recon.otx_enrich', 'run_otx_enrichment_isolated', 'update_graph_from_otx'),
+        'netlas': ('NETLAS_ENABLED', 'recon.netlas_enrich', 'run_netlas_enrichment_isolated', 'update_graph_from_netlas'),
+        'virustotal': ('VIRUSTOTAL_ENABLED', 'recon.virustotal_enrich', 'run_virustotal_enrichment_isolated', 'update_graph_from_virustotal'),
+        'zoomeye': ('ZOOMEYE_ENABLED', 'recon.zoomeye_enrich', 'run_zoomeye_enrichment_isolated', 'update_graph_from_zoomeye'),
+        'criminalip': ('CRIMINALIP_ENABLED', 'recon.criminalip_enrich', 'run_criminalip_enrichment_isolated', 'update_graph_from_criminalip'),
+    }
+    enabled_ip_osint = {
+        name: cfg for name, cfg in _ip_osint_tools.items()
+        if settings.get(cfg[0], False)
+        and (
+            settings.get(f'{name.upper()}_API_KEY', '')
+            or (name == 'censys' and settings.get('CENSYS_API_ID', ''))
+            or name == 'otx'  # OTX supports anonymous requests without an API key
+        )
+    }
+    if enabled_ip_osint:
+        print(f"\n[*][Pipeline] OSINT Enrichment ({', '.join(enabled_ip_osint.keys())}) — parallel")
+        print("-" * 40)
+        import importlib
+        osint_workers = min(len(enabled_ip_osint), 5)
+        with ThreadPoolExecutor(max_workers=osint_workers, thread_name_prefix="ip-osint") as osint_exec:
+            osint_futures = {}
+            for name, (_, module_path, func_name, _) in enabled_ip_osint.items():
+                mod = importlib.import_module(module_path)
+                fn = getattr(mod, func_name)
+                osint_futures[name] = osint_exec.submit(fn, combined_result, settings)
+            for name, future in osint_futures.items():
+                try:
+                    data = future.result()
+                    if data:
+                        combined_result[name] = data
+                        combined_result["metadata"]["modules_executed"].append(f"{name}_enrich")
+                        print(f"[+][{name.upper()}] Enrichment merged")
+                except Exception as e:
+                    print(f"[!][{name.upper()}] Enrichment failed: {e}")
+        save_recon_file(combined_result, output_file)
+        for name, (_, _, _, graph_method) in enabled_ip_osint.items():
+            if name in combined_result:
+                _graph_update_bg(graph_method, combined_result, USER_ID, PROJECT_ID)
+
     # HTTP Probe
     if "http_probe" in SCAN_MODULES:
         combined_result = run_http_probe(combined_result, output_file=output_file, settings=settings)
@@ -1039,6 +1083,60 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
 
         if "port_scan" in combined_result:
             _graph_update_bg("update_graph_from_port_scan", combined_result, USER_ID, PROJECT_ID)
+
+    # =====================================================================
+    # GROUP 3b — OSINT Enrichment (parallel, passive — no packets to target)
+    # Runs independently from port scanning; data feeds into the graph only.
+    # =====================================================================
+    _osint_tools = {
+        'censys': ('CENSYS_ENABLED', 'recon.censys_enrich', 'run_censys_enrichment_isolated', 'update_graph_from_censys'),
+        'fofa': ('FOFA_ENABLED', 'recon.fofa_enrich', 'run_fofa_enrichment_isolated', 'update_graph_from_fofa'),
+        'otx': ('OTX_ENABLED', 'recon.otx_enrich', 'run_otx_enrichment_isolated', 'update_graph_from_otx'),
+        'netlas': ('NETLAS_ENABLED', 'recon.netlas_enrich', 'run_netlas_enrichment_isolated', 'update_graph_from_netlas'),
+        'virustotal': ('VIRUSTOTAL_ENABLED', 'recon.virustotal_enrich', 'run_virustotal_enrichment_isolated', 'update_graph_from_virustotal'),
+        'zoomeye': ('ZOOMEYE_ENABLED', 'recon.zoomeye_enrich', 'run_zoomeye_enrichment_isolated', 'update_graph_from_zoomeye'),
+        'criminalip': ('CRIMINALIP_ENABLED', 'recon.criminalip_enrich', 'run_criminalip_enrichment_isolated', 'update_graph_from_criminalip'),
+    }
+
+    enabled_osint = {
+        name: cfg for name, cfg in _osint_tools.items()
+        if _settings.get(cfg[0], False)
+        and (
+            _settings.get(f'{name.upper()}_API_KEY', '')
+            or (name == 'censys' and _settings.get('CENSYS_API_ID', ''))
+            or name == 'otx'  # OTX supports anonymous requests without an API key
+        )
+    }
+
+    if enabled_osint:
+        print(f"\n[*][Pipeline] GROUP 3b: OSINT Enrichment ({', '.join(enabled_osint.keys())}) — parallel")
+        print("-" * 40)
+
+        import importlib
+        osint_workers = min(len(enabled_osint), 5)
+        with ThreadPoolExecutor(max_workers=osint_workers, thread_name_prefix="osint") as osint_exec:
+            osint_futures = {}
+            for name, (_, module_path, func_name, _) in enabled_osint.items():
+                mod = importlib.import_module(module_path)
+                fn = getattr(mod, func_name)
+                osint_futures[name] = osint_exec.submit(fn, combined_result, _settings)
+
+            for name, future in osint_futures.items():
+                try:
+                    data = future.result()
+                    if data:
+                        combined_result[name] = data
+                        combined_result["metadata"]["modules_executed"].append(f"{name}_enrich")
+                        print(f"[+][{name.upper()}] Enrichment merged")
+                except Exception as e:
+                    print(f"[!][{name.upper()}] Enrichment failed: {e}")
+
+        save_recon_file(combined_result, output_file)
+
+        # Queue graph updates for completed OSINT tools
+        for name, (_, _, _, graph_method) in enabled_osint.items():
+            if name in combined_result:
+                _graph_update_bg(graph_method, combined_result, USER_ID, PROJECT_ID)
 
     # =====================================================================
     # GROUP 4 — HTTP Probe (sequential, internally parallel via httpx threads)
