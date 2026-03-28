@@ -541,6 +541,7 @@ The recon pipeline uses a **fan-out / fan-in** pattern with Python's `concurrent
 | *Puredns* | Wildcard filtering (validates against public resolvers) | Sequential | After discovery fan-in, before DNS |
 | *DNS* | DNS resolution for all subdomains | 20 parallel workers | After puredns filtering |
 | **GROUP 3** | Shodan Enrichment + Port Scan (Naabu) | 2 parallel tasks | Needs IPs from GROUP 1 |
+| **GROUP 3b** | OSINT Enrichment (Censys + FOFA + OTX + Netlas + VirusTotal + ZoomEye + CriminalIP) | 7 parallel tasks | Needs IPs/domains from GROUP 1; runs concurrently with GROUP 3 |
 | **GROUP 4** | HTTP Probe (httpx) | Sequential (internally parallel) | Needs ports from GROUP 3 |
 | **GROUP 5** | Resource Enum (Katana + GAU + Kiterunner) | 3 tools internally parallel | Needs live URLs from GROUP 4 |
 | **GROUP 6** | Vuln Scan (Nuclei) + MITRE Enrichment | Sequential | Needs endpoints from GROUP 5 |
@@ -1016,6 +1017,13 @@ flowchart TB
     subgraph Layer1b["OSINT Enrichment"]
         Shodan2[Shodan<br/>Host/DNS/CVEs]
         URLScan[URLScan<br/>Historical scans]
+        Censys2[Censys<br/>Host intelligence]
+        FOFA2[FOFA<br/>Asset search]
+        OTX2[OTX<br/>Threat intel]
+        Netlas2[Netlas<br/>Internet intel]
+        VT2[VirusTotal<br/>Reputation]
+        ZoomEye2[ZoomEye<br/>Host search]
+        CrimIP2[CriminalIP<br/>Risk score]
     end
 
     subgraph Layer4["Data Enrichment"]
@@ -1046,21 +1054,24 @@ flowchart TB
 
 ### Feature Comparison
 
-| Feature | WHOIS | DNS | Shodan | URLScan | Masscan | Naabu | httpx | Katana | Hakrawler | GAU | Kiterunner | jsluice | Nuclei | GVM |
-|---------|-------|-----|--------|---------|---------|-------|-------|--------|-----------|-----|------------|---------|--------|-----|
-| **Domain Info** | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **IP Resolution** | ❌ | ✅ | ⚠️ | ⚠️ | ❌ | ⚠️ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Subdomain Discovery** | ❌ | ❌ | ⚠️ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Port Scanning** | ❌ | ❌ | ⚠️ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **Live URL Check** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Tech Detection** | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ |
-| **Endpoint Discovery** | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ | ❌ |
-| **Historical URLs** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **API Discovery** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **CVE Detection** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| **External Domains** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | ⚠️ | ❌ | ❌ |
-| **XSS/SQLi Testing** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ |
-| **Secret Detection** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Feature | WHOIS | DNS | Shodan | URLScan | Censys | FOFA | OTX | Netlas | VirusTotal | ZoomEye | CriminalIP | Masscan | Naabu | httpx | Katana | Hakrawler | GAU | Kiterunner | jsluice | Nuclei | GVM |
+|---------|-------|-----|--------|---------|--------|------|-----|--------|------------|---------|------------|---------|-------|-------|--------|-----------|-----|------------|---------|--------|-----|
+| **Domain Info** | ✅ | ⚠️ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **IP Resolution** | ❌ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | ⚠️ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Subdomain Discovery** | ❌ | ❌ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Port / Service Data** | ❌ | ❌ | ⚠️ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **Live URL Check** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Tech Detection** | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | ⚠️ | ⚠️ | ⚠️ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ |
+| **Endpoint Discovery** | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| **Historical URLs** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Threat Reputation** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Passive DNS** | ❌ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Malware / CVE Intel** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| **TLS / Certificate** | ❌ | ❌ | ⚠️ | ⚠️ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Geolocation / ASN** | ❌ | ❌ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | ✅ | ❌ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **API Discovery** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **XSS/SQLi Testing** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ |
+| **Secret Detection** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 **Legend:** ✅ Primary | ⚠️ Limited | ❌ Not supported
 
@@ -1072,6 +1083,13 @@ flowchart TB
 | DNS | <1 second | Instant |
 | Shodan | 5-15 seconds | Passive, per-IP queries |
 | URLScan | 5-20 seconds | Passive, API rate-limited |
+| Censys | 5-30 seconds | Passive, per-IP queries, 429 detection |
+| FOFA | 5-30 seconds | Passive, domain/IP query, max 10,000 results |
+| OTX | 5-60 seconds | Passive, per-IP + per-domain queries |
+| Netlas | 5-30 seconds | Passive, per-IP/domain queries, max 1,000 results |
+| VirusTotal | 1-5 minutes | Free tier: 4 req/min; 65s wait on rate limit |
+| ZoomEye | 5-30 seconds | Passive, per-IP/domain queries, max 1,000 results |
+| CriminalIP | 5-30 seconds | Passive, per-IP + per-domain queries |
 | Amass | 1-10 minutes | Passive; longer with active/brute |
 | Puredns | 30-90 seconds | Depends on subdomain count |
 | Masscan | 1-30 seconds | Fastest for large CIDR ranges |
@@ -1100,6 +1118,12 @@ All settings are managed through the webapp project form or via environment vari
 | `NAABU_TOP_PORTS` | `"1000"` | Top-N ports to scan |
 | `NAABU_SCAN_TYPE` | `"s"` | SYN scan |
 | `MASSCAN_RATE` | `1000` | Masscan packets/sec |
+| `OTX_ENABLED` | `true` | OTX threat intel enrichment (anonymous by default) |
+| `VIRUSTOTAL_RATE_LIMIT` | `4` | VirusTotal requests per minute (free tier) |
+| `VIRUSTOTAL_MAX_TARGETS` | `20` | Max IPs+domains to query with VirusTotal |
+| `FOFA_MAX_RESULTS` | `1000` | FOFA results per query (max 10,000) |
+| `NETLAS_MAX_RESULTS` | `1000` | Netlas results per query (max 1,000) |
+| `ZOOMEYE_MAX_RESULTS` | `1000` | ZoomEye results per query |
 | `NUCLEI_DAST_MODE` | `true` | Active fuzzing |
 | `NUCLEI_SEVERITY` | critical, high, medium, low | Severity filter |
 | `WAPPALYZER_ENABLED` | `true` | Technology detection |
@@ -1151,6 +1175,13 @@ recon/
 ├── domain_recon.py         # Subdomain discovery
 ├── whois_recon.py          # WHOIS lookup
 ├── urlscan_enrich.py       # URLScan.io OSINT enrichment
+├── censys_enrich.py        # Censys threat intelligence enrichment
+├── fofa_enrich.py          # FOFA internet asset search enrichment
+├── otx_enrich.py           # OTX (AlienVault) threat intelligence enrichment
+├── netlas_enrich.py        # Netlas internet intelligence enrichment
+├── virustotal_enrich.py    # VirusTotal reputation enrichment
+├── zoomeye_enrich.py       # ZoomEye host search enrichment
+├── criminalip_enrich.py    # Criminal IP threat intelligence enrichment
 ├── port_scan.py            # Port scanning
 ├── http_probe.py           # HTTP probing
 ├── resource_enum.py        # Endpoint discovery

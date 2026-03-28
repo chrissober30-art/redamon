@@ -351,7 +351,7 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
     otx_data: dict[str, Any] = {
         "ip_reports": [],
         "domain_report": {
-            "domain": "",
+            "domain": domain,
             "pulse_count": 0,
             "pulse_details": {},
             "whois": {},

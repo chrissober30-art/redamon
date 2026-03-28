@@ -200,7 +200,7 @@ If the tool uses external API keys, RedAmon has a well-established pattern where
 - `webapp/src/app/api/users/[id]/settings/route.ts` → GET masking + PUT whitelist
 - `webapp/src/app/settings/page.tsx` → `UserSettings` interface, `EMPTY_SETTINGS`, `TOOL_NAME_MAP`, `SecretField` rendering
 - `webapp/src/components/projects/ProjectForm/sections/ToolMatrixSection.tsx` → `TOOL_KEY_INFO` + `fetchKeyStatus()`
-- `webapp/src/app/graph/components/AIAssistantDrawer/AIAssistantDrawer.tsx` → `API_KEY_INFO` dict (~line 788) + missing key detection (~line 777) — **duplicate** of ToolMatrix key check, used to show missing-key warnings in the chat UI
+- `webapp/src/app/graph/components/AIAssistantDrawer/hooks/useApiKeyModal.ts` → `API_KEY_INFO` dict (top of file) + `fetchApiKeyStatus()` — **duplicate** of ToolMatrix key check, used to show missing-key warnings in the chat UI
 - `webapp/src/app/graph/components/AIAssistantDrawer/ToolExecutionCard.tsx` → `TOOL_KEY_LABEL` dict (line 15-19) — maps tool name to human-readable API key label for chat tool cards
 - `agentic/tools.py` → `[Tool]ToolManager` class
 - `agentic/orchestrator.py` → `_apply_project_settings()` + `_init_tools()`
@@ -287,7 +287,7 @@ The exact set of files depends on the integration type chosen in Phase 1.
 - [ ] **`webapp/src/app/api/users/[id]/settings/route.ts`** — Add to GET masking logic + PUT whitelist (read how existing keys are handled)
 - [ ] **`webapp/src/app/settings/page.tsx`** — Add to `UserSettings` interface, `EMPTY_SETTINGS`, `TOOL_NAME_MAP`, add `SecretField` component in JSX (read Shodan ~line 505-515 as reference), add to both `fetchSettings()` response handlers (~lines 243, 313)
 - [ ] **`webapp/src/components/projects/ProjectForm/sections/ToolMatrixSection.tsx`** — Add to `TOOL_KEY_INFO` + `fetchKeyStatus()` (if not already done above)
-- [ ] **`webapp/src/app/graph/components/AIAssistantDrawer/AIAssistantDrawer.tsx`** — Add to `API_KEY_INFO` dict (~line 788) and missing key detection in `fetchKeyStatus()` (~line 777). This is a **duplicate** of the ToolMatrix key check — the chat drawer also warns users about missing API keys.
+- [ ] **`webapp/src/app/graph/components/AIAssistantDrawer/hooks/useApiKeyModal.ts`** — Add to `API_KEY_INFO` dict (top of file) and missing key detection in `fetchApiKeyStatus()`. This is a **duplicate** of the ToolMatrix key check — the chat drawer also warns users about missing API keys.
 - [ ] **`webapp/src/app/graph/components/AIAssistantDrawer/ToolExecutionCard.tsx`** — Add to `TOOL_KEY_LABEL` dict (line 15-19) — maps tool name to human-readable label shown on tool cards in chat when key is missing.
 
 #### Progress Streaming (if long-running tool, >60s typical)
@@ -325,7 +325,7 @@ If the tool is the PRIMARY tool for a new built-in attack skill (like Hydra is f
 - [ ] **`agentic/project_settings.py`** — Add skill to `ATTACK_SKILL_CONFIG` > `builtIn` defaults (~line 130-138)
 - [ ] **`webapp/src/components/projects/ProjectForm/sections/AttackSkillsSection.tsx`** — Add to `BUILT_IN_SKILLS` array (~line 36-67)
 - [ ] **`webapp/src/app/api/users/[id]/attack-skills/available/route.ts`** — Add to `BUILT_IN_SKILLS` array
-- [ ] **`webapp/src/app/graph/components/AIAssistantDrawer/AIAssistantDrawer.tsx`** — Add to `KNOWN_ATTACK_PATH_CONFIG` (~line 143) for chat UI badge
+- [ ] **`webapp/src/app/graph/components/AIAssistantDrawer/phaseConfig.ts`** — Add to `KNOWN_ATTACK_PATH_CONFIG` for chat UI badge
 - [ ] **`agentic/prompts/classification.py`** — Add the new skill to the attack path classification prompt
 
 ---
@@ -372,8 +372,8 @@ If the tool is the PRIMARY tool for a new built-in attack skill (like Hydra is f
 | `webapp/src/components/projects/ProjectForm/sections/AttackSkillsSection.tsx` | Built-in attack skill toggles | If part of attack skill |
 | `webapp/src/components/projects/ProjectForm/ProjectForm.tsx` | Tab layout, section rendering | If adding settings section |
 | `webapp/src/components/projects/ProjectForm/sections/index.ts` | Section exports | If adding settings section |
-| `webapp/src/app/graph/components/AIAssistantDrawer/AIAssistantDrawer.tsx` | `KNOWN_ATTACK_PATH_CONFIG` — chat UI badges | If part of new attack skill |
-| `webapp/src/app/graph/components/AIAssistantDrawer/AIAssistantDrawer.tsx` | `API_KEY_INFO` + missing key detection in chat drawer | If tool needs API keys |
+| `webapp/src/app/graph/components/AIAssistantDrawer/phaseConfig.ts` | `KNOWN_ATTACK_PATH_CONFIG` — chat UI badges | If part of new attack skill |
+| `webapp/src/app/graph/components/AIAssistantDrawer/hooks/useApiKeyModal.ts` | `API_KEY_INFO` + `fetchApiKeyStatus()` — missing key detection in chat drawer | If tool needs API keys |
 | `webapp/src/app/graph/components/AIAssistantDrawer/ToolExecutionCard.tsx` | `TOOL_KEY_LABEL` — human label on tool cards when key missing | If tool needs API keys |
 | `webapp/src/app/api/users/[id]/settings/route.ts` | API key storage, masking, PUT whitelist | If tool needs API keys |
 | `webapp/src/app/api/users/[id]/attack-skills/available/route.ts` | Built-in skills list | If part of new attack skill |

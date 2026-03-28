@@ -719,6 +719,7 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
         and (
             settings.get(f'{name.upper()}_API_KEY', '')
             or (name == 'censys' and settings.get('CENSYS_API_ID', ''))
+            or name == 'otx'  # OTX supports anonymous requests without an API key
         )
     }
     if enabled_ip_osint:
@@ -1103,6 +1104,7 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
         and (
             _settings.get(f'{name.upper()}_API_KEY', '')
             or (name == 'censys' and _settings.get('CENSYS_API_ID', ''))
+            or name == 'otx'  # OTX supports anonymous requests without an API key
         )
     }
 

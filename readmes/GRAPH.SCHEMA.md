@@ -1030,7 +1030,7 @@ CREATE CONSTRAINT secret_unique IF NOT EXISTS FOR (s:Secret) REQUIRE (s.id) IS U
 
 OTX threat intelligence pulses — named threat reports associating indicators (IPs, domains) with adversaries, malware families, and attack patterns. Each pulse represents a community-published threat report on AlienVault OTX. Up to 10 pulses per indicator are stored.
 
-**Created by:** `recon/otx_enrich.py` + `graph_db/neo4j_client.py::update_graph_from_otx()`
+**Created by:** `recon/otx_enrich.py` + `graph_db/mixins/osint_mixin.py::update_graph_from_otx()`
 
 ```cypher
 (:ThreatPulse {
@@ -1074,7 +1074,7 @@ FOR (tp:ThreatPulse) ON (tp.user_id, tp.project_id);
 
 Malware samples (file hashes) associated with IPs or domains as reported by OSINT tools (OTX, VirusTotal). This is a **cross-tool** node type: OTX malware and VirusTotal malware samples both produce `Malware` nodes, allowing correlation across sources.
 
-**Created by:** `graph_db/neo4j_client.py::update_graph_from_otx()` (source=otx), and future VirusTotal malware integration (source=virustotal)
+**Created by:** `graph_db/mixins/osint_mixin.py::update_graph_from_otx()` (source=otx), and future VirusTotal malware integration (source=virustotal)
 
 ```cypher
 (:Malware {

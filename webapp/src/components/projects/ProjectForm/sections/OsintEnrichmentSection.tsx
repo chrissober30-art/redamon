@@ -191,13 +191,19 @@ export function OsintEnrichmentSection({ data, updateField }: OsintEnrichmentSec
                 <span className={styles.toggleLabel}>VirusTotal</span>
                 <p className={styles.toggleDescription}>
                   Fetch multi-engine reputation scores, malicious detection counts, and category
-                  labels for the target domain and discovered IPs. Free tier: 4 req/min.
-                  {noKey('virusTotal') && <em> Add an API key in Global Settings for full results.</em>}
+                  labels for the target domain and discovered IPs. Free tier: 4 req/min. Add an API key in Global Settings to enable.
                 </p>
+                {noKey('virusTotal') && (
+                  <div className={styles.shodanWarning}>
+                    <Info size={13} />
+                    No VirusTotal API key — add it in Global Settings to enable.
+                  </div>
+                )}
               </div>
               <Toggle
                 checked={data.virusTotalEnabled}
                 onChange={(checked) => updateField('virusTotalEnabled', checked)}
+                disabled={noKey('virusTotal')}
               />
             </div>
           </div>

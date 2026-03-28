@@ -615,12 +615,6 @@ export default function SettingsPage() {
               rotationInfo={rotationConfigs.urlscan || null}
             />
 
-            {/* OSINT & Threat Intelligence */}
-            <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-default)', paddingTop: '16px', marginTop: '8px' }}>
-              <h4 style={{ margin: '0 0 12px 0', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                OSINT &amp; Threat Intelligence
-              </h4>
-            </div>
             <SecretField
               label="Censys API ID"
               hint="Censys search engine — host/service discovery via banner and certificate data. Requires API ID + Secret pair"

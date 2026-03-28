@@ -32,20 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **GitHub Access Token moved to Global Settings** — the GitHub access token is now configured once in Global Settings and shared by both GitHub Secret Hunt and TruffleHog, eliminating duplicate token configuration per scan type.
 
-- **SQL Injection Agent Skill** (`sql_injection`) — new built-in agent skill for SQL injection testing, replacing the previous `sql_injection-unclassified` fallback with a structured 7-step workflow:
-  - **Step 1**: Target analysis via `execute_curl` (identify parameters, technology stack, DBMS hints)
-  - **Step 2**: SQLMap detection scan via `kali_shell` with configurable level (1-5) and risk (1-3)
-  - **Step 3**: WAF detection and bypass with tamper script recommendations per WAF type
-  - **Step 4**: Exploitation based on detected technique (error-based, union, blind boolean, blind time-based, OOB)
-  - **Step 5**: Long scan mode for complex targets (background sqlmap + polling)
-  - **Step 6**: Prioritized data extraction (banner → user → databases → tables → dump)
-  - **Step 7**: Post-SQLi escalation (file read/write, OS shell, SQL shell)
-  - **OOB DNS exfiltration** workflow via `interactsh-client` (background process with stateful session)
-  - **Payload reference** tables: auth bypass payloads, WAF bypass encodings, tamper scripts, DBMS-specific error/time-based payloads
-  - **Configurable settings**: SQLMap level, risk, and tamper scripts in project settings UI
-  - **Classification wiring**: LLM classifier routes SQLi requests directly to the skill instead of unclassified fallback
-  - **Dockerfile**: Added `interactsh-client` (ProjectDiscovery) to kali-sandbox for OOB callback support
-  - **42 unit tests** covering state registration, classification, prompt formatting, activation logic, and tool registry
+- **SQL Injection Agent Skill** (`sql_injection`) — new built-in agent skill for SQL injection testing, replacing the previous `sql_injection-unclassified` fallback with a structured 7-step workflow.
 
 - **Agent skill workflows injected from informational phase** — all built-in skill prompts (CVE, SQLi, Credential Testing, DoS, Social Engineering) are now injected from the start of a session, matching user skill behavior. Previously, skill workflows only appeared after transitioning to exploitation phase, causing the agent to improvise without guidance during recon.
 
@@ -54,6 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Improved classification for informational requests** — the LLM classifier now always determines the best-matching agent skill regardless of phase. Pure recon requests (e.g., "show attack surface") classify as `recon-unclassified` instead of defaulting to `cve_exploit`.
 
 - **AI-Assisted Development wiki page** — new contributor guide with two structured integration prompts (`ADD_AGENTIC_TOOL`, `ADD_RECON_TOOL`) and a 7-step iterative workflow for shipping zero-bug PRs using Claude Code. See [Wiki: AI-Assisted Development](https://github.com/samugit83/redamon/wiki/AI-Assisted-Development).
+
+- **7 OSINT Threat Intelligence Enrichment Tools** — passive enrichment phase (GROUP 3b) running in parallel with port scanning. All 7 modules use a fan-out `ThreadPoolExecutor` pattern, support rate-limit detection (HTTP 429), optional API key rotation, and write results to `recon_domain.json` + Neo4j graph:
+  - **Censys** (`censys_enrich.py`) — queries the Censys Search API v2 (`/v2/hosts/{ip}`) for each discovered IP. Returns open ports, services, banners, TLS certificate chains, geolocation, ASN, and OS. Requires `CENSYS_API_ID` + `CENSYS_API_SECRET` (Basic Auth). Both keys stored in Global Settings.
+  - **FOFA** (`fofa_enrich.py`) — queries the FOFA Search API using base64-encoded query syntax (`domain="<domain>"` or per-IP). Returns IP:port pairs, HTTP titles, server headers, geolocation, certificate info, and protocol details. Supports legacy (`email:key`) and modern (`key`-only) authentication formats. Max 10,000 results per query. Supports key rotation via `FOFA_KEY_ROTATOR`.
+  - **OTX / AlienVault Open Threat Exchange** (`otx_enrich.py`) — queries the OTX Indicators API v1 for IPs and domains. Returns threat reputation, associated malware families, MITRE ATT&CK attack IDs, passive DNS history, pulse data (adversaries, tags, TLP). Supports anonymous requests (1,000 req/hr) or with API key (10,000 req/hr). **Enabled by default** — the only OSINT tool active without an API key. Supports key rotation.
+  - **Netlas** (`netlas_enrich.py`) — queries the Netlas Responses API (`host:{domain}` or `host:{ip}`) for internet-connected asset intelligence. Returns port/service data, HTTP response metadata, geolocation (lat/lon, timezone), TLS certificate details, DNS records, and WHOIS data. Max 1,000 results. Supports key rotation.
+  - **VirusTotal** (`virustotal_enrich.py`) — queries the VirusTotal API v3 for domain and IP reputation. Returns reputation scores, last analysis stats (malicious/suspicious/undetected counts), categories, tags, JARM fingerprint, registrar, and last analysis date. Free-tier rate limit: 4 requests/minute (configurable via `VIRUSTOTAL_RATE_LIMIT`). On 429, automatically sleeps 65 seconds and retries once. Configurable `VIRUSTOTAL_MAX_TARGETS` (default 20) caps API usage per scan.
+  - **ZoomEye** (`zoomeye_enrich.py`) — queries the ZoomEye API for hostname and IP searches. Returns open ports, service banners, device type/OS, web application fingerprints, geolocation (country, city, lat/lon, timezone), ASN, ISP, and SSL certificate info. Max 1,000 results. Supports key rotation.
+  - **CriminalIP** (`criminalip_enrich.py`) — queries the Criminal IP API v1 (`/v1/ip/data?full=true`, `/v1/domain/data`) for IP and domain intelligence. Returns risk score, threat tags (VPN, cloud, Tor, proxy, hosting, mobile, darkweb, scanner, Snort IDS), geolocation, ISP, hosted services, and abuse history. On 429, sleeps 2 seconds and retries once.
+  - **API Keys**: all 7 tool API keys are stored in **Global Settings > API Keys** (user-scoped). Project settings contain only enable/disable toggles and optional limits (max results, rate limits, max targets).
+  - **Key Rotation**: FOFA, OTX, Netlas, VirusTotal, ZoomEye, and CriminalIP support automatic round-robin key rotation via the Global Settings key rotation UI.
+  - **Unit tests**: 7 test files in `tests/` covering all enrichment modules (mocked HTTP, rate limit handling, key rotation, graph update functions).
 
 ### Fixed
 

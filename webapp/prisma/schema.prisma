@@ -479,7 +479,7 @@ model Project {
   fofaMaxResults                        Int      @default(1000)   @map("fofa_max_results")
   otxEnabled                            Boolean  @default(true)   @map("otx_enabled")
   netlasEnabled                         Boolean  @default(false)  @map("netlas_enabled")
-  virusTotalEnabled                     Boolean  @default(true)   @map("virustotal_enabled")
+  virusTotalEnabled                     Boolean  @default(false)  @map("virustotal_enabled")
   zoomEyeEnabled                        Boolean  @default(false)  @map("zoomeye_enabled")
   zoomEyeMaxResults                     Int      @default(1000)   @map("zoomeye_max_results")
   criminalIpEnabled                     Boolean  @default(false)  @map("criminalip_enabled")

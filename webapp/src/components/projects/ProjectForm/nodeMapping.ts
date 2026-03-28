@@ -25,7 +25,7 @@ export const SECTION_NODE_MAP: Record<string, string[]> = {
   SubdomainDiscovery: ['Domain', 'Subdomain', 'IP', 'DNSRecord'],
   Shodan:             ['IP', 'Port', 'Service', 'Subdomain', 'ExternalDomain', 'DNSRecord', 'Vulnerability', 'CVE'],
   Urlscan:            ['Domain', 'Subdomain', 'ExternalDomain', 'IP', 'Endpoint', 'Parameter'],
-  OsintEnrichment:    ['IP', 'Domain', 'Subdomain', 'Port', 'Service', 'Certificate', 'Vulnerability', 'CVE'],
+  OsintEnrichment:    ['IP', 'Domain', 'Subdomain', 'Port', 'Service', 'ExternalDomain', 'ThreatPulse', 'Malware', 'Certificate', 'Vulnerability', 'CVE'],
   Naabu:              ['Port', 'Service'],
   Masscan:            ['Port', 'Service'],
   Httpx:              ['BaseURL', 'Certificate', 'Technology', 'Header', 'Service', 'Port'],

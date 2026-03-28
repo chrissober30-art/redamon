@@ -464,16 +464,53 @@ const { logs, currentPhase, currentPhaseNumber, isConnected, clearLogs } = useRe
 
 The `AIAssistantDrawer` is the primary interface for interacting with the RedAmon pentesting agent. It communicates over WebSocket via the `useAgentWebSocket` hook and renders a real-time timeline of agent activity.
 
-#### Key Components
+The component is split into a thin orchestrator (`AIAssistantDrawer.tsx`, ~426 lines) that composes purpose-built hooks and sub-components. All files live in `webapp/src/app/graph/components/AIAssistantDrawer/`.
+
+#### Sub-components
 
 | Component | Description |
 |-----------|-------------|
-| `AIAssistantDrawer` | Main drawer component — chat input, WebSocket management, message handling, conversation history |
-| `AgentTimeline` | Renders chronological timeline of thinking steps, tool executions, plan waves, and confirmations |
-| `ToolExecutionCard` | Individual tool execution card — shows tool name, args, output chunks, status, and **Allow/Deny** buttons for dangerous tools |
-| `PlanWaveCard` | Parallel wave card — groups multiple tools in a plan, shows per-tool status, and **Allow/Deny** for waves containing dangerous tools |
+| `AIAssistantDrawer` | Thin orchestrator — wires hooks together, renders sub-components |
+| `DrawerHeader` | Header bar — connection status, history toggle, new chat, download, close |
+| `PhaseIndicatorBar` | Phase badge, tool icons, attack skill badge, stealth/deep-think toggles, model badge, settings dropdown |
+| `ChatArea` | Scrollable message list — renders grouped items, loading eye, empty state |
+| `InputArea` | Textarea, send/stop/resume buttons |
+| `ApprovalDialog` | Phase-transition approval overlay |
+| `QuestionDialog` | Agent Q&A overlay (text / single-choice / multi-choice) |
+| `SettingsModal` | Agent behaviour / tool matrix / attack skills settings overlay |
+| `ModelPickerModal` | Model search and selection modal |
+| `ApiKeyModal` | API key input modal |
+| `SuggestionPanels` | Suggestion accordion shown in empty chat state |
+| `AgentTimeline` | Chronological timeline of thinking steps, tool executions, plan waves, and confirmations |
+| `ToolExecutionCard` | Individual tool execution card — tool name, args, output chunks, status, **Allow/Deny** buttons |
+| `PlanWaveCard` | Parallel wave card — groups tools in a plan wave, **Allow/Deny** for dangerous waves |
 | `TodoListWidget` | Agent's live task list |
 | `FileDownloadCard` | Download card for agent-generated files (reports, exports) |
+
+#### Custom Hooks (`hooks/`)
+
+| Hook | Owns |
+|------|------|
+| `useWebSocketHandler` | WebSocket message dispatch (18+ message types) |
+| `useSendHandlers` | `handleSend`, `handleApproval`, `handleAnswer`, `handleStop`, `handleResume` |
+| `useChatState` | `chatItems`, loading/stopped/phase state, `groupedChatItems` memo |
+| `useInteractionState` | Approval / Q&A / tool-confirmation state + double-submit refs |
+| `useConversationRestoration` | Conversation history, load/delete, `handleSelectConversation` |
+| `useScrollBehavior` | Auto-scroll, `scrollToBottom`, `checkIfAtBottom` |
+| `useApiKeyModal` | `API_KEY_INFO`, missing key detection, key save flow |
+| `useModelPicker` | Model list fetch, search filtering, model selection |
+| `useSettingsModal` | Project form state, debounced save, settings dropdown |
+| `useAttackSkillData` | Attack skill list fetch |
+| `useLoadingWord` | Rotating loading status word |
+| `useDownloadMarkdown` | Markdown report generation and download |
+
+#### Static files
+
+| File | Content |
+|------|---------|
+| `types.ts` | `Phase`, `Message`, `FileDownloadItem`, `ChatItem`, `AIAssistantDrawerProps` |
+| `phaseConfig.ts` | `PHASE_CONFIG`, `KNOWN_ATTACK_PATH_CONFIG`, `getAttackPathConfig()`, `formatModelDisplay()` |
+| `suggestionData.ts` | Suggestion panel data (informational / exploitation / post-exploitation groups) |
 
 #### Tool Confirmation in the Chat
 
