@@ -86,8 +86,10 @@ RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest \
 # Install API security testing tools (Go-based)
 # Source: https://github.com/ffuf/ffuf (MIT) - Fast web fuzzer
 # Source: https://github.com/projectdiscovery/httpx (MIT) - HTTP toolkit
+# Source: https://github.com/hahwul/dalfox (MIT) - XSS vulnerability scanner
 RUN go install -v github.com/ffuf/ffuf/v2@latest \
-    && go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+    && go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest \
+    && go install -v github.com/hahwul/dalfox/v2@latest
 
 # Update nuclei templates
 RUN nuclei -update-templates || true

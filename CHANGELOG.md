@@ -11,12 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **API Security Testing Tools in Kali Sandbox** -- 5 new tools available via `kali_shell` for API security testing:
+- **API Security Testing Tools in Kali Sandbox** -- 6 new tools available via `kali_shell` for API and web security testing:
   - **ffuf** v2.1.0 -- fast web fuzzer for API endpoint/parameter discovery ([MIT](https://github.com/ffuf/ffuf))
   - **httpx** v1.9.0 (ProjectDiscovery) -- HTTP probing, tech detection, header analysis ([MIT](https://github.com/projectdiscovery/httpx))
   - **jwt_tool** v2.3.0 -- JWT exploitation: alg:none, key confusion, secret cracking ([GPL-3.0](https://github.com/ticarpi/jwt_tool))
   - **graphql-cop** -- GraphQL security auditor ([BSD-3-Clause](https://github.com/dolevf/graphql-cop))
   - **graphqlmap** -- GraphQL exploitation scripting engine ([MIT](https://github.com/swisskyrepo/GraphQLmap))
+  - **dalfox** -- XSS vulnerability scanner with WAF bypass, DOM-based and blind XSS support ([MIT](https://github.com/hahwul/dalfox))
 
 - **Community Skills** -- new section in wiki and Global Settings UI linking to community-contributed attack skill templates (API testing, XSS, SQLi, SSRF)
 

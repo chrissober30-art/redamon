@@ -340,9 +340,9 @@ Two-agent pipeline: a **Triage Agent** runs 9 hardcoded Cypher queries then uses
 
 ### Agent Skills
 
-An **LLM-powered Intent Router** classifies user requests into agent skills: CVE (MSF), SQL Injection, Credential Testing, Social Engineering, Availability Testing, or custom user-defined skills uploaded as Markdown files.
+An **LLM-powered Intent Router** classifies user requests into agent skills: CVE (MSF), SQL Injection, Credential Testing, Social Engineering, Availability Testing, or custom user-defined skills uploaded as Markdown files. Ready-to-use **[community skills](agentic/community-skills/)** are available for API testing, XSS, SQLi, and SSRF -- download the `.md` file and upload it via **Global Settings > Agent Skills** to activate it for your user. You can also [contribute your own](https://github.com/samugit83/redamon/wiki/Attack-Skills#share-your-skills-with-the-community) by opening a PR.
 
-> **[Wiki: Agent Skills](https://github.com/samugit83/redamon/wiki/Attack-Skills)**
+> **[Wiki: Agent Skills](https://github.com/samugit83/redamon/wiki/Attack-Skills)** | **[Community Skills](agentic/community-skills/)**
 
 ### GitHub Secret Hunter
 
