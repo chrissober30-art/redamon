@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [3.1.2] - 2026-03-28
+## [3.1.2] - 2026-03-29
 
 ### Added
+
+- **Surface Shaper** -- natural language attack surface scoping. Describe a subgraph in plain English and the AI generates a read-only Cypher query that carves out a focused slice of the reconnaissance graph. Active surfaces scope Graph Map, Data Table, bottom bar stats, and the AI agent's `query_graph` tool:
+  - Split-panel creation page with form on left and live graph preview on right
+  - 20 example queries organized by category (Infrastructure, Vulnerabilities, Web Application, Threat Intelligence, Attack Chains) via dropdown menu
+  - Save & Select button to instantly activate a surface and switch to Graph Map
+  - Unified filter group control in tab bar (create + select as segmented element)
+  - Write operation guard (CREATE, MERGE, DELETE blocked) on both webapp execute endpoint and agent tools
+  - Bottom bar dynamically reflects active surface (node types, counts, sessions, stats)
 
 - **API Security Testing Tools in Kali Sandbox** -- 6 new tools available via `kali_shell` for API and web security testing:
   - **ffuf** v2.1.0 -- fast web fuzzer for API endpoint/parameter discovery ([MIT](https://github.com/ffuf/ffuf))

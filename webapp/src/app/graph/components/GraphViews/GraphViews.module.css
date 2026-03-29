@@ -5,6 +5,29 @@
   overflow: hidden;
 }
 
+/* -- Split Layout -- */
+
+.splitLayout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.leftPanel {
+  display: flex;
+  flex-direction: column;
+  width: 50%;
+  border-right: 1px solid var(--border-default);
+  overflow: hidden;
+}
+
+.rightPanel {
+  display: flex;
+  flex-direction: column;
+  width: 50%;
+  overflow: hidden;
+}
+
 /* -- Header -- */
 
 .header {
@@ -52,6 +75,7 @@
   border-bottom: 1px solid var(--border-default);
   color: var(--text-secondary);
   font-size: var(--text-xs);
+  flex-shrink: 0;
 }
 
 /* -- Create Form -- */
@@ -59,10 +83,10 @@
 .createForm {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .label {
@@ -95,50 +119,102 @@
   color: var(--text-tertiary);
 }
 
-.examples {
+/* -- Label row with examples dropdown -- */
+
+.labelRow {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.examplesLabel {
+.examplesDropdown {
+  position: relative;
+}
+
+.examplesToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.examplesToggle:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.examplesToggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.examplesMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  width: 380px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: var(--space-1) 0;
+}
+
+.examplesGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.examplesGroup + .examplesGroup {
+  border-top: 1px solid var(--border-default);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+}
+
+.examplesGroupLabel {
+  padding: var(--space-1) var(--space-3);
   font-size: 10px;
+  font-weight: var(--font-semibold);
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.exampleChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.chip {
-  padding: 4px var(--space-2-5);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-full);
+.examplesItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-1-5) var(--space-3);
+  background: none;
+  border: none;
   color: var(--text-secondary);
   font-size: var(--text-xs);
+  text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.1s ease, color 0.1s ease;
 }
 
-.chip:hover {
-  border-color: var(--accent-primary);
-  color: var(--accent-primary);
+.examplesItem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
-.chip:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* -- Generate Row -- */
 
 .generateRow {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
 }
 
@@ -165,6 +241,8 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* -- Error Banner -- */
 
 .errorBanner {
   display: flex;
@@ -206,6 +284,12 @@
   gap: var(--space-1-5);
 }
 
+.cypherHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .cypherCode {
   padding: var(--space-3);
   background: var(--bg-primary);
@@ -223,26 +307,21 @@
   overflow-y: auto;
 }
 
-/* -- Preview -- */
-
-.previewSection {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-}
+/* -- Preview (right panel) -- */
 
 .previewHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
 }
 
 .previewCanvas {
   position: relative;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  flex: 1;
   overflow: hidden;
-  height: 350px;
   background: var(--bg-primary);
 }
 
@@ -281,22 +360,50 @@
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1-5) var(--space-3);
-  background: #22c55e;
-  border: none;
+  background: transparent;
+  border: 1px solid var(--status-success);
   border-radius: var(--radius-md);
-  color: #fff;
+  color: var(--status-success);
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: var(--transition-all);
   flex-shrink: 0;
 }
 
-.saveBtn:hover {
-  opacity: 0.9;
+.saveBtn:hover:not(:disabled) {
+  background: var(--status-success);
+  color: white;
 }
 
 .saveBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.saveSelectBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1-5) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--status-success);
+  border-radius: var(--radius-md);
+  color: var(--status-success);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: var(--transition-all);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.saveSelectBtn:hover:not(:disabled) {
+  background: var(--status-success);
+  color: white;
+}
+
+.saveSelectBtn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

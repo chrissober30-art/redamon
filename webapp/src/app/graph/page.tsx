@@ -106,6 +106,12 @@ export default function GraphPage() {
     fetchViews()
   }, [fetchViews])
 
+  const handleFilterCreatedAndSelect = useCallback((filterId: string) => {
+    fetchViews()
+    setSelectedFilterId(filterId)
+    setActiveView('graph')
+  }, [fetchViews])
+
   // Agent status polling — lightweight fetch every 5s for toolbar indicators
   const [agentSummary, setAgentSummary] = useState<{
     activeCount: number
@@ -323,7 +329,22 @@ export default function GraphPage() {
     return counts
   }, [tableRows])
 
-  const nodeTypes = useMemo(() => Object.keys(nodeTypeCounts).sort(), [nodeTypeCounts])
+  const filterNodeTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    filterTableRows.forEach(r => {
+      counts[r.node.type] = (counts[r.node.type] || 0) + 1
+    })
+    return counts
+  }, [filterTableRows])
+
+  const effectiveNodeTypeCounts = selectedFilterId ? filterNodeTypeCounts : nodeTypeCounts
+  const nodeTypes = useMemo(() => Object.keys(effectiveNodeTypeCounts).sort(), [effectiveNodeTypeCounts])
+
+  // Reset active node types when filter selection changes
+  useEffect(() => {
+    setActiveNodeTypes(new Set(nodeTypes))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFilterId])
 
   useEffect(() => {
     if (nodeTypes.length > 0 && !tableInitialized) {
@@ -351,22 +372,24 @@ export default function GraphPage() {
     'AttackChain', 'ChainStep', 'ChainDecision', 'ChainFailure', 'ChainFinding',
   ]), [])
 
+  const effectiveBarData = selectedFilterId ? filterGraphData : data
+
   const sessionChainIds = useMemo(() => {
-    if (!data) return []
+    if (!effectiveBarData) return []
     const ids = new Set<string>()
-    for (const node of data.nodes) {
+    for (const node of effectiveBarData.nodes) {
       const chainId = node.properties?.chain_id as string | undefined
       if (chainId && CHAIN_NODE_TYPES.has(node.type)) {
         ids.add(chainId)
       }
     }
     return Array.from(ids).sort()
-  }, [data, CHAIN_NODE_TYPES])
+  }, [effectiveBarData, CHAIN_NODE_TYPES])
 
   const sessionTitles = useMemo(() => {
-    if (!data) return {} as Record<string, string>
+    if (!effectiveBarData) return {} as Record<string, string>
     const titles: Record<string, string> = {}
-    for (const node of data.nodes) {
+    for (const node of effectiveBarData.nodes) {
       if (node.type === 'AttackChain') {
         const chainId = node.properties?.chain_id as string | undefined
         const title = node.properties?.title as string | undefined
@@ -376,7 +399,7 @@ export default function GraphPage() {
       }
     }
     return titles
-  }, [data])
+  }, [effectiveBarData])
 
   const [hiddenSessions, setHiddenSessions] = useState<Set<string>>(new Set())
 
@@ -982,6 +1005,7 @@ export default function GraphPage() {
               showLabels={showLabels}
               isDark={isDark}
               onFilterCreated={handleFilterCreated}
+              onFilterCreatedAndSelect={handleFilterCreatedAndSelect}
             />
           ) : activeView === 'table' ? (
             <DataTable
@@ -1124,12 +1148,12 @@ export default function GraphPage() {
       />
 
       <PageBottomBar
-        data={data}
+        data={effectiveBarData ?? undefined}
         is3D={is3D}
         showLabels={showLabels}
         activeView={activeView}
         activeNodeTypes={activeNodeTypes}
-        nodeTypeCounts={nodeTypeCounts}
+        nodeTypeCounts={effectiveNodeTypeCounts}
         onToggleNodeType={handleToggleNodeType}
         onSelectAllTypes={handleSelectAllTypes}
         onClearAllTypes={handleClearAllTypes}

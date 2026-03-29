@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useState, useRef, useEffect, useCallback } from 'react'
-import { Waypoints, Table2, Terminal, Shield, Search, Download, SquareTerminal, Filter, Trash2, X } from 'lucide-react'
+import { Waypoints, Table2, Terminal, Shield, Search, Download, SquareTerminal, Filter, Plus, Trash2, X } from 'lucide-react'
 import styles from './ViewTabs.module.css'
 
 export type ViewMode = 'graph' | 'graphViews' | 'table' | 'sessions' | 'terminal' | 'roe'
@@ -100,6 +100,74 @@ export const ViewTabs = memo(function ViewTabs({
   return (
     <div className={styles.tabBar}>
       <div className={styles.tabs} role="tablist" aria-label="View mode">
+        {/* Filter group -- create + select as a unified element */}
+        <div className={styles.filterGroup}>
+          <button
+            role="tab"
+            aria-selected={activeView === 'graphViews'}
+            className={`${styles.filterGroupCreate} ${activeView === 'graphViews' ? styles.filterGroupCreateActive : ''}`}
+            onClick={() => onViewChange('graphViews')}
+            title="Surface Shaper"
+          >
+            <Filter size={13} />
+            <Plus size={10} className={styles.createFilterPlus} />
+          </button>
+
+          {hasFilters && (
+            <div className={styles.filterGroupSelect} ref={dropdownRef}>
+              <button
+                className={`${styles.filterGroupPill} ${selectedFilter ? styles.filterGroupPillActive : ''}`}
+                onClick={() => setDropdownOpen(prev => !prev)}
+                title={selectedFilter ? `Active surface: ${selectedFilter.name}` : 'Select a surface'}
+              >
+                {selectedFilter ? (
+                  <>
+                    <span className={styles.filterPillName}>{selectedFilter.name}</span>
+                    <span
+                      className={styles.filterPillClear}
+                      onClick={handleClearFilter}
+                      title="Clear surface"
+                    >
+                      <X size={10} />
+                    </span>
+                  </>
+                ) : (
+                  <span className={styles.filterPillLabel}>Surfaces</span>
+                )}
+              </button>
+
+              {dropdownOpen && (
+                <div className={styles.filterDropdown}>
+                  <div className={styles.filterDropdownHeader}>Surface Shapers</div>
+                  <div className={styles.filterDropdownList}>
+                    {dataFilters!.map(f => (
+                      <div
+                        key={f.id}
+                        className={`${styles.filterDropdownItem} ${f.id === selectedFilterId ? styles.filterDropdownItemActive : ''}`}
+                        onClick={() => handleSelectFilter(f.id)}
+                      >
+                        <div className={styles.filterDropdownInfo}>
+                          <span className={styles.filterDropdownName}>{f.name}</span>
+                          {f.description && (
+                            <span className={styles.filterDropdownDesc}>{f.description}</span>
+                          )}
+                        </div>
+                        <button
+                          className={styles.filterDropdownDelete}
+                          onClick={(e) => handleDeleteFilter(f.id, e)}
+                          title="Delete surface"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <button
           role="tab"
           aria-selected={activeView === 'graph'}
@@ -108,72 +176,6 @@ export const ViewTabs = memo(function ViewTabs({
         >
           <Waypoints size={14} />
           <span>Graph Map</span>
-        </button>
-
-        {/* Data Filter selector -- only shown when filters exist */}
-        {hasFilters && (
-          <div className={styles.filterSelectorWrap} ref={dropdownRef}>
-            <button
-              className={`${styles.filterPill} ${selectedFilter ? styles.filterPillActive : ''}`}
-              onClick={() => setDropdownOpen(prev => !prev)}
-              title={selectedFilter ? `Active filter: ${selectedFilter.name}` : 'Select a data filter'}
-            >
-              <Filter size={11} />
-              {selectedFilter ? (
-                <>
-                  <span className={styles.filterPillName}>{selectedFilter.name}</span>
-                  <span
-                    className={styles.filterPillClear}
-                    onClick={handleClearFilter}
-                    title="Clear filter"
-                  >
-                    <X size={10} />
-                  </span>
-                </>
-              ) : (
-                <span className={styles.filterPillLabel}>Filters</span>
-              )}
-            </button>
-
-            {dropdownOpen && (
-              <div className={styles.filterDropdown}>
-                <div className={styles.filterDropdownHeader}>Data Filters</div>
-                <div className={styles.filterDropdownList}>
-                  {dataFilters!.map(f => (
-                    <div
-                      key={f.id}
-                      className={`${styles.filterDropdownItem} ${f.id === selectedFilterId ? styles.filterDropdownItemActive : ''}`}
-                      onClick={() => handleSelectFilter(f.id)}
-                    >
-                      <div className={styles.filterDropdownInfo}>
-                        <span className={styles.filterDropdownName}>{f.name}</span>
-                        {f.description && (
-                          <span className={styles.filterDropdownDesc}>{f.description}</span>
-                        )}
-                      </div>
-                      <button
-                        className={styles.filterDropdownDelete}
-                        onClick={(e) => handleDeleteFilter(f.id, e)}
-                        title="Delete filter"
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <button
-          role="tab"
-          aria-selected={activeView === 'graphViews'}
-          className={`${styles.tab} ${activeView === 'graphViews' ? styles.tabActive : ''}`}
-          onClick={() => onViewChange('graphViews')}
-        >
-          <Filter size={14} />
-          <span>Create Data Filter</span>
         </button>
         <button
           role="tab"

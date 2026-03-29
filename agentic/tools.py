@@ -239,6 +239,7 @@ class Neo4jToolManager:
         previous_error: str = None,
         previous_cypher: str = None,
         view_cypher: str = None,
+        for_graph_view: bool = False,
     ) -> str:
         """
         Use LLM to generate a Cypher query from natural language.
@@ -290,6 +291,17 @@ Your query MUST only return results that exist within this subgraph.
 Incorporate the filter pattern into your MATCH clauses so results are scoped appropriately.
 """
 
+        graph_view_rules = ""
+        if for_graph_view:
+            graph_view_rules = """
+- CRITICAL: This query is for a GRAPH VISUALIZATION. You MUST return full node and relationship objects, NOT individual properties.
+  Good: MATCH (s:Subdomain)-[r:RESOLVES_TO]->(i:IP) RETURN s, r, i LIMIT 300
+  Bad:  MATCH (s:Subdomain)-[r:RESOLVES_TO]->(i:IP) RETURN s.name, i.address LIMIT 300
+- Always include relationships in your MATCH pattern and RETURN clause so the graph displays connections between nodes.
+- For aggregation/filtering queries (e.g., "subdomains with at least 4 IPs"), use WITH for filtering, then re-MATCH to return full objects:
+  Example: MATCH (s:Subdomain)-[:RESOLVES_TO]->(i:IP) WITH s, count(i) AS cnt WHERE cnt >= 4 MATCH (s)-[r:RESOLVES_TO]->(i:IP) RETURN s, r, i LIMIT 300
+- Never use RETURN with property accessors (e.g. n.name). Always RETURN the node/relationship variable itself."""
+
         prompt = f"""{TEXT_TO_CYPHER_SYSTEM}
 
 ## Current Database Schema
@@ -300,7 +312,7 @@ Incorporate the filter pattern into your MATCH clauses so results are scoped app
 - Do NOT include user_id or project_id filters - they will be added automatically
 - Do NOT use any parameters (like $target, $domain, etc.) - use literal values or no filters
 - If the question doesn't specify a target, query ALL matching data
-- Always use LIMIT to restrict results
+- Always use LIMIT to restrict results{graph_view_rules}
 
 User Question: {question}
 
@@ -389,6 +401,13 @@ Cypher Query:"""
                             )
 
                         logger.info(f"[{user_id}/{project_id}] Generated Cypher (attempt {attempt + 1}): {cypher}")
+
+                        # Reject write operations -- query_graph is read-only
+                        _upper = cypher.upper()
+                        _WRITE_KW = ['CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET ', 'REMOVE', 'DROP', 'CALL']
+                        _found = next((kw for kw in _WRITE_KW if kw in _upper), None)
+                        if _found:
+                            return f"Error: Write operations are not allowed in graph queries (found: {_found.strip()})"
 
                         # Step 2: Inject mandatory tenant filters
                         filtered_cypher = manager._inject_tenant_filter(cypher, user_id, project_id)

@@ -19,6 +19,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Block write operations -- data filters are read-only
+    const upper = cypherQuery.toUpperCase().replace(/\/\/[^\n]*/g, '')
+    const WRITE_KEYWORDS = ['CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET', 'REMOVE', 'DROP', 'CALL']
+    const found = WRITE_KEYWORDS.find(kw => new RegExp(`\\b${kw}\\b`).test(upper))
+    if (found) {
+      return NextResponse.json(
+        { error: `Write operations are not allowed in data filters (found: ${found})` },
+        { status: 400 }
+      )
+    }
+
     // Inject project_id filter into every node pattern in the Cypher query.
     const filtered = injectProjectFilter(cypherQuery)
 

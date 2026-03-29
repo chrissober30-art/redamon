@@ -295,7 +295,7 @@ def _write_attack_chain(
         MERGE (ac)-[:CHAIN_TARGETS]->(p))
     WITH ac
     UNWIND (CASE WHEN size($target_cves) > 0 THEN $target_cves ELSE [null] END) AS cve_id
-    OPTIONAL MATCH (c:CVE {id: cve_id})
+    OPTIONAL MATCH (c:CVE {id: cve_id, user_id: $user_id, project_id: $project_id})
     FOREACH (_ IN CASE WHEN c IS NOT NULL THEN [1] ELSE [] END |
         MERGE (ac)-[:CHAIN_TARGETS]->(c))
     // Fallback: Domain when no CHAIN_TARGETS was actually created

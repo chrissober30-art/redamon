@@ -967,12 +967,22 @@ async def text_to_cypher(body: TextToCypherRequest):
     for attempt in range(max_retries):
         try:
             if attempt == 0:
-                cypher = await manager._generate_cypher(body.question)
+                cypher = await manager._generate_cypher(body.question, for_graph_view=True)
             else:
                 cypher = await manager._generate_cypher(
                     body.question,
                     previous_error=last_error,
                     previous_cypher=last_cypher,
+                    for_graph_view=True,
+                )
+
+            # Reject write operations -- data filters are read-only
+            _upper = cypher.upper()
+            _WRITE_KW = ['CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET ', 'REMOVE', 'DROP', 'CALL']
+            if any(kw in _upper for kw in _WRITE_KW):
+                return JSONResponse(
+                    content={"error": "Write operations are not allowed in data filters"},
+                    status_code=400,
                 )
 
             # Validate by executing (with tenant filter) to catch syntax errors
