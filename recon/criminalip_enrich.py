@@ -10,6 +10,11 @@ import logging
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 CRIMINALIP_API_BASE = "https://api.criminalip.io/v1/"
@@ -44,17 +49,40 @@ def _effective_key(api_key: str, key_rotator) -> str:
     return (api_key or "").strip()
 
 
+STOP_AUTH = "auth"
+STOP_CREDIT = "credit"
+STOP_RATE = "rate"
+
+
+def _classify_stop_reason(status: int, body_text: str) -> str | None:
+    """Return a stop reason if the response indicates further requests are futile."""
+    if status in (401, 403):
+        return STOP_AUTH
+    if status == 402:
+        return STOP_CREDIT
+    lower = body_text.lower()
+    if any(kw in lower for kw in ("credit", "quota", "exceeded", "limit reached", "insufficient")):
+        return STOP_CREDIT
+    if "unauthorized" in lower or "invalid api key" in lower or "invalid key" in lower:
+        return STOP_AUTH
+    return None
+
+
 def _cip_get(
     path: str,
     api_key: str,
     key_rotator,
     params: dict | None = None,
     timeout: int = 30,
-) -> dict | None:
-    """GET Criminal IP v1 with 429 retry once."""
+) -> tuple[dict | None, str | None]:
+    """GET Criminal IP v1 with 429 retry once.
+
+    Returns (body_or_none, stop_reason).  stop_reason is non-None when further
+    requests should be skipped (auth failure, credit exhaustion, rate limit).
+    """
     eff = _effective_key(api_key, key_rotator)
     if not eff:
-        return None
+        return None, STOP_AUTH
     url = f"{CRIMINALIP_API_BASE.rstrip('/')}/{path.lstrip('/')}"
     headers = {"x-api-key": eff}
     merged = dict(params or {})
@@ -66,27 +94,36 @@ def _cip_get(
                 key_rotator.tick()
             if resp.status_code == 200:
                 try:
-                    return resp.json()
+                    return resp.json(), None
                 except ValueError:
                     logger.warning(f"CriminalIP invalid JSON for {path}")
-                    return None
+                    return None, None
             if resp.status_code == 404:
                 logger.debug(f"CriminalIP 404 for {path}")
-                return None
+                return None, None
             if resp.status_code == 429:
                 logger.warning("CriminalIP rate limit (429), sleeping and retrying once")
                 if attempt == 0:
                     time.sleep(2)
                     continue
-                return None
+                return None, STOP_RATE
+
+            body_text = resp.text[:300]
+            stop = _classify_stop_reason(resp.status_code, body_text)
+            if stop:
+                logger.warning(
+                    f"CriminalIP {resp.status_code} for {path}: {body_text}"
+                )
+                return None, stop
+
             logger.warning(
-                f"CriminalIP {resp.status_code} for {path}: {resp.text[:200]}"
+                f"CriminalIP {resp.status_code} for {path}: {body_text[:200]}"
             )
-            return None
+            return None, None
         except requests.RequestException as e:
             logger.warning(f"CriminalIP request failed for {path}: {e}")
-            return None
-    return None
+            return None, None
+    return None, STOP_RATE
 
 
 def _parse_ip_report(ip: str, body: dict | None) -> dict | None:
@@ -267,9 +304,21 @@ def _parse_domain_report(domain: str, body: dict | None) -> dict | None:
     return out
 
 
+_STOP_MESSAGES = {
+    STOP_AUTH: "API key is invalid or expired — skipping remaining Criminal IP requests",
+    STOP_CREDIT: "API credit/quota exhausted — skipping remaining Criminal IP requests",
+    STOP_RATE: "Rate limit exceeded — skipping remaining Criminal IP requests",
+}
+
+_MAX_CONSECUTIVE_FAILURES = 3
+
+
 def run_criminalip_enrichment(combined_result: dict, settings: dict) -> dict:
     """
     Run Criminal IP enrichment: domain report (domain mode) and per-IP data.
+
+    Stops early on auth/credit errors (single message) or after
+    ``_MAX_CONSECUTIVE_FAILURES`` consecutive data failures.
 
     Mutates combined_result in place with key ``criminalip``.
     """
@@ -280,14 +329,15 @@ def run_criminalip_enrichment(combined_result: dict, settings: dict) -> dict:
     key_rotator = settings.get("CRIMINALIP_KEY_ROTATOR")
 
     if not _effective_key(api_key, key_rotator):
-        print(f"[!][CriminalIP] No API key configured — skipping")
+        print("[!][CriminalIP] No API key configured — skipping")
         return combined_result
 
     domain = combined_result.get("domain", "")
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "CriminalIP")
 
-    print(f"[*][CriminalIP] Starting OSINT enrichment")
+    print("[*][CriminalIP] Starting OSINT enrichment")
     print(f"[+][CriminalIP] Extracted {len(ips)} unique IPs for enrichment")
 
     cip_data: dict = {
@@ -295,40 +345,74 @@ def run_criminalip_enrichment(combined_result: dict, settings: dict) -> dict:
         "domain_report": None,
     }
 
+    def _handle_stop(reason: str) -> None:
+        msg = _STOP_MESSAGES.get(reason, f"Stopping Criminal IP requests ({reason})")
+        print(f"[!][CriminalIP] {msg}")
+
     try:
         need_sleep = False
+        stopped = False
+
         if domain and not is_ip_mode:
             print(f"[*][CriminalIP] Fetching domain report for {domain}...")
-            raw = _cip_get(
+            raw, stop = _cip_get(
                 "domain/report",
                 api_key,
                 key_rotator,
                 params={"query": domain},
             )
-            cip_data["domain_report"] = _parse_domain_report(domain, raw)
-            if cip_data["domain_report"]:
-                print(f"[+][CriminalIP] Domain report retrieved for {domain}")
+            if stop:
+                _handle_stop(stop)
+                stopped = True
             else:
-                print(f"[!][CriminalIP] No domain report data for {domain}")
+                cip_data["domain_report"] = _parse_domain_report(domain, raw)
+                if cip_data["domain_report"]:
+                    print(f"[+][CriminalIP] Domain report retrieved for {domain}")
+                else:
+                    print(f"[!][CriminalIP] No domain report data for {domain}")
             need_sleep = True
 
+        consecutive_fails = 0
+        ips_attempted = 0
         for ip in ips:
+            if stopped:
+                break
             if need_sleep:
                 time.sleep(1)
             need_sleep = True
+            ips_attempted += 1
             print(f"[*][CriminalIP] Fetching IP data for {ip}...")
-            raw = _cip_get("ip/data", api_key, key_rotator, params={"ip": ip, "full": "true"})
+            raw, stop = _cip_get("ip/data", api_key, key_rotator, params={"ip": ip, "full": "true"})
+
+            if stop:
+                _handle_stop(stop)
+                stopped = True
+                break
+
             report = _parse_ip_report(ip, raw)
             if report:
                 cip_data["ip_reports"].append(report)
+                consecutive_fails = 0
                 vuln_count = len(report.get("vulnerabilities") or [])
                 print(
                     f"[+][CriminalIP] IP data retrieved for {ip} "
                     f"(ports={len(report['ports'])}, vulns={vuln_count})"
                 )
             else:
+                consecutive_fails += 1
                 logger.warning(f"CriminalIP: no data for {ip}")
+                if consecutive_fails >= _MAX_CONSECUTIVE_FAILURES:
+                    print(
+                        f"[!][CriminalIP] {consecutive_fails} consecutive failures "
+                        f"— skipping remaining IPs"
+                    )
+                    stopped = True
+                    break
 
+        if stopped:
+            skipped = len(ips) - ips_attempted
+            if skipped > 0:
+                print(f"[!][CriminalIP] Skipped {skipped} remaining IP(s)")
         print(
             f"[+][CriminalIP] Enrichment complete: "
             f"{len(cip_data['ip_reports'])} IP report(s), "

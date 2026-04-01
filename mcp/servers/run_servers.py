@@ -72,6 +72,11 @@ SERVERS = {
         "module": "nmap_server",
         "port": 8004,
         "description": "Network Mapper"
+    },
+    "playwright": {
+        "module": "playwright_server",
+        "port": 8005,
+        "description": "Browser Automation"
     }
 }
 

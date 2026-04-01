@@ -198,7 +198,11 @@ Discovered subdomains/hostnames under a domain.
     discovered_at: datetime,
     source: "crt.sh"                        // Discovery source: "crt.sh", "hackertarget", "knockpy",
                                             // "subfinder", "amass", "shodan_rdns", "shodan_dns",
-                                            // "urlscan", "fofa", "otx_passive_dns", "censys_rdns"
+                                            // "urlscan", "fofa", "otx_passive_dns", "censys_rdns",
+                                            // "uncover"
+    uncover_sources: ['shodan', 'censys'],  // Uncover engines that contributed (when source='uncover')
+    uncover_total_raw: 42,                  // Uncover raw results count
+    uncover_total_deduped: 30,              // Uncover deduplicated results count
 })
 ```
 
@@ -310,6 +314,14 @@ IP addresses discovered through DNS resolution.
     criminalip_ids_count: 2,                   // Count of IDS/Snort alerts for this IP
     criminalip_scanning_count: 20,             // Count of inbound scanning events recorded
     criminalip_categories: "[\"malware\", \"attack (Low)\"]"  // JSON list of IP category labels
+
+    // Uncover discovery flags (set by ProjectDiscovery uncover multi-engine search)
+    uncover_discovered: true,               // IP was first found via uncover target expansion
+    uncover_enriched: true,                 // Uncover has processed this IP
+    uncover_sources: ['shodan', 'censys'],  // Search engines that found results
+    uncover_source_counts: '{"shodan": 5}', // JSON-encoded engine->count map
+    uncover_total_raw: 42,                  // Total raw results before dedup
+    uncover_total_deduped: 30,              // Total results after dedup
 })
 ```
 
@@ -330,7 +342,8 @@ Open ports discovered on IPs/hosts.
     protocol: "tcp",                        // tcp or udp
     state: "open",
     source: "naabu",                        // Discovery source: "naabu", "masscan", "shodan",
-                                            // "censys", "fofa", "netlas", "zoomeye", "criminalip"
+                                            // "censys", "fofa", "netlas", "zoomeye", "criminalip",
+                                            // "uncover"
 
     // Nmap service version enrichment (set by update_graph_from_nmap)
     product: "nginx",                       // Product name from Nmap -sV

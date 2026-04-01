@@ -1,8 +1,8 @@
 """
 Unit tests for Censys OSINT enrichment (recon/censys_enrich.py).
 
-Mocks requests.get for https://search.censys.io/api/v2/hosts/{ip}.
-Censys uses HTTP Basic auth and has no KEY_ROTATOR (.tick() N/A).
+Mocks requests.get for the Censys Platform API v3.
+Censys uses Bearer-token auth (Personal Access Token + Organization ID).
 """
 from __future__ import annotations
 
@@ -56,8 +56,8 @@ class TestCensysEnrich(unittest.TestCase):
     def _settings(self, **overrides) -> dict:
         base = {
             "CENSYS_ENABLED": True,
-            "CENSYS_API_ID": "id-test",
-            "CENSYS_API_SECRET": "secret-test",
+            "CENSYS_API_TOKEN": "token-test",
+            "CENSYS_ORG_ID": "org-test",
         }
         base.update(overrides)
         return base
@@ -83,15 +83,15 @@ class TestCensysEnrich(unittest.TestCase):
 
         mock_get.assert_called()
         args, kwargs = mock_get.call_args
-        self.assertTrue(str(args[0]).startswith("https://search.censys.io/api/v2/hosts/"))
-        self.assertEqual(kwargs.get("auth"), ("id-test", "secret-test"))
+        self.assertIn("api.platform.censys.io/v3/global/asset/host/", str(args[0]))
+        self.assertIn("Bearer token-test", kwargs.get("headers", {}).get("Authorization", ""))
 
     @patch("censys_enrich.requests.get")
     def test_missing_api_key(self, mock_get):
         cr = _combined_result()
         for settings in (
-            self._settings(CENSYS_API_ID=""),
-            self._settings(CENSYS_API_SECRET=""),
+            self._settings(CENSYS_API_TOKEN=""),
+            self._settings(CENSYS_ORG_ID=""),
         ):
             out = run_censys_enrichment(cr, settings)
             self.assertNotIn("censys", out)
@@ -100,13 +100,22 @@ class TestCensysEnrich(unittest.TestCase):
     @patch("censys_enrich.time.sleep")
     @patch("censys_enrich.requests.get")
     def test_http_error(self, mock_get, _sleep):
-        for code in (401, 500):
+        for code in (500, 502):
             with self.subTest(code=code):
                 mock_get.reset_mock()
                 mock_get.return_value = _mock_response(code, {}, text="err")
                 cr = _combined_result()
                 out = run_censys_enrichment(cr, self._settings())
                 self.assertEqual(out["censys"]["hosts"], [])
+
+    @patch("censys_enrich.time.sleep")
+    @patch("censys_enrich.requests.get")
+    def test_auth_error_stops(self, mock_get, _sleep):
+        """401/403 should stop all further fetches (treated like rate limit)."""
+        mock_get.return_value = _mock_response(401, {}, text="unauthorized")
+        cr = _combined_result()
+        out = run_censys_enrichment(cr, self._settings())
+        self.assertEqual(out["censys"]["hosts"], [])
 
     @patch("censys_enrich.time.sleep")
     @patch("censys_enrich.requests.get")

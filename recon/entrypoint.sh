@@ -140,6 +140,7 @@ IMAGES=(
     "caffix/amass:latest"
     "frost19k/puredns:latest"
     "jauderho/hakrawler:latest"
+    "projectdiscovery/uncover:latest"
 )
 
 for IMAGE in "${IMAGES[@]}"; do

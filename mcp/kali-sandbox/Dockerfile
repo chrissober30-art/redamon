@@ -126,6 +126,12 @@ RUN git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git /opt/graph
     && pip install --no-cache-dir requests \
     && pip install --no-cache-dir -e .
 
+# Playwright browser automation (for web application recon & interaction)
+RUN pip install --no-cache-dir playwright \
+    && playwright install chromium \
+    && playwright install-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
 # Ensure ProjectDiscovery Go httpx wins over Python httpx CLI wrapper in PATH
 RUN ln -sf /root/go/bin/httpx /opt/venv/bin/httpx
 
@@ -141,15 +147,11 @@ RUN chmod +x /opt/entrypoint.sh
 
 WORKDIR /opt/mcp_servers
 
-# Install ngrok via official APT repository (for optional single-port TCP tunneling of reverse shells)
-RUN curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-        | tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
-    && echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
-        | tee /etc/apt/sources.list.d/ngrok.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends ngrok \
-    && rm -rf /var/lib/apt/lists/* \
-    || echo "[WARN] ngrok installation failed — tunneling via ngrok will be unavailable"
+# Install ngrok (for optional single-port TCP tunneling of reverse shells)
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -sSLf "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${ARCH}.tgz" \
+    | tar -xz -C /usr/local/bin \
+    || echo "WARNING: ngrok download failed (CDN may be down), skipping"
 
 # Install chisel (for optional multi-port TCP tunneling — reverse shells + web delivery)
 RUN CHISEL_VERSION="1.11.4" && \
@@ -159,7 +161,7 @@ RUN CHISEL_VERSION="1.11.4" && \
     chmod +x /usr/local/bin/chisel
 
 # Expose ports for MCP servers (SSE/HTTP transport) + tunnel manager + ngrok API + terminal WS
-EXPOSE 8000 8002 8003 8004 8014 8015 8016 4040
+EXPOSE 8000 8002 8003 8004 8005 8014 8015 8016 4040
 
 # Initialize Metasploit database (speeds up first run)
 RUN msfdb init || true

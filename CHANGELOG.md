@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.0] - 2026-03-31
+
+### Added
+
+- **Uncover Multi-Engine Target Expansion** -- ProjectDiscovery's [uncover](https://github.com/projectdiscovery/uncover) integrated as GROUP 2b in the recon pipeline, running before Shodan and port scanning to expand the target surface. Queries up to 13 search engines simultaneously to discover exposed hosts, IPs, and endpoints associated with the target domain:
+  - **Engines:** Shodan, Censys, FOFA, ZoomEye, Netlas, CriminalIP (reuses existing pipeline keys) + Quake, Hunter, PublicWWW, HunterHow, Google Custom Search, Onyphe, Driftnet (uncover-specific keys)
+  - **Smart key reuse:** automatically picks up API keys already configured for standalone OSINT enrichment modules -- no extra configuration needed if you already have Shodan/Censys/FOFA/etc. keys
+  - **Docker-in-Docker:** runs `projectdiscovery/uncover:latest` container with a dynamically generated `provider-config.yaml` containing only engines with valid credentials
+  - **Engine-aware parsing:** handles per-engine quirks -- Google's URL-in-IP field, PublicWWW's host-only results (no IP), Censys URL endpoints. All three previously produced silent data loss
+  - **URL discovery:** captures in-scope URLs from engines that populate the `url` field (Censys, PublicWWW, Google), stored as Endpoint nodes in Neo4j
+  - **Pipeline merge:** discovered subdomains are injected into `dns.subdomains` so all downstream modules (port scan, HTTP probe, OSINT enrichment) process them automatically. New IPs are added to `metadata.expanded_ips`
+  - **Neo4j graph:** `update_graph_from_uncover()` in `osint_mixin.py` creates Subdomain, IP, Port, and Endpoint nodes with source tracking (`uncover_sources`, `uncover_source_counts`, `uncover_total_raw`, `uncover_total_deduped`)
+  - **Frontend:** embedded in OsintEnrichmentSection with enable/disable toggle and max results (1-10,000). Settings page groups uncover-specific keys under "Uncover (Multi-Engine Search)" with `Standalone + Uncover` badges on shared keys
+  - **Prisma schema:** `uncoverEnabled`, `uncoverMaxResults`, `uncoverDockerImage` fields + 8 API key fields in UserGlobalSettings (Quake, Hunter, PublicWWW, HunterHow, Google key+CX, Onyphe, Driftnet)
+  - **Tests:** 42 unit tests covering provider config, deduplication, host/IP extraction, Google/PublicWWW quirks, URL collection, merge logic, isolated wrapper
+
+- **Centralized IP Filtering (`ip_filter.py`)** -- shared module replacing duplicate inline filtering across all OSINT enrichment modules:
+  - `is_non_routable_ip()` -- filters RFC 1918 private, loopback, link-local, CGNAT (100.64.0.0/10), multicast, reserved ranges
+  - `collect_cdn_ips()` -- gathers IPs flagged as CDN by Naabu/httpx from port scan and HTTP probe data
+  - `filter_ips_for_enrichment()` -- single entry point used by all 9 enrichment modules (Shodan, Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP, Uncover) to skip non-routable and CDN IPs before making external API calls
+  - 22 unit tests covering all IP classification categories, CDN collection, and filtering combinations
+
+- **Censys Platform API v3 Migration** -- migrated from deprecated Basic Auth (`API_ID:API_SECRET`) to Bearer token auth (`CENSYS_API_TOKEN` + `CENSYS_ORG_ID`). Both the recon pipeline enrichment module and the AI agent's `censys_lookup` tool now use the Platform API v3 (`api.platform.censys.io/v3/global`). Old credentials are consolidated via database migration
+
+- **CriminalIP Agent Tool** -- added `criminalip_lookup` to the AI agent's tool registry for interactive IP threat intelligence queries
+
+- **Playwright Browser Automation (MCP Tool)** -- headless Chromium browser automation exposed as an MCP tool (`execute_playwright`) on port 8005 inside the Kali sandbox. Enables the AI agent to interact with JavaScript-rendered pages, SPAs, and dynamic web applications that curl cannot handle:
+  - **Two modes:** Content extraction (navigate URL, extract rendered text/HTML with optional CSS selector) and Script mode (run multi-step Playwright Python code with pre-initialized `browser`, `context`, `page` variables)
+  - **Backend:** `mcp/servers/playwright_server.py` MCP server using FastMCP, subprocess-based script execution with ANSI stripping, 45s timeout for content mode, 60s for scripts
+  - **Docker:** Playwright + Chromium installed in kali-sandbox Dockerfile, headless with `--no-sandbox` and Chrome 120 user-agent. Server registered in `run_servers.py` on port 8005
+  - **Agent integration:** configured in `agentic/tools.py` as MCP server (SSE transport, 60s connection / 120s read timeout), documented in `tool_registry.py` with both modes and examples
+  - **Phase restrictions:** allowed in all phases (informational, exploitation, post_exploitation). Marked as a **dangerous tool** requiring manual confirmation before execution
+  - **Stealth mode:** restricted to single-URL operations only -- no crawling, bulk scraping, or credential spraying. Maximum 2 form submissions per target
+  - **Output:** max 15,000 chars per extraction, truncated with notice. Script mode captures stdout with filtered Playwright verbose logging
+
+### Fixed
+
+- **Silent data loss in uncover** -- Google engine results (URL in IP field) and PublicWWW results (no IP, host-only) were silently dropped by deduplication. Fixed with engine-aware parsing that extracts hostnames from URLs and uses `(host, port)` fallback dedup key
+- **Graph data loss in uncover** -- `sources`, `source_counts`, `total_raw`, `total_deduped` metadata fields were collected but never written to Neo4j nodes. All fields now stored on Subdomain and IP nodes
+- **Logging format violations in uncover** -- replaced `logger.info()`/`logger.error()` calls with standard `print("[symbol][Uncover]")` format per pipeline conventions
+- **Missing Prisma schema field** -- `uncoverDockerImage` was in Python settings but missing from Prisma schema, causing frontend/DB desync
+- **Missing nodeMapping entries** -- Uncover was not listed in `SECTION_INPUT_MAP` / `SECTION_NODE_MAP`, breaking the graph visualization node info tooltips
+
+---
+
 ## [3.1.4] - 2026-03-29
 
 ### Added

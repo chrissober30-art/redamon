@@ -14,6 +14,11 @@ from typing import Any
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 FOFA_API_URL = "https://fofa.info/api/v1/search/all"
@@ -174,6 +179,7 @@ def run_fofa_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict
     domain = combined_result.get("domain", "") or ""
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "FOFA")
 
     print(f"[*][FOFA] Starting OSINT enrichment")
 

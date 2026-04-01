@@ -928,7 +928,7 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 - status_codes (list[int]): all unique HTTP status codes seen e.g. [200, 301, 404]
 - http_live_url_count (int): count of URLs with status < 500
 - http_probed_at (datetime): when last HTTP-probed
-- source (string): discovery source ("crt.sh", "hackertarget", "knockpy", "shodan_rdns", "shodan_dns", "urlscan", "fofa", "otx_passive_dns", "censys_rdns")
+- source (string): discovery source ("crt.sh", "hackertarget", "knockpy", "shodan_rdns", "shodan_dns", "urlscan", "fofa", "otx_passive_dns", "censys_rdns", "uncover")
 
 **IP** - Resolved IP addresses
 - address (string): "192.168.1.1"
@@ -975,12 +975,18 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 - fofa_last_seen (string): last time FOFA indexed this asset (ISO datetime string)
 - os (string): OS fingerprint from FOFA (os field)
 - region (string): region/province from FOFA (region field)
+- uncover_discovered (boolean): IP was first found via ProjectDiscovery uncover multi-engine search
+- uncover_enriched (boolean): uncover has processed this IP
+- uncover_sources (list[string]): search engines that returned results (e.g. shodan, censys, fofa)
+- uncover_source_counts (string): JSON-encoded dict of engine->result count
+- uncover_total_raw (integer): total raw results before deduplication
+- uncover_total_deduped (integer): total results after deduplication
 
 **Port** - Open ports on IPs
 - number (integer): 80, 443, 22
 - protocol (string): "tcp", "udp"
 - state (string): "open", "closed", "filtered"
-- source (string): which tool discovered it ("naabu", "masscan", "shodan", "censys", "fofa", "netlas", "zoomeye", "criminalip")
+- source (string): which tool discovered it ("naabu", "masscan", "shodan", "censys", "fofa", "netlas", "zoomeye", "criminalip", "uncover")
 - product (string): software product from Nmap -sV (e.g. "vsftpd", "Apache Tomcat", "MySQL")
 - version (string): software version from Nmap -sV (e.g. "2.3.4", "8.5.19")
 - cpe (string): CPE string from Nmap (e.g. "cpe:/a:vsftpd:vsftpd:2.3.4")

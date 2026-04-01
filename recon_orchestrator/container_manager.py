@@ -31,6 +31,7 @@ SUB_CONTAINER_IMAGES = [
     "projectdiscovery/httpx",
     "projectdiscovery/katana",
     "projectdiscovery/nuclei",
+    "projectdiscovery/uncover",
     "sxcurity/gau",
     "frost19k/puredns",
 ]

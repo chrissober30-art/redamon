@@ -13,6 +13,11 @@ from typing import Any
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 NETLAS_API_BASE = "https://app.netlas.io/api"
@@ -210,6 +215,7 @@ def run_netlas_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     domain = combined_result.get("domain", "") or ""
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "Netlas")
 
     print(f"[*][Netlas] Starting OSINT enrichment")
 

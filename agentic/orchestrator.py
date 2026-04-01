@@ -220,7 +220,7 @@ class AgentOrchestrator:
         # OSINT tools — Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP
         if hasattr(self, '_osint_managers') and self.tool_executor:
             _osint_key_map = {
-                'censys': {'id_field': 'censysApiId', 'secret_field': 'censysApiSecret', 'token_field': 'censysApiToken'},
+                'censys': {'token_field': 'censysApiToken', 'org_id_field': 'censysOrgId'},
                 'fofa': {'key_field': 'fofaApiKey', 'rotation_name': 'fofa'},
                 'otx': {'key_field': 'otxApiKey', 'rotation_name': 'otx'},
                 'netlas': {'key_field': 'netlasApiKey', 'rotation_name': 'netlas'},
@@ -237,19 +237,16 @@ class AgentOrchestrator:
                     self.tool_executor.update_osint_tool(tool_name, None)
                     continue
                 if tool_name == 'censys':
-                    api_id = user_settings.get(key_cfg['id_field'], '')
-                    api_secret = user_settings.get(key_cfg['secret_field'], '')
                     api_token = user_settings.get('censysApiToken', '')
+                    org_id = user_settings.get('censysOrgId', '')
                     creds_changed = (
-                        mgr.api_id != api_id
-                        or mgr.api_secret != api_secret
-                        or mgr.api_token != api_token
+                        mgr.api_token != api_token
+                        or mgr.org_id != org_id
                     )
-                    has_creds = bool(api_token) or bool(api_id and api_secret)
+                    has_creds = bool(api_token) and bool(org_id)
                     if has_creds and creds_changed:
-                        mgr.api_id = api_id
-                        mgr.api_secret = api_secret
                         mgr.api_token = api_token
+                        mgr.org_id = org_id
                         self.tool_executor.update_osint_tool(tool_name, mgr.get_tool())
                         logger.info(f"Updated {tool_name} tool with API credentials")
                 else:

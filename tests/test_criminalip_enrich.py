@@ -211,8 +211,19 @@ class TestCriminalipEnrich(unittest.TestCase):
 
     @patch("criminalip_enrich.time.sleep")
     @patch("criminalip_enrich.requests.get")
-    def test_http_error(self, mock_get, _sleep):
-        for code in (401, 500):
+    def test_http_error_500(self, mock_get, _sleep):
+        """Non-auth errors (500) return None without triggering a hard stop."""
+        mock_get.return_value = _mock_response(500, {}, text="err")
+        cr = _combined_result()
+        out = run_criminalip_enrichment(cr, self._settings())
+        self.assertIsNone(out["criminalip"]["domain_report"])
+        self.assertEqual(out["criminalip"]["ip_reports"], [])
+
+    @patch("criminalip_enrich.time.sleep")
+    @patch("criminalip_enrich.requests.get")
+    def test_auth_error_stops_early(self, mock_get, _sleep):
+        """401/403 on the first request stops all further requests."""
+        for code in (401, 403):
             with self.subTest(code=code):
                 mock_get.reset_mock()
                 mock_get.return_value = _mock_response(code, {}, text="err")
@@ -220,6 +231,7 @@ class TestCriminalipEnrich(unittest.TestCase):
                 out = run_criminalip_enrichment(cr, self._settings())
                 self.assertIsNone(out["criminalip"]["domain_report"])
                 self.assertEqual(out["criminalip"]["ip_reports"], [])
+                self.assertEqual(mock_get.call_count, 1, "Should stop after first auth failure")
 
     @patch("criminalip_enrich.time.sleep")
     @patch("criminalip_enrich.requests.get")
@@ -337,6 +349,98 @@ class TestCriminalipEnrich(unittest.TestCase):
         # ports from direct list
         self.assertEqual(len(rep["ports"]), 2)
         self.assertEqual(rep["ports"][0]["port"], 80)
+
+
+    @patch("criminalip_enrich.time.sleep")
+    @patch("criminalip_enrich.requests.get")
+    def test_credit_exhaustion_stops_early(self, mock_get, _sleep):
+        """Response body mentioning 'credit' or 'quota' triggers early stop."""
+        mock_get.return_value = _mock_response(
+            400, {}, text='{"status":400,"message":"credit exceeded"}'
+        )
+        cr = _combined_result()
+        out = run_criminalip_enrichment(cr, self._settings())
+        self.assertIsNone(out["criminalip"]["domain_report"])
+        self.assertEqual(out["criminalip"]["ip_reports"], [])
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch("criminalip_enrich.time.sleep")
+    @patch("criminalip_enrich.requests.get")
+    def test_consecutive_data_failures_stop(self, mock_get, _sleep):
+        """After 3 consecutive IPs returning no data, remaining IPs are skipped."""
+        cr = {
+            "domain": "",
+            "metadata": {"ip_mode": True, "expanded_ips": [
+                "1.2.3.1", "1.2.3.2", "1.2.3.3", "1.2.3.4", "1.2.3.5",
+            ]},
+            "dns": {"domain": {}, "subdomains": {}},
+        }
+        mock_get.return_value = _mock_response(
+            400, {}, text='{"status":400,"message":"Invalid IP Address","data":{}}'
+        )
+        out = run_criminalip_enrichment(cr, self._settings())
+        self.assertEqual(out["criminalip"]["ip_reports"], [])
+        self.assertEqual(mock_get.call_count, 3, "Should stop after 3 consecutive failures")
+
+    @patch("criminalip_enrich.time.sleep")
+    @patch("criminalip_enrich.requests.get")
+    def test_consecutive_counter_resets_on_success(self, mock_get, _sleep):
+        """A successful response resets the consecutive failure counter."""
+        call_count = {"n": 0}
+
+        def side_effect(url, **_kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                return _mock_response(200, _cip_ip_body())
+            return _mock_response(
+                400, {}, text='{"status":400,"message":"Invalid IP Address"}'
+            )
+
+        mock_get.side_effect = side_effect
+        cr = {
+            "domain": "",
+            "metadata": {"ip_mode": True, "expanded_ips": [
+                "1.2.3.1", "1.2.3.2", "1.2.3.3", "1.2.3.4", "1.2.3.5",
+                "1.2.3.6", "1.2.3.7",
+            ]},
+            "dns": {"domain": {}, "subdomains": {}},
+        }
+        out = run_criminalip_enrichment(cr, self._settings())
+        self.assertEqual(len(out["criminalip"]["ip_reports"]), 1)
+        self.assertEqual(mock_get.call_count, 5,
+                         "1 fail, 1 success (reset), 3 more fails then stop")
+
+    @patch("criminalip_enrich.time.sleep")
+    @patch("criminalip_enrich.requests.get")
+    def test_rate_limit_stops_ip_loop(self, mock_get, mock_sleep):
+        """429 on an IP request stops all further IP queries."""
+        def side_effect(url, **_kwargs):
+            if "domain/report" in url:
+                return _mock_response(200, _cip_domain_body())
+            return _mock_response(429, {}, text="rate limited")
+
+        mock_get.side_effect = side_effect
+        cr = {
+            "domain": "example.com",
+            "metadata": {"ip_mode": False},
+            "dns": {"domain": {"ips": {"ipv4": ["1.2.3.1", "1.2.3.2", "1.2.3.3"]}}, "subdomains": {}},
+        }
+        out = run_criminalip_enrichment(cr, self._settings())
+        self.assertIsNotNone(out["criminalip"]["domain_report"])
+        self.assertEqual(out["criminalip"]["ip_reports"], [])
+        ip_calls = [c for c in mock_get.call_args_list if "ip/data" in str(c)]
+        self.assertEqual(len(ip_calls), 2,
+                         "One attempt + one retry for the first IP, then stop")
+
+    @patch("criminalip_enrich.time.sleep")
+    @patch("criminalip_enrich.requests.get")
+    def test_402_credit_stops(self, mock_get, _sleep):
+        """HTTP 402 is treated as credit exhaustion and stops immediately."""
+        mock_get.return_value = _mock_response(402, {}, text="payment required")
+        cr = _combined_result()
+        out = run_criminalip_enrichment(cr, self._settings())
+        self.assertIsNone(out["criminalip"]["domain_report"])
+        self.assertEqual(mock_get.call_count, 1)
 
 
 if __name__ == "__main__":

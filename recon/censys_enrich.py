@@ -1,12 +1,12 @@
 """
 Censys Pipeline Enrichment Module
 
-Passive OSINT enrichment using the Censys Search API v2 (hosts).
+Passive OSINT enrichment using the Censys Platform API v3.
 Queries host records for discovered IPv4 addresses: services, geo location,
 autonomous system, and operating system metadata.
 
-Requires CENSYS_API_ID and CENSYS_API_SECRET (HTTP Basic Auth). No key rotation
-(pair credentials).
+Requires CENSYS_API_TOKEN (Personal Access Token) and CENSYS_ORG_ID
+(Organization ID).  Uses Bearer-token auth against api.platform.censys.io.
 """
 from __future__ import annotations
 
@@ -14,11 +14,16 @@ import time
 import logging
 from typing import Any
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 import requests
 
 logger = logging.getLogger(__name__)
 
-CENSYS_API_BASE = "https://search.censys.io/api/v2"
+CENSYS_API_BASE = "https://api.platform.censys.io/v3/global"
 
 
 def _extract_ips_from_recon(combined_result: dict) -> list[str]:
@@ -70,25 +75,19 @@ def _censys_normalize_software(svc: dict) -> list:
     return out
 
 
-def _censys_get_host(ip: str, api_id: str, api_secret: str, api_token: str = "") -> tuple[dict | None, bool]:
-    """GET /v2/hosts/{ip} using Bearer token (Personal API Token) or Basic auth (ID + Secret).
+def _censys_get_host(ip: str, api_token: str, org_id: str) -> tuple[dict | None, bool]:
+    """GET /v3/global/asset/host/{ip} with Bearer token auth.
 
     Returns (result_or_none, rate_limited). If rate_limited, caller should stop.
     """
-    url = f"{CENSYS_API_BASE}/hosts/{ip}"
+    url = f"{CENSYS_API_BASE}/asset/host/{ip}"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json",
+    }
+    params = {"organization_id": org_id}
     try:
-        if api_token:
-            resp = requests.get(
-                url,
-                headers={"Authorization": f"Bearer {api_token}"},
-                timeout=30,
-            )
-        else:
-            resp = requests.get(
-                url,
-                auth=(api_id, api_secret),
-                timeout=30,
-            )
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
         if resp.status_code == 200:
             body = resp.json()
             result = body.get("result")
@@ -102,6 +101,10 @@ def _censys_get_host(ip: str, api_id: str, api_secret: str, api_token: str = "")
         if resp.status_code == 429:
             logger.warning("Censys rate limit (429) — stopping host fetches for this run")
             print("[!][Censys] Rate limit hit — skipping remaining hosts")
+            return None, True
+        if resp.status_code in (401, 403):
+            logger.warning(f"Censys {resp.status_code} — auth failed (check token/org-id)")
+            print(f"[!][Censys] Auth error {resp.status_code} — verify API Token and Organization ID")
             return None, True
         logger.warning(f"Censys {resp.status_code} for {ip}: {resp.text[:200]}")
         return None, False
@@ -270,17 +273,17 @@ def run_censys_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     if not settings.get("CENSYS_ENABLED", False):
         return combined_result
 
-    api_id = settings.get("CENSYS_API_ID", "") or ""
-    api_secret = settings.get("CENSYS_API_SECRET", "") or ""
     api_token = settings.get("CENSYS_API_TOKEN", "") or ""
-    if not api_token and (not api_id or not api_secret):
-        logger.warning("Censys credentials missing — skipping enrichment")
-        print("[!][Censys] No Censys credentials configured (need Personal API Token or API ID + Secret) — skipping")
+    org_id = settings.get("CENSYS_ORG_ID", "") or ""
+    if not api_token or not org_id:
+        logger.warning("Censys API Token or Organization ID missing — skipping enrichment")
+        print("[!][Censys] CENSYS_API_TOKEN / CENSYS_ORG_ID not configured — skipping")
         return combined_result
 
     print(f"[*][Censys] Starting OSINT enrichment")
 
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "Censys")
     print(f"[+][Censys] Extracted {len(ips)} unique IPs for enrichment")
 
     censys_data: dict[str, Any] = {"hosts": []}
@@ -291,7 +294,7 @@ def run_censys_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
         else:
             print(f"[*][Censys] Querying host view for {len(ips)} IPs...")
             for ip in ips:
-                result, rate_limited = _censys_get_host(ip, api_id, api_secret, api_token)
+                result, rate_limited = _censys_get_host(ip, api_token, org_id)
                 if rate_limited:
                     break
                 if result is None:

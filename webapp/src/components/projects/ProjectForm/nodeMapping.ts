@@ -20,6 +20,7 @@ export const SECTION_INPUT_MAP: Record<string, string[]> = {
   GvmScan:            ['IP', 'Port', 'Subdomain', 'Domain'],
   Github:             ['Domain'],
   SecurityChecks:     ['BaseURL', 'IP', 'Subdomain', 'Domain'],
+  Uncover:            ['Domain'],
 }
 
 export const SECTION_NODE_MAP: Record<string, string[]> = {
@@ -44,4 +45,5 @@ export const SECTION_NODE_MAP: Record<string, string[]> = {
   GvmScan:            ['Vulnerability', 'Technology', 'Traceroute', 'Certificate', 'ExploitGvm', 'CVE', 'MitreData', 'Capec'],
   Github:             ['GithubHunt', 'GithubRepository', 'GithubPath', 'GithubSecret', 'GithubSensitiveFile'],
   SecurityChecks:     ['Vulnerability'],
+  Uncover:            ['IP', 'Subdomain', 'Port', 'Endpoint'],
 }

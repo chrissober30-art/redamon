@@ -157,7 +157,7 @@ class TestMethodPresence(unittest.TestCase):
             new_methods |= self._methods(path)
 
         missing = original - new_methods
-        extra   = new_methods - original - {"__init__", "__enter__", "__exit__"}
+        extra   = new_methods - original - {"__init__", "__enter__", "__exit__", "update_graph_from_uncover"}
         self.assertEqual(missing, set(), f"Methods missing from refactored code: {missing}")
         self.assertEqual(extra,   set(), f"Unexpected extra methods: {extra}")
 
@@ -186,6 +186,7 @@ class TestMethodPresence(unittest.TestCase):
                 "update_graph_from_censys", "update_graph_from_fofa", "update_graph_from_otx",
                 "update_graph_from_netlas", "update_graph_from_virustotal",
                 "update_graph_from_zoomeye", "update_graph_from_criminalip",
+                "update_graph_from_uncover",
             },
         }
         for fpath, required in checks.items():

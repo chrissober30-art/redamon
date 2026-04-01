@@ -320,6 +320,7 @@ services:
       - "${MCP_NUCLEI_PORT:-8002}:8002"
       - "${MCP_METASPLOIT_PORT:-8003}:8003"
       - "${MCP_NMAP_PORT:-8004}:8004"
+      - "${MCP_PLAYWRIGHT_PORT:-8005}:8005"
       - "8013:8013"
       - "8014:8014"
       - "4444:4444"
@@ -338,6 +339,7 @@ services:
       NUCLEI_PORT: "8002"
       METASPLOIT_PORT: "8003"
       NMAP_PORT: "8004"
+      PLAYWRIGHT_PORT: "8005"
       MSF_PROGRESS_PORT: "8013"
       HYDRA_PROGRESS_PORT: "8014"
       MSF_AUTO_UPDATE: "${MSF_AUTO_UPDATE:-true}"
@@ -374,6 +376,7 @@ services:
       MCP_NETWORK_RECON_URL: http://kali-sandbox:8000/sse
       MCP_NMAP_URL: http://kali-sandbox:8004/sse
       MCP_METASPLOIT_URL: http://kali-sandbox:8003/sse
+      MCP_PLAYWRIGHT_URL: http://kali-sandbox:8005/sse
       MCP_METASPLOIT_PROGRESS_URL: http://kali-sandbox:8013/progress
       MCP_HYDRA_PROGRESS_URL: http://kali-sandbox:8014/progress
       KALI_TERMINAL_WS_URL: ws://kali-sandbox:8016

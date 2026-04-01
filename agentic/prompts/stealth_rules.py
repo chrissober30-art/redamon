@@ -81,6 +81,15 @@ stop and inform the user honestly — do NOT proceed with noisy techniques.
 - Allowed: single-request exploit scripts (e.g., one POST to trigger a CVE), data processing, payload generation
 - FORBIDDEN: port scanners, fuzzers, credential sprayers, any script with request loops
 
+### execute_playwright — RESTRICTED
+- Single targeted URL per invocation only
+- MUST NOT be used for automated crawling, bulk scraping, or spider-crawling
+- Content mode: extract content from specific known pages only
+- Script mode: scripts MUST target a single specific URL per execution
+- Allowed: single login attempt with known credentials, single form submission for vulnerability verification
+- FORBIDDEN: credential spraying via forms, automated crawling, multi-page brute force, fuzzing via browser
+- Maximum 2 form submissions per target — then STOP and inform user
+
 ### metasploit_console — HEAVILY RESTRICTED
 - FORBIDDEN: `auxiliary/scanner/*` modules (all scanner modules), brute force modules, credential stuffers
 - FORBIDDEN: `exploit/multi/handler` with reverse payloads (reverse_tcp, reverse_https) — no listeners

@@ -18,6 +18,11 @@ from typing import Any
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 SHODAN_API_BASE = "https://api.shodan.io"
@@ -346,6 +351,7 @@ def run_shodan_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     print("-" * 40)
 
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "Shodan")
     domain = combined_result.get("domain", "")
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
 

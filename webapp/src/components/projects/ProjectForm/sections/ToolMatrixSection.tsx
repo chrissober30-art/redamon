@@ -137,6 +137,7 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
               { id: 'execute_nuclei', label: 'execute_nuclei' },
               { id: 'kali_shell', label: 'kali_shell' },
               { id: 'execute_code', label: 'execute_code' },
+              { id: 'execute_playwright', label: 'execute_playwright' },
               { id: 'execute_hydra', label: 'execute_hydra' },
               { id: 'metasploit_console', label: 'metasploit_console' },
               { id: 'msf_restart', label: 'msf_restart' },

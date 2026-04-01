@@ -175,8 +175,8 @@ async def get_defaults():
             # API keys fetched at runtime from user's global settings (not stored per-project)
             'SHODAN_API_KEY',
             'URLSCAN_API_KEY',
-            'CENSYS_API_ID',
-            'CENSYS_API_SECRET',
+            'CENSYS_API_TOKEN',
+            'CENSYS_ORG_ID',
             'OTX_API_KEY',
             'NETLAS_API_KEY',
             'VIRUSTOTAL_API_KEY',
@@ -184,6 +184,14 @@ async def get_defaults():
             'CRIMINALIP_API_KEY',
             'FOFA_EMAIL',
             'FOFA_API_KEY',
+            'UNCOVER_QUAKE_API_KEY',
+            'UNCOVER_HUNTER_API_KEY',
+            'UNCOVER_PUBLICWWW_API_KEY',
+            'UNCOVER_HUNTERHOW_API_KEY',
+            'UNCOVER_GOOGLE_API_KEY',
+            'UNCOVER_GOOGLE_API_CX',
+            'UNCOVER_ONYPHE_API_KEY',
+            'UNCOVER_DRIFTNET_API_KEY',
         }
 
         # Convert snake_case keys to camelCase for frontend

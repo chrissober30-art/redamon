@@ -128,6 +128,20 @@ TOOL_REGISTRY = {
             '   - Do NOT use for shell commands — use kali_shell instead'
         ),
     },
+    "execute_playwright": {
+        "purpose": "Browser automation -- rendered content extraction or custom scripting",
+        "when_to_use": "Get JS-rendered page content (SPAs, dynamic pages), fill forms, test XSS inputs, login testing, multi-step browser flows",
+        "args_format": '"url": "http://target:port/path", "selector": "CSS selector", "format": "text|html", "script": "Playwright Python code"',
+        "description": (
+            '**execute_playwright** (Browser automation -- Playwright)\n'
+            '   - **Content mode** (url): renders page with real browser, extracts text/HTML\n'
+            '     Unlike curl, this executes JavaScript -- perfect for SPAs and dynamic pages\n'
+            '     Optional: selector="form" to target elements, format="html" for innerHTML\n'
+            '   - **Script mode** (script): run multi-step Playwright Python code\n'
+            '     Pre-initialized `browser`, `context`, `page` variables. Use print() for output.\n'
+            '     Example: page.goto("url"); page.fill("#user","admin"); print(page.title())'
+        ),
+    },
     "execute_hydra": {
         "purpose": "Brute force password cracking (50+ protocols)",
         "when_to_use": "Credential brute force attacks (SSH, FTP, SMB, RDP, HTTP, MySQL, etc.)",
@@ -153,28 +167,6 @@ TOOL_REGISTRY = {
             'For complex scripts: write to file via `echo`, then run with `python3`'
         ),
     },
-    "execute_masscan": {
-        "purpose": "High-speed port scanning for IP ranges/CIDRs",
-        "when_to_use": "Scan large networks, subnets, or IP ranges for open ports at high speed",
-        "args_format": '"args": "complete masscan CLI arguments"',
-        "description": (
-            '**execute_masscan** (Fastest port scanner for large networks)\n'
-            '   - Asynchronous SYN scanning — scans millions of IPs quickly\n'
-            '   - ONLY accepts IP addresses and CIDR ranges (NOT hostnames)\n'
-            '   - Resolve hostnames to IPs first using dig/nslookup\n'
-            '   - Requires root or CAP_NET_RAW capability\n'
-            '   - Key flags:\n'
-            '     - `-p PORTS` — port list or range (e.g., `-p 80,443` or `-p 0-65535`)\n'
-            '     - `--top-ports N` — scan top N most common ports\n'
-            '     - `--rate N` — packets per second (default 100, can go to 10M+)\n'
-            '     - `--banners` — grab service banners after port discovery\n'
-            '     - `-iL FILE` — read targets from file\n'
-            '     - `--excludefile FILE` — exclude targets from file\n'
-            '   - Example: "10.0.0.0/24 -p 80,443,8080 --rate 1000"\n'
-            '   - Example: "192.168.1.0/24 --top-ports 100 --rate 5000"\n'
-            '   - Example: "10.0.0.1-10.0.0.254 -p 0-65535 --rate 10000 --banners"'
-        ),
-    },
     "msf_restart": {
         "purpose": "Restart msfconsole",
         "when_to_use": "Reset Metasploit to a clean state (kills ALL sessions)",
@@ -183,79 +175,6 @@ TOOL_REGISTRY = {
             '**msf_restart** (Full Metasploit reset)\n'
             '   - Kills ALL active sessions and clears module config. Takes 60-120s.\n'
             '   - Use only when you need a completely clean state'
-        ),
-    },
-    "censys": {
-        "purpose": "Censys internet search (hosts/services)",
-        "when_to_use": "Search for hosts by banner, cert, or get detailed host info",
-        "args_format": '"action": "search|host", "query": "...", "ip": "..."',
-        "description": (
-            '**censys** (Internet-wide host/service search)\n'
-            '   - **action="search"** — Search hosts by query (e.g. "services.port=443 AND location.country=US")\n'
-            '   - **action="host"** — Detailed IP info: services, TLS certs, OS, ASN\n'
-            '   - Paid API — requires Censys API ID + Secret'
-        ),
-    },
-    "fofa": {
-        "purpose": "FOFA cyberspace search (asset discovery)",
-        "when_to_use": "Search for assets by banner, certificate, domain, header, protocol",
-        "args_format": '"query": "FOFA query string"',
-        "description": (
-            '**fofa** (FOFA cyberspace search)\n'
-            '   - Query syntax: domain="example.com", ip="1.2.3.4", header="Apache", cert="example.com"\n'
-            '   - Returns IP, port, host, title, server, protocol, geo'
-        ),
-    },
-    "otx": {
-        "purpose": "AlienVault OTX threat intelligence",
-        "when_to_use": "Check IPs/domains against threat feeds, get pulse counts, adversary attribution, malware samples, and historical infrastructure",
-        "args_format": '"action": "ip_report|domain_report", "ip": "...", "domain": "..."',
-        "description": (
-            '**otx** (AlienVault Open Threat Exchange)\n'
-            '   - **action="ip_report"** — Threat pulses, adversary attribution, malware samples, reputation, geo for an IP\n'
-            '   - **action="domain_report"** — Threat pulses, adversary, malware samples, WHOIS, historical IPs for a domain\n'
-            '   - Works without API key (reduced rate); key provides private pulses and higher limits'
-        ),
-    },
-    "netlas": {
-        "purpose": "Netlas.io internet intelligence search",
-        "when_to_use": "Search for services by banner, certificate; get host details",
-        "args_format": '"action": "search|host", "query": "...", "ip": "..."',
-        "description": (
-            '**netlas** (Internet intelligence)\n'
-            '   - **action="search"** — Search responses index (e.g. "host:example.com", "port:443")\n'
-            '   - **action="host"** — Aggregated host info for an IP'
-        ),
-    },
-    "virustotal": {
-        "purpose": "VirusTotal reputation lookup",
-        "when_to_use": "Check IP/domain reputation against 70+ security vendors",
-        "args_format": '"action": "ip_report|domain_report", "ip": "...", "domain": "..."',
-        "description": (
-            '**virustotal** (Multi-engine reputation)\n'
-            '   - **action="ip_report"** — Detections, ASN, country for an IP\n'
-            '   - **action="domain_report"** — Detections, categories, popularity, registrar for a domain\n'
-            '   - Free tier: 4 lookups/min, 500/day — use sparingly'
-        ),
-    },
-    "zoomeye": {
-        "purpose": "ZoomEye cyberspace search",
-        "when_to_use": "Search for hosts/devices by port, app, banner, OS, country",
-        "args_format": '"query": "ZoomEye search query"',
-        "description": (
-            '**zoomeye** (Cyberspace search)\n'
-            '   - Query syntax: ip:"1.2.3.4", hostname:"example.com", port:8080, app:"Apache"\n'
-            '   - Returns ports, banners, OS, geo info'
-        ),
-    },
-    "criminalip": {
-        "purpose": "Criminal IP threat intelligence",
-        "when_to_use": "Get IP/domain risk scores, detect VPN/proxy/Tor, find vulnerabilities",
-        "args_format": '"action": "ip_report|domain_report", "ip": "...", "domain": "..."',
-        "description": (
-            '**criminalip** (AI threat intelligence)\n'
-            '   - **action="ip_report"** — Risk score, open ports, issues (VPN/proxy/Tor/hosting), vulnerabilities\n'
-            '   - **action="domain_report"** — Risk assessment, technologies, domain intel'
         ),
     },
 }

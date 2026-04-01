@@ -10,6 +10,11 @@ import logging
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 ZOOMEYE_API_BASE = "https://api.zoomeye.ai/"
@@ -231,6 +236,7 @@ def run_zoomeye_enrichment(combined_result: dict, settings: dict) -> dict:
     domain = combined_result.get("domain", "")
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "ZoomEye")
 
     print(f"[*][ZoomEye] Starting OSINT enrichment")
 

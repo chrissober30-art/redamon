@@ -18,7 +18,8 @@ mcp/
 │   ├── network_recon_server.py  # HTTP client + port scanning (dynamic)
 │   ├── nuclei_server.py         # Vuln scanning (dynamic)
 │   ├── nmap_server.py           # Network mapper (dynamic)
-│   └── metasploit_server.py     # Exploitation (structured)
+│   ├── metasploit_server.py     # Exploitation (structured)
+│   └── playwright_server.py     # Browser automation (dual-mode)
 ├── output/                # Scan results
 └── nuclei-templates/      # Custom nuclei templates (optional)
 ```
@@ -49,10 +50,10 @@ mcp/requirements.txt              ──COPY──>      /tmp/requirements.txt
                                          ▼               ▼               ▼
                                     Process 1       Process 2       Process 3  Process 4
                                          │               │               │         │
-                                         ▼               ▼               ▼         ▼
-                                    :8000           :8002           :8003      :8004
-                                  network_recon     nuclei       metasploit    nmap
-                                  (curl + naabu)                               │
+                                         ▼               ▼               ▼         ▼         ▼
+                                    :8000           :8002           :8003      :8004      :8005
+                                  network_recon     nuclei       metasploit    nmap    playwright
+                                  (curl + naabu)                               │      (chromium)
                                          │               │           │         ▼
                                          ▼               ▼           ▼     /usr/bin/
                                     /usr/bin/      /root/go/bin/  msfconsole   nmap
@@ -71,6 +72,7 @@ These variables are set in `docker-compose.yml` and passed to the container:
 | `NUCLEI_PORT` | `8002` | Vulnerability scanner server |
 | `METASPLOIT_PORT` | `8003` | Exploitation framework server |
 | `NMAP_PORT` | `8004` | Network mapper server |
+| `PLAYWRIGHT_PORT` | `8005` | Browser automation server |
 | `MSF_PROGRESS_PORT` | `8013` | Metasploit progress streaming endpoint |
 | `MSF_RUN_TIMEOUT` | `1800` | Total timeout for `run` commands (30 min) |
 | `MSF_RUN_QUIET_PERIOD` | `120` | Quiet period for `run` commands (2 min) |
@@ -89,11 +91,11 @@ AI Agent (Claude/LangGraph)
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              KALI CONTAINER                                   │
 │                                                                               │
-│  ┌───────────────────┐  ┌──────────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ network_recon     │  │ nuclei_server│  │nmap_server│  │  msf_server    │  │
-│  │   :8000           │  │    :8002     │  │   :8004   │  │  :8003 (MCP)   │  │
-│  │ (curl + naabu)    │  └──────┬───────┘  └─────┬─────┘  │  :8013 (prog.) │  │
-│  └────────┬──────────┘         │                │        └───────┬────────┘  │
+│  ┌──────────────┐ ┌────────────┐ ┌──────────┐ ┌──────────────┐ ┌────────────┐ │
+│  │network_recon │ │nuclei_server│ │nmap_server│ │  msf_server  │ │ playwright │ │
+│  │   :8000      │ │    :8002   │ │   :8004  │ │ :8003 (MCP)  │ │   :8005    │ │
+│  │(curl + naabu)│ └──────┬─────┘ └────┬─────┘ │ :8013 (prog.)│ │ (chromium) │ │
+│  └──────┬───────┘        │            │       └──────┬───────┘ └─────┬──────┘ │
 │           │                    │                │                │            │
 │           ▼                    ▼                ▼                ▼            │
 │    subprocess.run()    subprocess.run()   subprocess.run()  PersistentMsf    │
@@ -120,6 +122,7 @@ AI Agent (Claude/LangGraph)
 | nuclei | Dynamic CLI | `execute_nuclei(args)` | Many templates/options, custom templates auto-discovered at startup |
 | nmap | Dynamic CLI | `execute_nmap(args)` | Countless flags, LLM expertise |
 | metasploit | Structured | `metasploit_console(command)`, `msf_restart()` | Stateful, sessions, complex workflows |
+| playwright | Dual-mode | `execute_playwright(url/script)` | Content extraction or custom browser scripting |
 
 **Dynamic CLI**: Pass raw command-line arguments. Maximum flexibility, trusts LLM knowledge.
 
@@ -161,6 +164,7 @@ The MCP servers are available at:
 - **nuclei**: `http://localhost:8002` (vulnerability scanning)
 - **metasploit**: `http://localhost:8003` (exploitation)
 - **nmap**: `http://localhost:8004` (service detection, OS fingerprinting, NSE scripts)
+- **playwright**: `http://localhost:8005` (browser automation, JS-rendered content)
 - **metasploit progress**: `http://localhost:8013/progress` (live progress for long-running commands)
 
 ## Available Tools
@@ -226,6 +230,56 @@ execute_nmap("-O 10.0.0.5")
 execute_nmap("--script http-enum 10.0.0.5 -p 80")
 execute_nmap("-sU 10.0.0.5 --top-ports 20")
 ```
+
+### Playwright Server (Port 8005)
+
+Browser automation with headless Chromium. Two operational modes for interacting with JavaScript-rendered pages.
+
+| Tool | Description |
+|------|-------------|
+| `execute_playwright(url, selector, format)` | **Content mode** -- navigate to URL, extract rendered text or HTML (45s timeout) |
+| `execute_playwright(script)` | **Script mode** -- run multi-step Playwright Python code with pre-initialized `browser`, `context`, `page` (60s timeout) |
+
+**Content Mode Examples:**
+```python
+# Get all visible text from a page
+execute_playwright(url="http://10.0.0.5:3000")
+
+# Get HTML of a login form
+execute_playwright(url="http://10.0.0.5/login", selector="form", format="html")
+
+# Extract specific element text
+execute_playwright(url="http://10.0.0.5/dashboard", selector=".user-info", format="text")
+```
+
+**Script Mode Examples:**
+```python
+# Login and capture authenticated page
+execute_playwright(script="""
+page.goto('http://10.0.0.5/login')
+page.fill('#username', 'admin')
+page.fill('#password', 'pass')
+page.click('button[type=submit]')
+page.wait_for_load_state('networkidle')
+print(page.inner_text('body')[:3000])
+""")
+
+# Test XSS in search field
+execute_playwright(script="""
+page.goto('http://10.0.0.5/search')
+page.fill('input[name=q]', '<script>alert(1)</script>')
+page.click('button[type=submit]')
+page.wait_for_load_state('networkidle')
+print(page.content()[:5000])
+""")
+```
+
+**Key details:**
+- Runs headless Chromium with Chrome 120 user-agent
+- Pre-initialized `browser`, `context`, `page` in script mode -- use `print()` for output
+- Output capped at 15,000 characters (truncated with notice)
+- Marked as a **dangerous tool** -- requires manual confirmation before execution
+- Stealth mode: single-URL only, no crawling/bulk scraping, max 2 form submissions per target
 
 ### Metasploit Server (Port 8003)
 
@@ -360,6 +414,7 @@ environment:
   - NUCLEI_PORT=8002
   - METASPLOIT_PORT=8003
   - NMAP_PORT=8004
+  - PLAYWRIGHT_PORT=8005
   - MSF_PROGRESS_PORT=8013
 
 ports:
@@ -367,6 +422,7 @@ ports:
   - "8002:8002"   # nuclei
   - "8003:8003"   # metasploit
   - "8004:8004"   # nmap
+  - "8005:8005"   # playwright (browser automation)
   - "8013:8013"   # metasploit progress endpoint
 ```
 
@@ -375,29 +431,6 @@ To change ports or settings, edit `docker-compose.yml` directly.
 **Note:** If you change port mappings, you must recreate the container (not just restart):
 ```bash
 docker-compose down && docker-compose up -d
-```
-
-## Integration with Claude Code
-
-Add to your Claude Code MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "network_recon": {
-      "url": "http://localhost:8000"
-    },
-    "nuclei": {
-      "url": "http://localhost:8002"
-    },
-    "metasploit": {
-      "url": "http://localhost:8003"
-    },
-    "nmap": {
-      "url": "http://localhost:8004"
-    }
-  }
-}
 ```
 
 ## Security Notice

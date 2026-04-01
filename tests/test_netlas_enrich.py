@@ -433,14 +433,14 @@ class TestNetlasEnrich(unittest.TestCase):
         mock_get.return_value = _mock_response(200, _netlas_body())
         cr = {
             "domain": "",
-            "metadata": {"ip_mode": True, "expanded_ips": ["10.0.0.1", "10.0.0.2"]},
+            "metadata": {"ip_mode": True, "expanded_ips": ["93.184.1.1", "93.184.1.2"]},
             "dns": {},
         }
         run_netlas_enrichment(cr, self._settings())
         self.assertEqual(mock_get.call_count, 2)
         calls = [mock_get.call_args_list[i][1]["params"]["q"] for i in range(2)]
-        self.assertIn("host:10.0.0.1", calls)
-        self.assertIn("host:10.0.0.2", calls)
+        self.assertIn("host:93.184.1.1", calls)
+        self.assertIn("host:93.184.1.2", calls)
 
     @patch("netlas_enrich.time.sleep")
     @patch("netlas_enrich.requests.get")
@@ -451,7 +451,7 @@ class TestNetlasEnrich(unittest.TestCase):
         ]
         cr = {
             "domain": "",
-            "metadata": {"ip_mode": True, "expanded_ips": ["10.0.0.1", "10.0.0.2", "10.0.0.3"]},
+            "metadata": {"ip_mode": True, "expanded_ips": ["93.184.1.1", "93.184.1.2", "93.184.1.3"]},
             "dns": {},
         }
         run_netlas_enrichment(cr, self._settings())

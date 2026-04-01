@@ -23,6 +23,11 @@ from typing import Any
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 OTX_API_BASE = "https://otx.alienvault.com/api/v1/indicators"
@@ -345,6 +350,7 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
     domain = combined_result.get("domain", "") or ""
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "OTX")
 
     print(f"[+][OTX] Extracted {len(ips)} unique IPs")
 

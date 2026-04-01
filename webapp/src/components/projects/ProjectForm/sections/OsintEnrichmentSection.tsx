@@ -37,7 +37,7 @@ export function OsintEnrichmentSection({ data, updateField }: OsintEnrichmentSec
       .then(settings => {
         if (settings) {
           setKeyStatus({
-            censys:     !!(settings.censysApiId && settings.censysApiSecret),
+            censys:     !!(settings.censysApiToken && settings.censysOrgId),
             fofa:       !!settings.fofaApiKey,
             otx:        !!settings.otxApiKey,
             netlas:     !!settings.netlasApiKey,
@@ -90,7 +90,7 @@ export function OsintEnrichmentSection({ data, updateField }: OsintEnrichmentSec
                 {noKey('censys') && (
                   <div className={styles.shodanWarning}>
                     <Info size={13} />
-                    No Censys API credentials — add ID &amp; Secret in Global Settings to enable.
+                    No Censys API credentials — add API Token &amp; Organization ID in Global Settings to enable.
                   </div>
                 )}
               </div>
@@ -270,6 +270,41 @@ export function OsintEnrichmentSection({ data, updateField }: OsintEnrichmentSec
                 disabled={noKey('criminalIp')}
               />
             </div>
+          </div>
+
+          {/* Uncover */}
+          <div className={styles.subSection}>
+            <div className={styles.toggleRow}>
+              <div>
+                <span className={styles.toggleLabel}>Uncover (Multi-Engine Search)</span>
+                <p className={styles.toggleDescription}>
+                  ProjectDiscovery Uncover — searches Shodan, Censys, FOFA, ZoomEye, Netlas,
+                  CriminalIP, Quake, Hunter, and more simultaneously for target expansion.
+                  Discovers additional IPs, subdomains, and open ports before port scanning.
+                  Configure API keys for each engine in Global Settings.
+                </p>
+              </div>
+              <Toggle
+                checked={data.uncoverEnabled}
+                onChange={(checked) => updateField('uncoverEnabled', checked)}
+              />
+            </div>
+            {data.uncoverEnabled && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Max Results</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.uncoverMaxResults}
+                    onChange={(e) => updateField('uncoverMaxResults', parseInt(e.target.value) || 500)}
+                    min={1}
+                    max={10000}
+                  />
+                  <span className={styles.fieldHint}>Maximum total results across all engines (1–10 000)</span>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

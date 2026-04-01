@@ -4,6 +4,42 @@ Modern Node.js vulnerable application (32 vuln categories) plus CVE Lab containe
 
 > **WARNING**: Intentionally vulnerable -- for authorized testing only.
 
+---
+
+## Public Test Server -- Rules of Engagement
+
+A public instance of this environment is available at **http://gpigs.devergolabs.com** for testing with RedAmon.
+
+### Acceptable Use Policy
+
+By accessing this server you agree to the following terms:
+
+1. **RedAmon-only testing** -- This server is provided exclusively for testing with the [RedAmon](https://github.com/samugit83/redamon) framework. Manual exploitation, third-party scanners, and automated tools other than RedAmon are not authorized.
+
+2. **Scope** -- You may only interact with the services listed in the target service map below (ports 80, 4000, 9090, 3306, 27017, 8080, 8888, 21/6200). All other ports, IPs, and infrastructure behind this server are out of scope.
+
+3. **No lateral movement** -- Do not attempt to pivot from this server to other systems, networks, or AWS infrastructure (including the EC2 metadata service at 169.254.169.254).
+
+4. **No denial of service** -- Do not perform load testing, resource exhaustion, or any action intended to degrade availability. This includes XML bombs (Billion Laughs), fork bombs, and excessive concurrent connections.
+
+5. **No data exfiltration beyond the server** -- You may read intentionally planted vulnerable data (credentials, files, database contents). Do not exfiltrate data to external servers, set up reverse shells to your own infrastructure, or establish persistent backdoors.
+
+6. **No modification of the environment** -- Do not delete databases, drop tables, modify other users' data, or alter the running services in ways that affect other testers. The environment resets periodically, but destructive actions impact concurrent users.
+
+7. **Responsible disclosure** -- If you discover a vulnerability in RedAmon itself (not in the intentionally vulnerable target), report it via [GitHub Issues](https://github.com/samugit83/redamon/issues) or email. Do not exploit vulnerabilities in RedAmon's infrastructure.
+
+8. **Legal compliance** -- You are solely responsible for ensuring your testing complies with all applicable laws in your jurisdiction. Unauthorized access to computer systems is illegal in most countries regardless of the target's intended vulnerability.
+
+9. **No warranty / liability** -- This server is provided "as is" for educational purposes. Devergolabs assumes no liability for any damages arising from your use of this server. Access may be revoked at any time without notice.
+
+10. **Logging and monitoring** -- All traffic to this server is logged. IP addresses and request data are recorded for security monitoring and abuse prevention. By accessing this server, you consent to this logging.
+
+### Violation consequences
+
+Violations of these rules will result in immediate IP ban and may be reported to the relevant ISP or law enforcement authority. We reserve the right to modify these rules at any time.
+
+---
+
 ## Services (7 containers)
 
 | Service | Port | Technology | Vulns |

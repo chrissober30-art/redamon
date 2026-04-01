@@ -70,15 +70,22 @@ model UserSettings {
   urlscanApiKey   String   @default("") @map("urlscan_api_key")
 
   // OSINT & Threat Intelligence API Keys
-  censysApiId      String  @default("") @map("censys_api_id")
-  censysApiSecret  String  @default("") @map("censys_api_secret")
   censysApiToken   String  @default("") @map("censys_api_token")
+  censysOrgId      String  @default("") @map("censys_org_id")
   fofaApiKey       String  @default("") @map("fofa_api_key")
   otxApiKey        String  @default("") @map("otx_api_key")
   netlasApiKey     String  @default("") @map("netlas_api_key")
   virusTotalApiKey String  @default("") @map("virustotal_api_key")
   zoomEyeApiKey    String  @default("") @map("zoomeye_api_key")
   criminalIpApiKey String  @default("") @map("criminalip_api_key")
+  quakeApiKey      String  @default("") @map("quake_api_key")
+  hunterApiKey     String  @default("") @map("hunter_api_key")
+  publicWwwApiKey  String  @default("") @map("publicwww_api_key")
+  hunterHowApiKey  String  @default("") @map("hunterhow_api_key")
+  googleApiKey     String  @default("") @map("google_api_key")
+  googleApiCx      String  @default("") @map("google_api_cx")
+  onypheApiKey     String  @default("") @map("onyphe_api_key")
+  driftnetApiKey   String  @default("") @map("driftnet_api_key")
 
   // Tunneling & Infrastructure
   ngrokAuthtoken  String   @default("") @map("ngrok_authtoken")
@@ -452,7 +459,7 @@ model Project {
   agentCreateGraphImageOnInit           Boolean  @default(false) @map("agent_create_graph_image_on_init")
   agentLogMaxMb                         Int      @default(10) @map("agent_log_max_mb")
   agentLogBackupCount                   Int      @default(5) @map("agent_log_backup_count")
-  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"google_dork\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_masscan\":[\"informational\",\"exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
+  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\"],\"google_dork\":[\"informational\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"exploitation\",\"post_exploitation\"],\"execute_playwright\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
   agentKaliInstallEnabled               Boolean  @default(false) @map("agent_kali_install_enabled")
   agentKaliInstallAllowedPackages       String   @default("") @map("agent_kali_install_allowed_packages")
   agentKaliInstallForbiddenPackages     String   @default("") @map("agent_kali_install_forbidden_packages")
@@ -496,6 +503,9 @@ model Project {
   zoomEyeEnabled                        Boolean  @default(false)  @map("zoomeye_enabled")
   zoomEyeMaxResults                     Int      @default(1000)   @map("zoomeye_max_results")
   criminalIpEnabled                     Boolean  @default(false)  @map("criminalip_enabled")
+  uncoverEnabled                        Boolean  @default(false)  @map("uncover_enabled")
+  uncoverMaxResults                     Int      @default(500)    @map("uncover_max_results")
+  uncoverDockerImage                    String   @default("projectdiscovery/uncover:latest") @map("uncover_docker_image")
 
   // Subdomain Discovery Tool Toggles
   crtshEnabled                          Boolean  @default(true)  @map("crtsh_enabled")

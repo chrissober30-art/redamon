@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v3.1.4-release-2E8B57?style=flat" alt="Version 3.1.4"/>
+  <img height="24" src="https://img.shields.io/badge/v3.2.0-release-2E8B57?style=flat" alt="Version 3.2.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -134,7 +134,7 @@ The script builds all images and starts the services. When done, open **http://l
 Open **http://localhost:3000/settings** (gear icon in the header) to configure everything. No `.env` file is needed.
 
 - **LLM Providers** -- add API keys for OpenAI, Anthropic, OpenRouter, AWS Bedrock, or any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Each provider can be tested before saving. The model selector in project settings **dynamically fetches** available models from configured providers.
-- **API Keys** -- Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). Supports **key rotation** -- configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
+- **API Keys** -- Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). **Uncover multi-engine search** keys (Quake, Hunter, PublicWWW, HunterHow, Google, Onyphe, Driftnet) expand target discovery across 13 search engines -- shared keys (Shodan, Censys, FOFA, etc.) are automatically reused. Supports **key rotation** -- configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
 - **Tunneling** -- configure ngrok or chisel for reverse shell tunneling. Changes apply immediately without container restarts.
 
 All settings are stored per-user in the database. See the **[AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)** wiki page for detailed setup instructions.
@@ -234,6 +234,26 @@ docker compose --profile tools down --rmi local --volumes --remove-orphans  # Fu
 
 ---
 
+<table>
+<tr>
+<td width="280" align="center">
+  <a href="https://github.com/samugit83/redamon/wiki/RedAmon-HackLab">
+    <img src="assets/hacklab.png" alt="RedAmon HackLab" width="260"/>
+  </a>
+</td>
+<td>
+  <h3>Want to see RedAmon think like a real pentester?</h3>
+  <p>Explore real-time live attack sessions -- every step, every pivot, every exploit -- across 15 vulnerability categories on a live target. Full session logs, decoded walkthroughs, and video recordings showing the agent autonomously compromising a multi-service server from scratch.</p>
+  <a href="https://github.com/samugit83/redamon/wiki/RedAmon-HackLab"><b>Explore the HackLab &rarr;</b></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://github.com/samugit83/redamon/wiki/RedAmon-HackLab#community-sessions"><b>Submit your own session &rarr;</b></a>
+  <br/><sub>Got an amazing agent session on your own target? Share it with the community -- session log + YouTube video.</sub>
+</td>
+</tr>
+</table>
+
+---
+
 ## Table of Contents
 
 - [Full Wiki Documentation](https://github.com/samugit83/redamon/wiki)
@@ -277,6 +297,8 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
   <img src="assets/recon.gif" alt="RedAmon Reconnaissance Pipeline" width="100%"/>
 </p>
 
+#### Recon Pipeline Tool Matrix
+
 | Settings Tab | Phase | Tools | Type | Execution |
 |:-----:|-------|-------|:----:|-----------|
 | **Discovery & OSINT** | **Subdomain Discovery** | crt.sh, HackerTarget, Subfinder, Amass, Knockpy | Passive* | 5 tools parallel |
@@ -284,6 +306,7 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 | | **WHOIS + URLScan** | python-whois, URLScan.io API | Passive | Parallel |
 | | **DNS Resolution** | dnspython | Passive | 20 parallel workers |
 | | **OSINT Enrichment** | Shodan / InternetDB | Passive | Parallel with port scan |
+| | **Uncover Expansion** | ProjectDiscovery Uncover (13 engines: Shodan, Censys, FOFA, ZoomEye, Netlas, CriminalIP, Quake, Hunter, PublicWWW, HunterHow, Google, Onyphe, Driftnet) | Passive | Before port scan (GROUP 2b) |
 | | **Threat Intel Enrichment** | Censys, FOFA, OTX (AlienVault), Netlas, VirusTotal, ZoomEye, CriminalIP | Passive | 7 tools parallel (GROUP 3b) |
 | **Port Scanning** | **Port Scanning** | Masscan, Naabu | Active | Both parallel |
 | **Nmap Service Detection** | **Service Version Detection** | Nmap (-sV, --script vuln) | Active | Sequential per target |
@@ -312,13 +335,34 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 
 ### AI Agent Orchestrator
 
-A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progresses through three phases — **Informational** (intelligence gathering, graph queries, Shodan, Google dorking), **Exploitation** (Metasploit, Hydra credential testing, social engineering simulation), and **Post-Exploitation** (enumeration, lateral movement). The agent executes 13 security tools via MCP servers inside a Kali sandbox, supports parallel tool execution via **Wave Runner**, and provides real-time chat interaction with guidance, stop/resume, and approval workflows. **Deep Think** mode enables structured strategic analysis before acting.
+A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progresses through three phases — **Informational** (intelligence gathering, graph queries, Shodan, Google dorking), **Exploitation** (Metasploit, Hydra credential testing, social engineering simulation), and **Post-Exploitation** (enumeration, lateral movement). The agent executes 14 security tools via MCP servers inside a Kali sandbox, supports parallel tool execution via **Wave Runner**, and provides real-time chat interaction with guidance, stop/resume, and approval workflows. **Deep Think** mode enables structured strategic analysis before acting.
 
 > **[Wiki: AI Agent Guide](https://github.com/samugit83/redamon/wiki/AI-Agent-Guide)** | **[Technical: README.PENTEST_AGENT.md](readmes/README.PENTEST_AGENT.md)**
 
 <p align="center">
   <img src="assets/exploit.gif" alt="RedAmon Exploitation Demo" width="100%"/>
 </p>
+
+#### Agent Tool Arsenal
+
+| Category | Tool | Description | Phases | MCP Server |
+|:-----:|-------|-------------|:------:|:----------:|
+| **Intelligence** | **query_graph** | Neo4j graph queries -- primary source of truth for recon data | All | -- |
+| | **web_search** | Internet search via Tavily for CVE details, exploit PoCs, advisories | All | -- |
+| | **shodan** | Shodan OSINT -- host details, reverse DNS, device search | Info, Exploit | -- |
+| | **google_dork** | Google dorking via SerpAPI -- exposed files, admin panels, directory listings | Info | -- |
+| **Scanning** | **execute_naabu** | Fast port scanning and verification | Info, Exploit | network_recon :8000 |
+| | **execute_nmap** | Deep service detection (-sV), OS fingerprint, NSE scripts | All | nmap :8004 |
+| | **execute_nuclei** | CVE verification and exploitation with 9,000+ templates + custom uploads | Info, Exploit | nuclei :8002 |
+| **Web & HTTP** | **execute_curl** | HTTP requests -- reachability, headers, status codes, banners | All | network_recon :8000 |
+| | **execute_playwright** | Headless Chromium browser automation -- JS-rendered content extraction and interactive scripting for SPAs, form testing, XSS verification | All | playwright :8005 |
+| **Exploitation** | **metasploit_console** | Persistent msfconsole -- exploit execution, session management, post-exploitation | Exploit, Post | metasploit :8003 |
+| | **msf_restart** | Full Metasploit reset -- kills all sessions, clears module state | Exploit, Post | metasploit :8003 |
+| | **execute_hydra** | THC Hydra brute force -- 50+ protocols (SSH, FTP, RDP, SMB, HTTP, MySQL, etc.) | Exploit, Post | network_recon :8000 |
+| **Code Execution** | **kali_shell** | Full Kali Linux shell -- netcat, sqlmap, smbclient, msfvenom, searchsploit, and 30+ CLI tools | All | network_recon :8000 |
+| | **execute_code** | Write and run code files (Python, bash, Ruby, Perl, C, C++) -- no shell escaping | Exploit, Post | network_recon :8000 |
+
+<sub>All MCP tools run inside a Kali Linux sandbox container. Tools marked as dangerous require manual confirmation before execution. Stealth mode restricts active tools to passive-only or single-target operations.</sub>
 
 ### AI Model Providers
 

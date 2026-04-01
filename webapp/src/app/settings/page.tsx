@@ -19,15 +19,22 @@ interface UserSettings {
   nvdApiKey: string
   vulnersApiKey: string
   urlscanApiKey: string
-  censysApiId: string
-  censysApiSecret: string
   censysApiToken: string
+  censysOrgId: string
   fofaApiKey: string
   otxApiKey: string
   netlasApiKey: string
   virusTotalApiKey: string
   zoomEyeApiKey: string
   criminalIpApiKey: string
+  quakeApiKey: string
+  hunterApiKey: string
+  publicWwwApiKey: string
+  hunterHowApiKey: string
+  googleApiKey: string
+  googleApiCx: string
+  onypheApiKey: string
+  driftnetApiKey: string
   ngrokAuthtoken: string
   chiselServerUrl: string
   chiselAuth: string
@@ -41,15 +48,22 @@ const EMPTY_SETTINGS: UserSettings = {
   nvdApiKey: '',
   vulnersApiKey: '',
   urlscanApiKey: '',
-  censysApiId: '',
-  censysApiSecret: '',
   censysApiToken: '',
+  censysOrgId: '',
   fofaApiKey: '',
   otxApiKey: '',
   netlasApiKey: '',
   virusTotalApiKey: '',
   zoomEyeApiKey: '',
   criminalIpApiKey: '',
+  quakeApiKey: '',
+  hunterApiKey: '',
+  publicWwwApiKey: '',
+  hunterHowApiKey: '',
+  googleApiKey: '',
+  googleApiCx: '',
+  onypheApiKey: '',
+  driftnetApiKey: '',
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
@@ -74,6 +88,12 @@ const TOOL_NAME_MAP: Record<string, string> = {
   virusTotalApiKey: 'virustotal',
   zoomEyeApiKey: 'zoomeye',
   criminalIpApiKey: 'criminalip',
+  quakeApiKey: 'quake',
+  hunterApiKey: 'hunter',
+  publicWwwApiKey: 'publicwww',
+  hunterHowApiKey: 'hunterhow',
+  onypheApiKey: 'onyphe',
+  driftnetApiKey: 'driftnet',
 }
 
 function getProviderIcon(providerType: string): string {
@@ -275,15 +295,22 @@ export default function SettingsPage() {
           nvdApiKey: data.nvdApiKey || '',
           vulnersApiKey: data.vulnersApiKey || '',
           urlscanApiKey: data.urlscanApiKey || '',
-          censysApiId: data.censysApiId || '',
-          censysApiSecret: data.censysApiSecret || '',
           censysApiToken: data.censysApiToken || '',
+          censysOrgId: data.censysOrgId || '',
           fofaApiKey: data.fofaApiKey || '',
           otxApiKey: data.otxApiKey || '',
           netlasApiKey: data.netlasApiKey || '',
           virusTotalApiKey: data.virusTotalApiKey || '',
           zoomEyeApiKey: data.zoomEyeApiKey || '',
           criminalIpApiKey: data.criminalIpApiKey || '',
+          quakeApiKey: data.quakeApiKey || '',
+          hunterApiKey: data.hunterApiKey || '',
+          publicWwwApiKey: data.publicWwwApiKey || '',
+          hunterHowApiKey: data.hunterHowApiKey || '',
+          googleApiKey: data.googleApiKey || '',
+          googleApiCx: data.googleApiCx || '',
+          onypheApiKey: data.onypheApiKey || '',
+          driftnetApiKey: data.driftnetApiKey || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -355,15 +382,22 @@ export default function SettingsPage() {
           nvdApiKey: data.nvdApiKey || '',
           vulnersApiKey: data.vulnersApiKey || '',
           urlscanApiKey: data.urlscanApiKey || '',
-          censysApiId: data.censysApiId || '',
-          censysApiSecret: data.censysApiSecret || '',
           censysApiToken: data.censysApiToken || '',
+          censysOrgId: data.censysOrgId || '',
           fofaApiKey: data.fofaApiKey || '',
           otxApiKey: data.otxApiKey || '',
           netlasApiKey: data.netlasApiKey || '',
           virusTotalApiKey: data.virusTotalApiKey || '',
           zoomEyeApiKey: data.zoomEyeApiKey || '',
           criminalIpApiKey: data.criminalIpApiKey || '',
+          quakeApiKey: data.quakeApiKey || '',
+          hunterApiKey: data.hunterApiKey || '',
+          publicWwwApiKey: data.publicWwwApiKey || '',
+          hunterHowApiKey: data.hunterHowApiKey || '',
+          googleApiKey: data.googleApiKey || '',
+          googleApiCx: data.googleApiCx || '',
+          onypheApiKey: data.onypheApiKey || '',
+          driftnetApiKey: data.driftnetApiKey || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -638,7 +672,7 @@ export default function SettingsPage() {
               label="Shodan API Key"
               hint="Enables the shodan tool for internet-wide OSINT (search, host info, DNS, count)"
               signupUrl="https://account.shodan.io/"
-              badges={['AI Agent', 'Recon Pipeline']}
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
               value={settings.shodanApiKey}
               visible={!!visibleFields.shodanApiKey}
               onToggle={() => toggleFieldVisibility('shodanApiKey')}
@@ -696,23 +730,24 @@ export default function SettingsPage() {
             />
 
             <SecretField
-              label="Censys API ID"
-              hint="Censys search engine — host/service discovery via banner and certificate data. Requires API ID + Secret pair"
+              label="Censys API Token"
+              hint="Censys Platform personal access token — used by Recon Pipeline, AI Agent, and Uncover engine"
               signupUrl="https://accounts.censys.io/settings/personal-access-tokens"
-              badges={['AI Agent', 'Recon Pipeline']}
-              value={settings.censysApiId}
-              visible={!!visibleFields.censysApiId}
-              onToggle={() => toggleFieldVisibility('censysApiId')}
-              onChange={v => updateSetting('censysApiId', v)}
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
+              value={settings.censysApiToken}
+              visible={!!visibleFields.censysApiToken}
+              onToggle={() => toggleFieldVisibility('censysApiToken')}
+              onChange={v => updateSetting('censysApiToken', v)}
             />
             <SecretField
-              label="Censys API Secret"
-              hint="Second half of Censys credentials — paired with API ID above"
-              badges={['AI Agent', 'Recon Pipeline']}
-              value={settings.censysApiSecret}
-              visible={!!visibleFields.censysApiSecret}
-              onToggle={() => toggleFieldVisibility('censysApiSecret')}
-              onChange={v => updateSetting('censysApiSecret', v)}
+              label="Censys Organization ID"
+              hint="Censys Organization ID — paired with API Token above. Found on your Censys account page"
+              signupUrl="https://accounts.censys.io/settings/personal-access-tokens"
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
+              value={settings.censysOrgId}
+              visible={!!visibleFields.censysOrgId}
+              onToggle={() => toggleFieldVisibility('censysOrgId')}
+              onChange={v => updateSetting('censysOrgId', v)}
             />
             <SecretField
               label="Censys Personal API Token"
@@ -728,7 +763,7 @@ export default function SettingsPage() {
               label="FOFA API Key"
               hint="FOFA cyberspace search — asset discovery by banner, certificate, domain. Key format: email:key"
               signupUrl="https://en.fofa.info/"
-              badges={['AI Agent', 'Recon Pipeline']}
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
               value={settings.fofaApiKey}
               visible={!!visibleFields.fofaApiKey}
               onToggle={() => toggleFieldVisibility('fofaApiKey')}
@@ -752,7 +787,7 @@ export default function SettingsPage() {
               label="Netlas API Key"
               hint="Netlas.io — internet-wide scan data with banners, certificates, and WHOIS info"
               signupUrl="https://app.netlas.io/profile/"
-              badges={['AI Agent', 'Recon Pipeline']}
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
               value={settings.netlasApiKey}
               visible={!!visibleFields.netlasApiKey}
               onToggle={() => toggleFieldVisibility('netlasApiKey')}
@@ -776,7 +811,7 @@ export default function SettingsPage() {
               label="ZoomEye API Key"
               hint="ZoomEye cyberspace search — host/device discovery with port, banner, and geo data"
               signupUrl="https://www.zoomeye.ai/profile"
-              badges={['AI Agent', 'Recon Pipeline']}
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
               value={settings.zoomEyeApiKey}
               visible={!!visibleFields.zoomEyeApiKey}
               onToggle={() => toggleFieldVisibility('zoomEyeApiKey')}
@@ -788,13 +823,112 @@ export default function SettingsPage() {
               label="Criminal IP API Key"
               hint="AI-powered threat intelligence — IP/domain risk scoring, vulnerability detection, proxy/VPN/Tor identification"
               signupUrl="https://search.criminalip.io/mypage/information"
-              badges={['AI Agent', 'Recon Pipeline']}
+              badges={['AI Agent', 'Recon Pipeline', 'Standalone + Uncover']}
               value={settings.criminalIpApiKey}
               visible={!!visibleFields.criminalIpApiKey}
               onToggle={() => toggleFieldVisibility('criminalIpApiKey')}
               onChange={v => updateSetting('criminalIpApiKey', v)}
               onConfigureRotation={() => openRotationModal('criminalIpApiKey')}
               rotationInfo={rotationConfigs.criminalip || null}
+            />
+
+            {/* Uncover group */}
+            <div style={{ borderTop: '1px solid var(--border-secondary)', marginTop: '0.75rem', paddingTop: '0.75rem' }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                Uncover (Multi-Engine Search)
+              </p>
+            </div>
+            <SecretField
+              label="Quake API Key"
+              hint="360 Quake cyberspace search — asset discovery by service, certificate, and banner"
+              signupUrl="https://quake.360.net/quake/#/index"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.quakeApiKey}
+              visible={!!visibleFields.quakeApiKey}
+              onToggle={() => toggleFieldVisibility('quakeApiKey')}
+              onChange={v => updateSetting('quakeApiKey', v)}
+              onConfigureRotation={() => openRotationModal('quakeApiKey')}
+              rotationInfo={rotationConfigs.quake || null}
+            />
+            <SecretField
+              label="Hunter API Key"
+              hint="Qianxin Hunter cyberspace search — Chinese threat intelligence platform"
+              signupUrl="https://hunter.qianxin.com/"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.hunterApiKey}
+              visible={!!visibleFields.hunterApiKey}
+              onToggle={() => toggleFieldVisibility('hunterApiKey')}
+              onChange={v => updateSetting('hunterApiKey', v)}
+              onConfigureRotation={() => openRotationModal('hunterApiKey')}
+              rotationInfo={rotationConfigs.hunter || null}
+            />
+            <SecretField
+              label="PublicWWW API Key"
+              hint="Search engine for source code — find websites using specific technologies, scripts, or snippets"
+              signupUrl="https://publicwww.com/profile/signup.html"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.publicWwwApiKey}
+              visible={!!visibleFields.publicWwwApiKey}
+              onToggle={() => toggleFieldVisibility('publicWwwApiKey')}
+              onChange={v => updateSetting('publicWwwApiKey', v)}
+              onConfigureRotation={() => openRotationModal('publicWwwApiKey')}
+              rotationInfo={rotationConfigs.publicwww || null}
+            />
+            <SecretField
+              label="HunterHow API Key"
+              hint="hunter.how internet search — asset discovery and reconnaissance"
+              signupUrl="https://hunter.how/"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.hunterHowApiKey}
+              visible={!!visibleFields.hunterHowApiKey}
+              onToggle={() => toggleFieldVisibility('hunterHowApiKey')}
+              onChange={v => updateSetting('hunterHowApiKey', v)}
+              onConfigureRotation={() => openRotationModal('hunterHowApiKey')}
+              rotationInfo={rotationConfigs.hunterhow || null}
+            />
+            <SecretField
+              label="Google Custom Search API Key"
+              hint="Google Custom Search JSON API — for Uncover Google search engine (different from SerpAPI)"
+              signupUrl="https://developers.google.com/custom-search/v1/introduction"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.googleApiKey}
+              visible={!!visibleFields.googleApiKey}
+              onToggle={() => toggleFieldVisibility('googleApiKey')}
+              onChange={v => updateSetting('googleApiKey', v)}
+            />
+            <SecretField
+              label="Google Custom Search CX"
+              hint="Programmable Search Engine ID — paired with Google API Key above"
+              signupUrl="https://programmablesearchengine.google.com/controlpanel/create"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.googleApiCx}
+              visible={!!visibleFields.googleApiCx}
+              onToggle={() => toggleFieldVisibility('googleApiCx')}
+              onChange={v => updateSetting('googleApiCx', v)}
+            />
+            <SecretField
+              label="Onyphe API Key"
+              hint="Onyphe — cyber defense search engine for exposed assets, threat detection, and attack surface management"
+              signupUrl="https://search.onyphe.io/signup"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.onypheApiKey}
+              visible={!!visibleFields.onypheApiKey}
+              onToggle={() => toggleFieldVisibility('onypheApiKey')}
+              onChange={v => updateSetting('onypheApiKey', v)}
+              onConfigureRotation={() => openRotationModal('onypheApiKey')}
+              rotationInfo={rotationConfigs.onyphe || null}
+            />
+            <SecretField
+              label="Driftnet API Key"
+              hint="Driftnet — fast internet-wide port and service discovery"
+              signupUrl="https://driftnet.io/auth?state=signup"
+              badges={['Uncover', 'Recon Pipeline']}
+              value={settings.driftnetApiKey}
+              visible={!!visibleFields.driftnetApiKey}
+              onToggle={() => toggleFieldVisibility('driftnetApiKey')}
+              onChange={v => updateSetting('driftnetApiKey', v)}
+              onConfigureRotation={() => openRotationModal('driftnetApiKey')}
+              rotationInfo={rotationConfigs.driftnet || null}
             />
           </div>
         )}
@@ -1294,7 +1428,7 @@ function SecretField({
           <input
             className="textInput"
             type={visible ? 'text' : 'password'}
-            value={value}
+            value={value ?? ''}
             onChange={e => onChange(e.target.value)}
             placeholder={`Enter ${label.toLowerCase()}`}
           />

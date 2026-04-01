@@ -11,6 +11,11 @@ import logging
 
 import requests
 
+try:
+    from recon.ip_filter import filter_ips_for_enrichment
+except ImportError:
+    from ip_filter import filter_ips_for_enrichment
+
 logger = logging.getLogger(__name__)
 
 VIRUSTOTAL_API_BASE = "https://www.virustotal.com/api/v3/"
@@ -155,6 +160,7 @@ def run_virustotal_enrichment(combined_result: dict, settings: dict) -> dict:
     domain = combined_result.get("domain", "")
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
     ips = _extract_ips_from_recon(combined_result)
+    ips = filter_ips_for_enrichment(ips, combined_result, "VirusTotal")
     ip_slice = ips[:max_targets] if max_targets else []
 
     print(f"[*][VirusTotal] Starting OSINT enrichment")

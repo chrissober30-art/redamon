@@ -383,9 +383,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     # OSINT & Threat Intelligence Enrichment
     'CENSYS_ENABLED': False,
-    'CENSYS_API_ID': '',
-    'CENSYS_API_SECRET': '',
     'CENSYS_API_TOKEN': '',
+    'CENSYS_ORG_ID': '',
     'FOFA_ENABLED': False,
     'FOFA_MAX_RESULTS': 1000,
     'FOFA_API_KEY': '',
@@ -403,6 +402,19 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'ZOOMEYE_API_KEY': '',
     'CRIMINALIP_ENABLED': False,
     'CRIMINALIP_API_KEY': '',
+
+    # Uncover (ProjectDiscovery multi-engine search)
+    'UNCOVER_ENABLED': False,
+    'UNCOVER_MAX_RESULTS': 500,
+    'UNCOVER_DOCKER_IMAGE': 'projectdiscovery/uncover:latest',
+    'UNCOVER_QUAKE_API_KEY': '',
+    'UNCOVER_HUNTER_API_KEY': '',
+    'UNCOVER_PUBLICWWW_API_KEY': '',
+    'UNCOVER_HUNTERHOW_API_KEY': '',
+    'UNCOVER_GOOGLE_API_KEY': '',
+    'UNCOVER_GOOGLE_API_CX': '',
+    'UNCOVER_ONYPHE_API_KEY': '',
+    'UNCOVER_DRIFTNET_API_KEY': '',
 
     # Subdomain Discovery Tool Toggles
     'CRTSH_ENABLED': True,
@@ -811,6 +823,9 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['ZOOMEYE_ENABLED'] = project.get('zoomEyeEnabled', DEFAULT_SETTINGS['ZOOMEYE_ENABLED'])
     settings['ZOOMEYE_MAX_RESULTS'] = project.get('zoomEyeMaxResults', DEFAULT_SETTINGS['ZOOMEYE_MAX_RESULTS'])
     settings['CRIMINALIP_ENABLED'] = project.get('criminalIpEnabled', DEFAULT_SETTINGS['CRIMINALIP_ENABLED'])
+    settings['UNCOVER_ENABLED'] = project.get('uncoverEnabled', DEFAULT_SETTINGS['UNCOVER_ENABLED'])
+    settings['UNCOVER_MAX_RESULTS'] = int(project.get('uncoverMaxResults', DEFAULT_SETTINGS['UNCOVER_MAX_RESULTS']) or DEFAULT_SETTINGS['UNCOVER_MAX_RESULTS'])
+    settings['UNCOVER_DOCKER_IMAGE'] = project.get('uncoverDockerImage', DEFAULT_SETTINGS['UNCOVER_DOCKER_IMAGE'])
 
     # Subdomain Discovery Tool Toggles
     settings['CRTSH_ENABLED'] = project.get('crtshEnabled', DEFAULT_SETTINGS['CRTSH_ENABLED'])
@@ -884,9 +899,8 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
 
     # OSINT & Threat Intelligence keys
     if settings.get('CENSYS_ENABLED'):
-        settings['CENSYS_API_ID'] = user_global.get('censysApiId', '')
-        settings['CENSYS_API_SECRET'] = user_global.get('censysApiSecret', '')
         settings['CENSYS_API_TOKEN'] = user_global.get('censysApiToken', '')
+        settings['CENSYS_ORG_ID'] = user_global.get('censysOrgId', '')
 
     if settings.get('FOFA_ENABLED'):
         fofa_key = user_global.get('fofaApiKey', '')
@@ -917,6 +931,32 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
         cip_key = user_global.get('criminalIpApiKey', '')
         settings['CRIMINALIP_API_KEY'] = cip_key
         settings['CRIMINALIP_KEY_ROTATOR'] = _build_rotator(cip_key, 'criminalip')
+
+    # Uncover keys — always load shared OSINT keys so uncover can use
+    # engines even when the per-tool enrichment toggles are off.
+    if settings.get('UNCOVER_ENABLED'):
+        if not settings.get('SHODAN_API_KEY'):
+            settings['SHODAN_API_KEY'] = user_global.get('shodanApiKey', '')
+        if not settings.get('FOFA_API_KEY'):
+            settings['FOFA_API_KEY'] = user_global.get('fofaApiKey', '')
+        if not settings.get('ZOOMEYE_API_KEY'):
+            settings['ZOOMEYE_API_KEY'] = user_global.get('zoomEyeApiKey', '')
+        if not settings.get('NETLAS_API_KEY'):
+            settings['NETLAS_API_KEY'] = user_global.get('netlasApiKey', '')
+        if not settings.get('CRIMINALIP_API_KEY'):
+            settings['CRIMINALIP_API_KEY'] = user_global.get('criminalIpApiKey', '')
+        if not settings.get('CENSYS_API_TOKEN'):
+            settings['CENSYS_API_TOKEN'] = user_global.get('censysApiToken', '')
+        if not settings.get('CENSYS_ORG_ID'):
+            settings['CENSYS_ORG_ID'] = user_global.get('censysOrgId', '')
+        settings['UNCOVER_QUAKE_API_KEY'] = user_global.get('quakeApiKey', '')
+        settings['UNCOVER_HUNTER_API_KEY'] = user_global.get('hunterApiKey', '')
+        settings['UNCOVER_PUBLICWWW_API_KEY'] = user_global.get('publicWwwApiKey', '')
+        settings['UNCOVER_HUNTERHOW_API_KEY'] = user_global.get('hunterHowApiKey', '')
+        settings['UNCOVER_GOOGLE_API_KEY'] = user_global.get('googleApiKey', '')
+        settings['UNCOVER_GOOGLE_API_CX'] = user_global.get('googleApiCx', '')
+        settings['UNCOVER_ONYPHE_API_KEY'] = user_global.get('onypheApiKey', '')
+        settings['UNCOVER_DRIFTNET_API_KEY'] = user_global.get('driftnetApiKey', '')
 
     # Rules of Engagement
     settings['ROE_ENABLED'] = project.get('roeEnabled', DEFAULT_SETTINGS['ROE_ENABLED'])

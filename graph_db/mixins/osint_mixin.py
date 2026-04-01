@@ -2109,4 +2109,154 @@ class OsintMixin:
         print(f"[graph-db] update_graph_from_criminalip complete: {stats}")
         return stats
 
+    def update_graph_from_uncover(self, recon_data: dict, user_id: str, project_id: str) -> dict:
+        """Update Neo4j graph with uncover target expansion results.
 
+        Creates Subdomain and IP nodes for newly discovered assets.
+        Uses ON CREATE SET to avoid overwriting richer data from other tools.
+        """
+        stats = {
+            "subdomains_created": 0, "ips_created": 0,
+            "urls_created": 0,
+            "relationships_created": 0, "errors": [],
+        }
+        domain = recon_data.get("domain", "") or ""
+        try:
+            uncover = recon_data.get("uncover") or {}
+            hosts = uncover.get("hosts") or []
+            ips = uncover.get("ips") or []
+            ip_ports = uncover.get("ip_ports") or {}
+            urls = uncover.get("urls") or []
+            sources = uncover.get("sources") or []
+            source_counts = uncover.get("source_counts") or {}
+            total_raw = uncover.get("total_raw", 0)
+            total_deduped = uncover.get("total_deduped", 0)
+
+            if not hosts and not ips and not urls:
+                return stats
+
+            with self.driver.session() as session:
+                for hostname in hosts:
+                    if not hostname:
+                        continue
+                    try:
+                        session.run(
+                            """
+                            MERGE (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
+                            ON CREATE SET s.discovered_at = datetime(), s.updated_at = datetime(),
+                                          s.source = 'uncover', s.status = 'unverified'
+                            SET s.uncover_sources = $sources,
+                                s.uncover_total_raw = $total_raw,
+                                s.uncover_total_deduped = $total_deduped
+                            """,
+                            name=hostname, user_id=user_id, project_id=project_id,
+                            sources=sources, total_raw=total_raw, total_deduped=total_deduped,
+                        )
+                        stats["subdomains_created"] += 1
+                        if domain:
+                            session.run(
+                                """
+                                MATCH (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
+                                MATCH (d:Domain {name: $domain, user_id: $user_id, project_id: $project_id})
+                                MERGE (s)-[:BELONGS_TO]->(d)
+                                MERGE (d)-[:HAS_SUBDOMAIN]->(s)
+                                """,
+                                name=hostname, domain=domain,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats["relationships_created"] += 2
+                    except Exception as e:
+                        stats["errors"].append(f"Uncover subdomain {hostname}: {e}")
+
+                for ip in ips:
+                    if not ip:
+                        continue
+                    try:
+                        session.run(
+                            """
+                            MERGE (i:IP {address: $address, user_id: $user_id, project_id: $project_id})
+                            ON CREATE SET i.updated_at = datetime(), i.uncover_discovered = true
+                            SET i.uncover_enriched = true, i.updated_at = datetime(),
+                                i.uncover_sources = $sources,
+                                i.uncover_source_counts = $source_counts_str,
+                                i.uncover_total_raw = $total_raw,
+                                i.uncover_total_deduped = $total_deduped
+                            """,
+                            address=ip, user_id=user_id, project_id=project_id,
+                            sources=sources,
+                            source_counts_str=str(source_counts),
+                            total_raw=total_raw, total_deduped=total_deduped,
+                        )
+                        stats["ips_created"] += 1
+
+                        # Link IP to Domain (prevents orphaned IP nodes)
+                        if domain:
+                            session.run(
+                                """
+                                MATCH (i:IP {address: $address, user_id: $user_id, project_id: $project_id})
+                                MATCH (d:Domain {name: $domain, user_id: $user_id, project_id: $project_id})
+                                MERGE (d)-[:HAS_IP]->(i)
+                                """,
+                                address=ip, domain=domain,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats["relationships_created"] += 1
+
+                        ports = ip_ports.get(ip, [])
+                        for port_num in ports:
+                            if not port_num or port_num <= 0:
+                                continue
+                            session.run(
+                                """
+                                MERGE (p:Port {number: $port, protocol: 'tcp', ip_address: $ip,
+                                               user_id: $user_id, project_id: $project_id})
+                                ON CREATE SET p.state = 'open', p.source = 'uncover',
+                                              p.updated_at = datetime()
+                                MERGE (i:IP {address: $ip, user_id: $user_id, project_id: $project_id})
+                                MERGE (i)-[:HAS_PORT]->(p)
+                                """,
+                                port=int(port_num), ip=ip,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats["relationships_created"] += 1
+                    except Exception as e:
+                        stats["errors"].append(f"Uncover IP {ip}: {e}")
+
+                for url in urls:
+                    if not url:
+                        continue
+                    try:
+                        session.run(
+                            """
+                            MERGE (e:Endpoint {url: $url, user_id: $user_id, project_id: $project_id})
+                            ON CREATE SET e.discovered_at = datetime(), e.updated_at = datetime(),
+                                          e.source = 'uncover', e.method = 'GET'
+                            """,
+                            url=url, user_id=user_id, project_id=project_id,
+                        )
+                        stats["urls_created"] += 1
+                        # Link Endpoint to Domain
+                        if domain:
+                            session.run(
+                                """
+                                MATCH (e:Endpoint {url: $url, user_id: $user_id, project_id: $project_id})
+                                MATCH (d:Domain {name: $domain, user_id: $user_id, project_id: $project_id})
+                                MERGE (d)-[:HAS_ENDPOINT]->(e)
+                                """,
+                                url=url, domain=domain,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats["relationships_created"] += 1
+                    except Exception as e:
+                        stats["errors"].append(f"Uncover URL {url}: {e}")
+
+        except Exception as e:
+            stats["errors"].append(f"update_graph_from_uncover: {e}")
+
+        print(f"[+][graph-db] Uncover Graph Update: "
+              f"{stats['subdomains_created']} subdomains, "
+              f"{stats['ips_created']} IPs, "
+              f"{stats['urls_created']} URLs, "
+              f"{stats['relationships_created']} relationships")
+        print(f"[graph-db] update_graph_from_uncover complete")
+        return stats

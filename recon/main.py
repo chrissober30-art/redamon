@@ -679,6 +679,22 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
     _graph_update_bg("update_graph_from_ip_recon", combined_result, USER_ID, PROJECT_ID)
 
     # =====================================================================
+    # GROUP 2b — Uncover Target Expansion (before port scan / OSINT)
+    # =====================================================================
+    if settings.get('UNCOVER_ENABLED', False):
+        try:
+            from recon.uncover_enrich import run_uncover_expansion, merge_uncover_into_pipeline
+            uncover_data = run_uncover_expansion(combined_result, settings)
+            if uncover_data:
+                combined_result["uncover"] = uncover_data
+                merge_uncover_into_pipeline(combined_result, uncover_data, combined_result.get('domain', ''))
+                combined_result["metadata"]["modules_executed"].append("uncover_expansion")
+                save_recon_file(combined_result, output_file)
+                _graph_update_bg("update_graph_from_uncover", combined_result, USER_ID, PROJECT_ID)
+        except Exception as e:
+            print(f"[!][Uncover] Expansion failed: {e}")
+
+    # =====================================================================
     # Shodan + Port Scan (parallel fan-out) — same pattern as domain recon
     # =====================================================================
     shodan_enabled = any([
@@ -760,7 +776,7 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
         if settings.get(cfg[0], False)
         and (
             settings.get(f'{name.upper()}_API_KEY', '')
-            or (name == 'censys' and settings.get('CENSYS_API_ID', ''))
+            or (name == 'censys' and settings.get('CENSYS_API_TOKEN', ''))
             or name == 'otx'  # OTX supports anonymous requests without an API key
         )
     }
@@ -1051,6 +1067,22 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
         _graph_update_bg("update_graph_from_urlscan_discovery", combined_result, USER_ID, PROJECT_ID)
 
     # =====================================================================
+    # GROUP 2b — Uncover Target Expansion (before port scan / OSINT)
+    # =====================================================================
+    if _settings.get('UNCOVER_ENABLED', False):
+        try:
+            from recon.uncover_enrich import run_uncover_expansion, merge_uncover_into_pipeline
+            uncover_data = run_uncover_expansion(combined_result, _settings)
+            if uncover_data:
+                combined_result["uncover"] = uncover_data
+                merge_uncover_into_pipeline(combined_result, uncover_data, TARGET_DOMAIN)
+                combined_result["metadata"]["modules_executed"].append("uncover_expansion")
+                save_recon_file(combined_result, output_file)
+                _graph_update_bg("update_graph_from_uncover", combined_result, USER_ID, PROJECT_ID)
+        except Exception as e:
+            print(f"[!][Uncover] Expansion failed: {e}")
+
+    # =====================================================================
     # GROUP 3 — Fan-Out: Shodan + Port Scan (parallel)
     # Both need IPs/hostnames from DNS. Independent of each other.
     # =====================================================================
@@ -1168,7 +1200,7 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
         if _settings.get(cfg[0], False)
         and (
             _settings.get(f'{name.upper()}_API_KEY', '')
-            or (name == 'censys' and _settings.get('CENSYS_API_ID', ''))
+            or (name == 'censys' and _settings.get('CENSYS_API_TOKEN', ''))
             or name == 'otx'  # OTX supports anonymous requests without an API key
         )
     }

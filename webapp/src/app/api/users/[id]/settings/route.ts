@@ -12,7 +12,7 @@ function maskSecret(value: string): string {
 }
 
 const TUNNEL_FIELDS = ['ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
-const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan', 'censys', 'fofa', 'otx', 'netlas', 'virustotal', 'zoomeye', 'criminalip'] as const
+const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan', 'censys', 'fofa', 'otx', 'netlas', 'virustotal', 'zoomeye', 'criminalip', 'quake', 'hunter', 'publicwww', 'hunterhow', 'onyphe', 'driftnet'] as const
 
 // GET /api/users/[id]/settings
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -49,15 +49,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         nvdApiKey: '',
         vulnersApiKey: '',
         urlscanApiKey: '',
-        censysApiId: '',
-        censysApiSecret: '',
         censysApiToken: '',
+        censysOrgId: '',
         fofaApiKey: '',
         otxApiKey: '',
         netlasApiKey: '',
         virusTotalApiKey: '',
         zoomEyeApiKey: '',
         criminalIpApiKey: '',
+        quakeApiKey: '',
+        hunterApiKey: '',
+        publicWwwApiKey: '',
+        hunterHowApiKey: '',
+        googleApiKey: '',
+        googleApiCx: '',
+        onypheApiKey: '',
+        driftnetApiKey: '',
         ngrokAuthtoken: '',
         chiselServerUrl: '',
         chiselAuth: '',
@@ -75,15 +82,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         nvdApiKey: maskSecret(settings.nvdApiKey),
         vulnersApiKey: maskSecret(settings.vulnersApiKey),
         urlscanApiKey: maskSecret(settings.urlscanApiKey),
-        censysApiId: maskSecret(settings.censysApiId),
-        censysApiSecret: maskSecret(settings.censysApiSecret),
         censysApiToken: maskSecret(settings.censysApiToken),
+        censysOrgId: maskSecret(settings.censysOrgId),
         fofaApiKey: maskSecret(settings.fofaApiKey),
         otxApiKey: maskSecret(settings.otxApiKey),
         netlasApiKey: maskSecret(settings.netlasApiKey),
         virusTotalApiKey: maskSecret(settings.virusTotalApiKey),
         zoomEyeApiKey: maskSecret(settings.zoomEyeApiKey),
         criminalIpApiKey: maskSecret(settings.criminalIpApiKey),
+        quakeApiKey: maskSecret(settings.quakeApiKey),
+        hunterApiKey: maskSecret(settings.hunterApiKey),
+        publicWwwApiKey: maskSecret(settings.publicWwwApiKey),
+        hunterHowApiKey: maskSecret(settings.hunterHowApiKey),
+        googleApiKey: maskSecret(settings.googleApiKey),
+        googleApiCx: maskSecret(settings.googleApiCx),
+        onypheApiKey: maskSecret(settings.onypheApiKey),
+        driftnetApiKey: maskSecret(settings.driftnetApiKey),
         ngrokAuthtoken: maskSecret(settings.ngrokAuthtoken),
         chiselAuth: maskSecret(settings.chiselAuth),
       }
@@ -111,7 +125,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
 
     const data: Record<string, string> = {}
-    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiId', 'censysApiSecret', 'censysApiToken', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
+    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiToken', 'censysOrgId', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'quakeApiKey', 'hunterApiKey', 'publicWwwApiKey', 'hunterHowApiKey', 'googleApiKey', 'googleApiCx', 'onypheApiKey', 'driftnetApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
 
     for (const field of fields) {
       if (field in body) {
@@ -221,15 +235,22 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       nvdApiKey: maskSecret(settings.nvdApiKey),
       vulnersApiKey: maskSecret(settings.vulnersApiKey),
       urlscanApiKey: maskSecret(settings.urlscanApiKey),
-      censysApiId: maskSecret(settings.censysApiId),
-      censysApiSecret: maskSecret(settings.censysApiSecret),
       censysApiToken: maskSecret(settings.censysApiToken),
+      censysOrgId: maskSecret(settings.censysOrgId),
       fofaApiKey: maskSecret(settings.fofaApiKey),
       otxApiKey: maskSecret(settings.otxApiKey),
       netlasApiKey: maskSecret(settings.netlasApiKey),
       virusTotalApiKey: maskSecret(settings.virusTotalApiKey),
       zoomEyeApiKey: maskSecret(settings.zoomEyeApiKey),
       criminalIpApiKey: maskSecret(settings.criminalIpApiKey),
+      quakeApiKey: maskSecret(settings.quakeApiKey),
+      hunterApiKey: maskSecret(settings.hunterApiKey),
+      publicWwwApiKey: maskSecret(settings.publicWwwApiKey),
+      hunterHowApiKey: maskSecret(settings.hunterHowApiKey),
+      googleApiKey: maskSecret(settings.googleApiKey),
+      googleApiCx: maskSecret(settings.googleApiCx),
+      onypheApiKey: maskSecret(settings.onypheApiKey),
+      driftnetApiKey: maskSecret(settings.driftnetApiKey),
       ngrokAuthtoken: maskSecret(settings.ngrokAuthtoken),
       chiselAuth: maskSecret(settings.chiselAuth),
       rotationConfigs,

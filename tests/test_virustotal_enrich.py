@@ -490,7 +490,7 @@ class TestRunVirustotalEnrichment(unittest.TestCase):
     @patch("virustotal_enrich.requests.get")
     def test_max_targets_limits_ip_requests(self, mock_get, _sleep):
         mock_get.return_value = _mock_response(200, _vt_ip_body())
-        ips = [f"10.0.0.{i}" for i in range(1, 11)]  # 10 IPs
+        ips = [f"93.184.{i}.1" for i in range(1, 11)]  # 10 IPs
         cr = _combined_result(ips=ips)
         cr["domain"] = ""  # skip domain request
         out = run_virustotal_enrichment(cr, _default_settings(VIRUSTOTAL_MAX_TARGETS=3))

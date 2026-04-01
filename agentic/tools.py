@@ -75,11 +75,13 @@ class MCPToolsManager:
         nmap_url: str = None,
         metasploit_url: str = None,
         nuclei_url: str = None,
+        playwright_url: str = None,
     ):
         self.network_recon_url = network_recon_url or os.environ.get('MCP_NETWORK_RECON_URL', 'http://host.docker.internal:8000/sse')
         self.nmap_url = nmap_url or os.environ.get('MCP_NMAP_URL', 'http://host.docker.internal:8004/sse')
         self.metasploit_url = metasploit_url or os.environ.get('MCP_METASPLOIT_URL', 'http://host.docker.internal:8003/sse')
         self.nuclei_url = nuclei_url or os.environ.get('MCP_NUCLEI_URL', 'http://host.docker.internal:8002/sse')
+        self.playwright_url = playwright_url or os.environ.get('MCP_PLAYWRIGHT_URL', 'http://host.docker.internal:8005/sse')
         self.client: Optional[MultiServerMCPClient] = None
         self._tools_cache: Dict[str, any] = {}
 
@@ -106,6 +108,7 @@ class MCPToolsManager:
             ("nmap", self.nmap_url, 60, 600),                     # 10 min read
             ("metasploit", self.metasploit_url, 60, 1800),        # 30 min read
             ("nuclei", self.nuclei_url, 60, 600),                 # 10 min read
+            ("playwright", self.playwright_url, 60, 120),            # 2 min read
         ]
 
         for server_name, url, timeout, sse_read_timeout in server_configs:
@@ -506,7 +509,7 @@ class WebSearchToolManager:
                     max_results=manager.max_results,
                     topic="general",
                     search_depth="advanced",
-                    api_key=api_key,
+                    tavily_api_key=api_key,
                 )
 
                 results = await tavily_tool.ainvoke({"query": query})
