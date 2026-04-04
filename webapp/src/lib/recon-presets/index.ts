@@ -10,8 +10,16 @@ import { FULL_PASSIVE_SCAN } from './presets/full-passive-scan'
 import { SECRET_MINER } from './presets/secret-miner'
 import { SUBDOMAIN_TAKEOVER } from './presets/subdomain-takeover'
 import { CVE_HUNTER } from './presets/cve-hunter'
+import { CLOUD_EXPOSURE } from './presets/cloud-exposure'
+import { COMPLIANCE_AUDIT } from './presets/compliance-audit'
+import { DIRECTORY_DISCOVERY } from './presets/directory-discovery'
+import { RED_TEAM_OPERATOR } from './presets/red-team-operator'
+import { SECRET_HUNTER } from './presets/secret-hunter'
 import { STEALTH_RECON } from './presets/stealth-recon'
 import { WEB_APP_PENTESTER } from './presets/web-app-pentester'
+import { PARAMETER_INJECTION } from './presets/parameter-injection'
+import { DNS_EMAIL_SECURITY } from './presets/dns-email-security'
+import { LARGE_NETWORK } from './presets/large-network'
 
 export type { ReconPreset } from './types'
 
@@ -29,6 +37,14 @@ export const RECON_PRESETS: ReconPreset[] = [
   SUBDOMAIN_TAKEOVER,
   STEALTH_RECON,
   CVE_HUNTER,
+  RED_TEAM_OPERATOR,
+  DIRECTORY_DISCOVERY,
+  CLOUD_EXPOSURE,
+  COMPLIANCE_AUDIT,
+  SECRET_HUNTER,
+  PARAMETER_INJECTION,
+  DNS_EMAIL_SECURITY,
+  LARGE_NETWORK,
 ]
 
 export function getPresetById(id: string): ReconPreset | undefined {

@@ -32,7 +32,7 @@ Pentesters running a final comprehensive sweep on a target they have full author
 - All 28 security checks with 20 workers
 - CVE lookup: 50 max CVEs per service, min CVSS 0
 - MITRE: full CWE + CAPEC enrichment
-- All 11 OSINT providers at maximum results (Shodan, URLScan 10000, OTX, Censys, FOFA 5000, Netlas, VirusTotal, ZoomEye 5000, CriminalIP, Uncover 1000)
+- All 10 OSINT providers at maximum results (Shodan, URLScan 10000, OTX, Censys, FOFA 5000, Netlas, VirusTotal, ZoomEye 5000, CriminalIP, Uncover 1000)
 
 ### What it disables
 - Nothing. Every tool is enabled.
@@ -305,7 +305,7 @@ Pentesters running a final comprehensive sweep on a target they have full author
     securityCheckTimeout: 20,
     securityCheckMaxWorkers: 20,
 
-    // --- All 11 OSINT providers at maximum ---
+    // --- All 10 OSINT providers at maximum ---
     osintEnrichmentEnabled: true,
 
     shodanEnabled: true,

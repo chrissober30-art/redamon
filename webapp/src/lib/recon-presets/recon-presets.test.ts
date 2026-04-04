@@ -22,6 +22,14 @@ import { FULL_PASSIVE_SCAN } from './presets/full-passive-scan'
 import { STEALTH_RECON } from './presets/stealth-recon'
 import { SUBDOMAIN_TAKEOVER } from './presets/subdomain-takeover'
 import { CVE_HUNTER } from './presets/cve-hunter'
+import { DIRECTORY_DISCOVERY } from './presets/directory-discovery'
+import { RED_TEAM_OPERATOR } from './presets/red-team-operator'
+import { CLOUD_EXPOSURE } from './presets/cloud-exposure'
+import { COMPLIANCE_AUDIT } from './presets/compliance-audit'
+import { SECRET_HUNTER } from './presets/secret-hunter'
+import { PARAMETER_INJECTION } from './presets/parameter-injection'
+import { DNS_EMAIL_SECURITY } from './presets/dns-email-security'
+import { LARGE_NETWORK } from './presets/large-network'
 import type { ReconPreset } from './types'
 
 // ============================================================
@@ -709,12 +717,12 @@ describe('Full Pipeline - Passive Only preset', () => {
     expect(FULL_PASSIVE_SCAN.parameters.paramspiderEnabled).toBe(true)
   })
 
-  // --- All 11 OSINT providers enabled ---
+  // --- All 10 OSINT providers enabled ---
   test('enables OSINT enrichment master switch', () => {
     expect(FULL_PASSIVE_SCAN.parameters.osintEnrichmentEnabled).toBe(true)
   })
 
-  test('enables all 11 OSINT providers', () => {
+  test('enables all 10 OSINT providers', () => {
     const p = FULL_PASSIVE_SCAN.parameters
     expect(p.shodanEnabled).toBe(true)
     expect(p.urlscanEnabled).toBe(true)
@@ -1620,8 +1628,8 @@ describe('OSINT Investigator preset', () => {
     expect(modules).toHaveLength(3)
   })
 
-  // --- All 11 OSINT providers enabled at max ---
-  test('enables all 11 OSINT providers', () => {
+  // --- All 10 OSINT providers enabled at max ---
+  test('enables all 10 OSINT providers', () => {
     const p = OSINT_INVESTIGATOR.parameters
     expect(p.osintEnrichmentEnabled).toBe(true)
     expect(p.shodanEnabled).toBe(true)
@@ -2238,6 +2246,1017 @@ describe('Subdomain Takeover Hunter preset', () => {
     expect(SUBDOMAIN_TAKEOVER.fullDescription).toContain('### What it enables')
     expect(SUBDOMAIN_TAKEOVER.fullDescription).toContain('### What it disables')
     expect(SUBDOMAIN_TAKEOVER.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Directory & Content Discovery preset validation
+// ============================================================
+
+describe('Directory & Content Discovery preset', () => {
+  test('has correct id and name', () => {
+    expect(DIRECTORY_DISCOVERY.id).toBe('directory-discovery')
+    expect(DIRECTORY_DISCOVERY.name).toBe('Directory & Content Discovery')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('directory-discovery')
+    expect(preset).toBeDefined()
+    expect(preset!.id).toBe('directory-discovery')
+  })
+
+  test('scanModules include discovery, http_probe, resource_enum but not port_scan, vuln_scan, js_recon', () => {
+    const modules = DIRECTORY_DISCOVERY.parameters.scanModules!
+    expect(modules).toContain('domain_discovery')
+    expect(modules).toContain('http_probe')
+    expect(modules).toContain('resource_enum')
+    expect(modules).not.toContain('port_scan')
+    expect(modules).not.toContain('vuln_scan')
+    expect(modules).not.toContain('js_recon')
+  })
+
+  test('ffuf enabled with recursion depth 3 and many extensions', () => {
+    expect(DIRECTORY_DISCOVERY.parameters.ffufEnabled).toBe(true)
+    expect(DIRECTORY_DISCOVERY.parameters.ffufRecursionDepth).toBe(3)
+    const extensions = DIRECTORY_DISCOVERY.parameters.ffufExtensions as string[]
+    expect(extensions).toContain('.php')
+    expect(extensions).toContain('.bak')
+    expect(extensions).toContain('.env')
+    expect(extensions).toContain('.sql')
+    expect(extensions).toContain('.zip')
+  })
+
+  test('Kiterunner enabled with routes-large', () => {
+    expect(DIRECTORY_DISCOVERY.parameters.kiterunnerEnabled).toBe(true)
+    const wordlists = DIRECTORY_DISCOVERY.parameters.kiterunnerWordlists as string[]
+    expect(wordlists).toContain('routes-large')
+  })
+
+  test('Katana depth 4 and Hakrawler depth 4', () => {
+    expect(DIRECTORY_DISCOVERY.parameters.katanaEnabled).toBe(true)
+    expect(DIRECTORY_DISCOVERY.parameters.katanaDepth).toBe(4)
+    expect(DIRECTORY_DISCOVERY.parameters.hakrawlerEnabled).toBe(true)
+    expect(DIRECTORY_DISCOVERY.parameters.hakrawlerDepth).toBe(4)
+  })
+
+  test('GAU enabled with all providers', () => {
+    expect(DIRECTORY_DISCOVERY.parameters.gauEnabled).toBe(true)
+    const providers = DIRECTORY_DISCOVERY.parameters.gauProviders as string[]
+    expect(providers).toContain('wayback')
+    expect(providers).toContain('commoncrawl')
+    expect(providers).toContain('otx')
+    expect(providers).toContain('urlscan')
+  })
+
+  test('jsluice enabled', () => {
+    expect(DIRECTORY_DISCOVERY.parameters.jsluiceEnabled).toBe(true)
+  })
+
+  test('disables port scanning, vuln scanning, OSINT, and irrelevant tools', () => {
+    expect(DIRECTORY_DISCOVERY.parameters.naabuEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.masscanEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.nmapEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.arjunEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.paramspiderEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.nucleiEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.jsReconEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.bannerGrabEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.wappalyzerEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.securityCheckEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.osintEnrichmentEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.cveLookupEnabled).toBe(false)
+    expect(DIRECTORY_DISCOVERY.parameters.mitreEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = DIRECTORY_DISCOVERY.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(DIRECTORY_DISCOVERY.fullDescription).not.toContain('\u2014')
+    expect(DIRECTORY_DISCOVERY.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(DIRECTORY_DISCOVERY.fullDescription).toContain('### Pipeline Goal')
+    expect(DIRECTORY_DISCOVERY.fullDescription).toContain('### Who is this for?')
+    expect(DIRECTORY_DISCOVERY.fullDescription).toContain('### What it enables')
+    expect(DIRECTORY_DISCOVERY.fullDescription).toContain('### What it disables')
+    expect(DIRECTORY_DISCOVERY.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Red Team Operator preset validation
+// ============================================================
+
+describe('Red Team Operator preset', () => {
+  test('has correct id and name', () => {
+    expect(RED_TEAM_OPERATOR.id).toBe('red-team-operator')
+    expect(RED_TEAM_OPERATOR.name).toBe('Red Team Operator')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('red-team-operator')
+    expect(preset).toBeDefined()
+    expect(preset!.id).toBe('red-team-operator')
+  })
+
+  test('routes all traffic through Tor', () => {
+    expect(RED_TEAM_OPERATOR.parameters.useTorForRecon).toBe(true)
+  })
+
+  test('Naabu uses connect scan (not passive, not SYN)', () => {
+    expect(RED_TEAM_OPERATOR.parameters.naabuEnabled).toBe(true)
+    expect(RED_TEAM_OPERATOR.parameters.naabuPassiveMode).toBe(false)
+    expect(RED_TEAM_OPERATOR.parameters.naabuScanType).toBe('c')
+  })
+
+  test('httpx is throttled with limited probes', () => {
+    const p = RED_TEAM_OPERATOR.parameters
+    expect(p.httpxEnabled).toBe(true)
+    expect(p.httpxThreads).toBe(3)
+    expect(p.httpxRateLimit).toBe(5)
+    expect(p.httpxProbeJarm).toBe(false)
+    expect(p.httpxProbeFavicon).toBe(false)
+    expect(p.httpxProbeAsn).toBe(false)
+    expect(p.httpxProbeCdn).toBe(false)
+  })
+
+  test('Katana is throttled with shallow crawl', () => {
+    const p = RED_TEAM_OPERATOR.parameters
+    expect(p.katanaEnabled).toBe(true)
+    expect(p.katanaDepth).toBe(1)
+    expect(p.katanaMaxUrls).toBe(100)
+    expect(p.katanaRateLimit).toBe(5)
+    expect(p.katanaJsCrawl).toBe(false)
+  })
+
+  test('Nuclei is critical-only with low concurrency and exclude tags', () => {
+    const p = RED_TEAM_OPERATOR.parameters
+    expect(p.nucleiEnabled).toBe(true)
+    const sev = p.nucleiSeverity as string[]
+    expect(sev).toEqual(['critical'])
+    expect(p.nucleiConcurrency).toBe(3)
+    expect(p.nucleiDastMode).toBe(false)
+    expect(p.nucleiInteractsh).toBe(false)
+    const tags = p.nucleiExcludeTags as string[]
+    expect(tags).toContain('dos')
+    expect(tags).toContain('fuzz')
+    expect(tags).toContain('intrusive')
+  })
+
+  test('GAU enabled with verify disabled', () => {
+    expect(RED_TEAM_OPERATOR.parameters.gauEnabled).toBe(true)
+    expect(RED_TEAM_OPERATOR.parameters.gauVerifyUrls).toBe(false)
+  })
+
+  test('Arjun is passive', () => {
+    expect(RED_TEAM_OPERATOR.parameters.arjunEnabled).toBe(true)
+    expect(RED_TEAM_OPERATOR.parameters.arjunPassive).toBe(true)
+  })
+
+  test('OSINT enrichment enabled with Shodan, URLScan, OTX, Censys', () => {
+    const p = RED_TEAM_OPERATOR.parameters
+    expect(p.osintEnrichmentEnabled).toBe(true)
+    expect(p.shodanEnabled).toBe(true)
+    expect(p.urlscanEnabled).toBe(true)
+    expect(p.otxEnabled).toBe(true)
+    expect(p.censysEnabled).toBe(true)
+  })
+
+  test('disables noisy and brute-force tools', () => {
+    const p = RED_TEAM_OPERATOR.parameters
+    expect(p.masscanEnabled).toBe(false)
+    expect(p.nmapEnabled).toBe(false)
+    expect(p.hakrawlerEnabled).toBe(false)
+    expect(p.ffufEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.jsReconEnabled).toBe(false)
+    expect(p.bannerGrabEnabled).toBe(false)
+    expect(p.wappalyzerEnabled).toBe(false)
+    expect(p.securityCheckEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = RED_TEAM_OPERATOR.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(RED_TEAM_OPERATOR.fullDescription).not.toContain('\u2014')
+    expect(RED_TEAM_OPERATOR.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(RED_TEAM_OPERATOR.fullDescription).toContain('### Pipeline Goal')
+    expect(RED_TEAM_OPERATOR.fullDescription).toContain('### Who is this for?')
+    expect(RED_TEAM_OPERATOR.fullDescription).toContain('### What it enables')
+    expect(RED_TEAM_OPERATOR.fullDescription).toContain('### What it disables')
+    expect(RED_TEAM_OPERATOR.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Cloud & External Exposure preset validation
+// ============================================================
+
+describe('Cloud & External Exposure preset', () => {
+  test('has correct id and name', () => {
+    expect(CLOUD_EXPOSURE.id).toBe('cloud-exposure')
+    expect(CLOUD_EXPOSURE.name).toBe('Cloud & External Exposure')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('cloud-exposure')
+    expect(preset).toBeDefined()
+    expect(preset!.name).toBe('Cloud & External Exposure')
+  })
+
+  test('scan modules include domain_discovery, port_scan, http_probe, vuln_scan', () => {
+    const modules = CLOUD_EXPOSURE.parameters.scanModules!
+    expect(modules).toContain('domain_discovery')
+    expect(modules).toContain('port_scan')
+    expect(modules).toContain('http_probe')
+    expect(modules).toContain('vuln_scan')
+    expect(modules).not.toContain('resource_enum')
+    expect(modules).not.toContain('js_recon')
+  })
+
+  test('Naabu enabled with custom cloud ports', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.naabuEnabled).toBe(true)
+    expect(p.naabuCustomPorts).toContain('6443')
+    expect(p.naabuCustomPorts).toContain('10250')
+    expect(p.naabuCustomPorts).toContain('9200')
+    expect(p.naabuCustomPorts).toContain('27017')
+  })
+
+  test('Nmap enabled with version detection and scripts', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.nmapEnabled).toBe(true)
+    expect(p.nmapVersionDetection).toBe(true)
+    expect(p.nmapScriptScan).toBe(true)
+  })
+
+  test('httpx with ASN, CDN, TLS probes all true', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.httpxEnabled).toBe(true)
+    expect(p.httpxProbeAsn).toBe(true)
+    expect(p.httpxProbeCdn).toBe(true)
+    expect(p.httpxProbeTlsInfo).toBe(true)
+    expect(p.httpxProbeTlsGrab).toBe(true)
+    expect(p.httpxProbeJarm).toBe(true)
+  })
+
+  test('all OSINT providers enabled', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.osintEnrichmentEnabled).toBe(true)
+    expect(p.shodanEnabled).toBe(true)
+    expect(p.censysEnabled).toBe(true)
+    expect(p.urlscanEnabled).toBe(true)
+    expect(p.otxEnabled).toBe(true)
+    expect(p.fofaEnabled).toBe(true)
+    expect(p.netlasEnabled).toBe(true)
+    expect(p.virusTotalEnabled).toBe(true)
+    expect(p.zoomEyeEnabled).toBe(true)
+    expect(p.criminalIpEnabled).toBe(true)
+    expect(p.uncoverEnabled).toBe(true)
+  })
+
+  test('security checks all enabled, especially cloud-related', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.securityCheckEnabled).toBe(true)
+    expect(p.securityCheckKubernetesApiExposed).toBe(true)
+    expect(p.securityCheckDatabaseExposed).toBe(true)
+    expect(p.securityCheckAdminPortExposed).toBe(true)
+    expect(p.securityCheckRedisNoAuth).toBe(true)
+    expect(p.securityCheckDirectIpHttp).toBe(true)
+    expect(p.securityCheckDirectIpHttps).toBe(true)
+    expect(p.securityCheckIpApiExposed).toBe(true)
+    expect(p.securityCheckWafBypass).toBe(true)
+  })
+
+  test('Nuclei enabled with interactsh', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.nucleiEnabled).toBe(true)
+    expect(p.nucleiInteractsh).toBe(true)
+    expect(p.nucleiSeverity).toEqual(['critical', 'high', 'medium'])
+  })
+
+  test('CVE and MITRE enabled', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.cveLookupEnabled).toBe(true)
+    expect(p.mitreEnabled).toBe(true)
+    expect(p.mitreIncludeCwe).toBe(true)
+    expect(p.mitreIncludeCapec).toBe(true)
+  })
+
+  test('web crawlers and fuzzers disabled', () => {
+    const p = CLOUD_EXPOSURE.parameters
+    expect(p.katanaEnabled).toBe(false)
+    expect(p.hakrawlerEnabled).toBe(false)
+    expect(p.gauEnabled).toBe(false)
+    expect(p.paramspiderEnabled).toBe(false)
+    expect(p.jsluiceEnabled).toBe(false)
+    expect(p.jsReconEnabled).toBe(false)
+    expect(p.ffufEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.arjunEnabled).toBe(false)
+    expect(p.masscanEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = CLOUD_EXPOSURE.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(CLOUD_EXPOSURE.fullDescription).not.toContain('\u2014')
+    expect(CLOUD_EXPOSURE.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(CLOUD_EXPOSURE.fullDescription).toContain('### Pipeline Goal')
+    expect(CLOUD_EXPOSURE.fullDescription).toContain('### Who is this for?')
+    expect(CLOUD_EXPOSURE.fullDescription).toContain('### What it enables')
+    expect(CLOUD_EXPOSURE.fullDescription).toContain('### What it disables')
+    expect(CLOUD_EXPOSURE.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Compliance & Header Audit preset validation
+// ============================================================
+
+describe('Compliance & Header Audit preset', () => {
+  test('has correct id and name', () => {
+    expect(COMPLIANCE_AUDIT.id).toBe('compliance-audit')
+    expect(COMPLIANCE_AUDIT.name).toBe('Compliance & Header Audit')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('compliance-audit')
+    expect(preset).toBeDefined()
+    expect(preset!.name).toBe('Compliance & Header Audit')
+  })
+
+  test('scan modules include domain_discovery, http_probe, vuln_scan only', () => {
+    const modules = COMPLIANCE_AUDIT.parameters.scanModules!
+    expect(modules).toContain('domain_discovery')
+    expect(modules).toContain('http_probe')
+    expect(modules).toContain('vuln_scan')
+    expect(modules).not.toContain('port_scan')
+    expect(modules).not.toContain('resource_enum')
+    expect(modules).not.toContain('js_recon')
+  })
+
+  test('httpx all header probes enabled', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.httpxEnabled).toBe(true)
+    expect(p.httpxProbeStatusCode).toBe(true)
+    expect(p.httpxProbeContentLength).toBe(true)
+    expect(p.httpxProbeContentType).toBe(true)
+    expect(p.httpxProbeTitle).toBe(true)
+    expect(p.httpxProbeServer).toBe(true)
+    expect(p.httpxProbeResponseTime).toBe(true)
+    expect(p.httpxProbeWordCount).toBe(true)
+    expect(p.httpxProbeLineCount).toBe(true)
+    expect(p.httpxProbeTechDetect).toBe(true)
+    expect(p.httpxProbeIp).toBe(true)
+    expect(p.httpxProbeCname).toBe(true)
+    expect(p.httpxProbeTlsInfo).toBe(true)
+    expect(p.httpxProbeTlsGrab).toBe(true)
+    expect(p.httpxProbeFavicon).toBe(true)
+    expect(p.httpxProbeJarm).toBe(true)
+    expect(p.httpxProbeAsn).toBe(true)
+    expect(p.httpxProbeCdn).toBe(true)
+  })
+
+  test('httpxIncludeResponseHeaders true', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.httpxIncludeResponseHeaders).toBe(true)
+    expect(p.httpxIncludeResponse).toBe(false)
+  })
+
+  test('Wappalyzer enabled', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.wappalyzerEnabled).toBe(true)
+    expect(p.wappalyzerMinConfidence).toBe(30)
+    expect(p.wappalyzerAutoUpdate).toBe(true)
+  })
+
+  test('all 27 security checks enabled', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.securityCheckEnabled).toBe(true)
+    expect(p.securityCheckDirectIpHttp).toBe(true)
+    expect(p.securityCheckDirectIpHttps).toBe(true)
+    expect(p.securityCheckIpApiExposed).toBe(true)
+    expect(p.securityCheckWafBypass).toBe(true)
+    expect(p.securityCheckTlsExpiringSoon).toBe(true)
+    expect(p.securityCheckMissingReferrerPolicy).toBe(true)
+    expect(p.securityCheckMissingPermissionsPolicy).toBe(true)
+    expect(p.securityCheckMissingCoop).toBe(true)
+    expect(p.securityCheckMissingCorp).toBe(true)
+    expect(p.securityCheckMissingCoep).toBe(true)
+    expect(p.securityCheckCacheControlMissing).toBe(true)
+    expect(p.securityCheckLoginNoHttps).toBe(true)
+    expect(p.securityCheckSessionNoSecure).toBe(true)
+    expect(p.securityCheckSessionNoHttponly).toBe(true)
+    expect(p.securityCheckBasicAuthNoTls).toBe(true)
+    expect(p.securityCheckSpfMissing).toBe(true)
+    expect(p.securityCheckDmarcMissing).toBe(true)
+    expect(p.securityCheckDnssecMissing).toBe(true)
+    expect(p.securityCheckZoneTransfer).toBe(true)
+    expect(p.securityCheckAdminPortExposed).toBe(true)
+    expect(p.securityCheckDatabaseExposed).toBe(true)
+    expect(p.securityCheckRedisNoAuth).toBe(true)
+    expect(p.securityCheckKubernetesApiExposed).toBe(true)
+    expect(p.securityCheckSmtpOpenRelay).toBe(true)
+    expect(p.securityCheckCspUnsafeInline).toBe(true)
+    expect(p.securityCheckInsecureFormAction).toBe(true)
+    expect(p.securityCheckNoRateLimiting).toBe(true)
+  })
+
+  test('Nuclei enabled with misconfig focus, no DAST, no interactsh', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.nucleiEnabled).toBe(true)
+    expect(p.nucleiDastMode).toBe(false)
+    expect(p.nucleiInteractsh).toBe(false)
+    expect(p.nucleiHeadless).toBe(false)
+    expect(p.nucleiSeverity).toEqual(['critical', 'high', 'medium'])
+    expect(p.nucleiTags).toEqual(['misconfig', 'exposure'])
+  })
+
+  test('all port scanners disabled', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.naabuEnabled).toBe(false)
+    expect(p.masscanEnabled).toBe(false)
+    expect(p.nmapEnabled).toBe(false)
+  })
+
+  test('crawlers, fuzzers, JS tools, OSINT, CVE, MITRE all disabled', () => {
+    const p = COMPLIANCE_AUDIT.parameters
+    expect(p.katanaEnabled).toBe(false)
+    expect(p.hakrawlerEnabled).toBe(false)
+    expect(p.gauEnabled).toBe(false)
+    expect(p.paramspiderEnabled).toBe(false)
+    expect(p.jsluiceEnabled).toBe(false)
+    expect(p.jsReconEnabled).toBe(false)
+    expect(p.ffufEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.arjunEnabled).toBe(false)
+    expect(p.bannerGrabEnabled).toBe(false)
+    expect(p.osintEnrichmentEnabled).toBe(false)
+    expect(p.shodanEnabled).toBe(false)
+    expect(p.censysEnabled).toBe(false)
+    expect(p.cveLookupEnabled).toBe(false)
+    expect(p.mitreEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = COMPLIANCE_AUDIT.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(COMPLIANCE_AUDIT.fullDescription).not.toContain('\u2014')
+    expect(COMPLIANCE_AUDIT.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(COMPLIANCE_AUDIT.fullDescription).toContain('### Pipeline Goal')
+    expect(COMPLIANCE_AUDIT.fullDescription).toContain('### Who is this for?')
+    expect(COMPLIANCE_AUDIT.fullDescription).toContain('### What it enables')
+    expect(COMPLIANCE_AUDIT.fullDescription).toContain('### What it disables')
+    expect(COMPLIANCE_AUDIT.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Secret & Credential Hunter preset validation
+// ============================================================
+
+describe('Secret & Credential Hunter preset', () => {
+  test('has correct id and name', () => {
+    expect(SECRET_HUNTER.id).toBe('secret-hunter')
+    expect(SECRET_HUNTER.name).toBe('Secret & Credential Hunter')
+  })
+
+  test('getPresetById returns it', () => {
+    const preset = getPresetById('secret-hunter')
+    expect(preset).toBeDefined()
+    expect(preset!.id).toBe('secret-hunter')
+    expect(preset!.name).toBe('Secret & Credential Hunter')
+  })
+
+  test('scanModules includes js_recon', () => {
+    const modules = SECRET_HUNTER.parameters.scanModules!
+    expect(modules).toContain('js_recon')
+    expect(modules).toContain('domain_discovery')
+    expect(modules).toContain('http_probe')
+    expect(modules).toContain('resource_enum')
+    expect(modules).toContain('vuln_scan')
+  })
+
+  test('JS Recon fully enabled with maxFiles >= 2000, validateKeys, sourceMaps, all analysis modules', () => {
+    const p = SECRET_HUNTER.parameters
+    expect(p.jsReconEnabled).toBe(true)
+    expect(p.jsReconMaxFiles).toBeGreaterThanOrEqual(2000)
+    expect(p.jsReconValidateKeys).toBe(true)
+    expect(p.jsReconSourceMaps).toBe(true)
+    expect(p.jsReconExtractEndpoints).toBe(true)
+    expect(p.jsReconRegexPatterns).toBe(true)
+    expect(p.jsReconDependencyCheck).toBe(true)
+    expect(p.jsReconDomSinks).toBe(true)
+    expect(p.jsReconFrameworkDetect).toBe(true)
+    expect(p.jsReconDevComments).toBe(true)
+    expect(p.jsReconIncludeChunks).toBe(true)
+    expect(p.jsReconIncludeFrameworkJs).toBe(true)
+    expect(p.jsReconIncludeArchivedJs).toBe(true)
+  })
+
+  test('jsluice enabled with maxFiles >= 1000, extractSecrets true', () => {
+    const p = SECRET_HUNTER.parameters
+    expect(p.jsluiceEnabled).toBe(true)
+    expect(p.jsluiceMaxFiles).toBeGreaterThanOrEqual(1000)
+    expect(p.jsluiceExtractSecrets).toBe(true)
+  })
+
+  test('ffuf with sensitive extensions (.env, .config, .yml, .bak, .key, .pem)', () => {
+    const p = SECRET_HUNTER.parameters
+    expect(p.ffufEnabled).toBe(true)
+    const exts = p.ffufExtensions as string[]
+    expect(exts).toContain('.env')
+    expect(exts).toContain('.config')
+    expect(exts).toContain('.yml')
+    expect(exts).toContain('.bak')
+    expect(exts).toContain('.key')
+    expect(exts).toContain('.pem')
+  })
+
+  test('Katana depth 3 with JS crawl', () => {
+    const p = SECRET_HUNTER.parameters
+    expect(p.katanaEnabled).toBe(true)
+    expect(p.katanaDepth).toBe(3)
+    expect(p.katanaJsCrawl).toBe(true)
+  })
+
+  test('Hakrawler enabled', () => {
+    expect(SECRET_HUNTER.parameters.hakrawlerEnabled).toBe(true)
+  })
+
+  test('GAU enabled', () => {
+    expect(SECRET_HUNTER.parameters.gauEnabled).toBe(true)
+  })
+
+  test('Nuclei with exposure/token tags', () => {
+    const p = SECRET_HUNTER.parameters
+    expect(p.nucleiEnabled).toBe(true)
+    const tags = p.nucleiTags as string[]
+    expect(tags).toContain('exposure')
+    expect(tags).toContain('token')
+  })
+
+  test('disables port scanners, kiterunner, arjun, paramspider, bannerGrab, wappalyzer, securityCheck, osint, cveLookup, mitre', () => {
+    const p = SECRET_HUNTER.parameters
+    expect(p.naabuEnabled).toBe(false)
+    expect(p.nmapEnabled).toBe(false)
+    expect(p.masscanEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.arjunEnabled).toBe(false)
+    expect(p.paramspiderEnabled).toBe(false)
+    expect(p.bannerGrabEnabled).toBe(false)
+    expect(p.wappalyzerEnabled).toBe(false)
+    expect(p.securityCheckEnabled).toBe(false)
+    expect(p.osintEnrichmentEnabled).toBe(false)
+    expect(p.cveLookupEnabled).toBe(false)
+    expect(p.mitreEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = SECRET_HUNTER.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(SECRET_HUNTER.fullDescription).not.toContain('\u2014')
+    expect(SECRET_HUNTER.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(SECRET_HUNTER.fullDescription).toContain('### Pipeline Goal')
+    expect(SECRET_HUNTER.fullDescription).toContain('### Who is this for?')
+    expect(SECRET_HUNTER.fullDescription).toContain('### What it enables')
+    expect(SECRET_HUNTER.fullDescription).toContain('### What it disables')
+    expect(SECRET_HUNTER.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Parameter & Injection Surface preset
+// ============================================================
+
+describe('Parameter & Injection Surface preset', () => {
+  test('has correct id and name', () => {
+    expect(PARAMETER_INJECTION.id).toBe('parameter-injection')
+    expect(PARAMETER_INJECTION.name).toBe('Parameter & Injection Surface')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('parameter-injection')
+    expect(preset).toBeDefined()
+    expect(preset!.name).toBe('Parameter & Injection Surface')
+  })
+
+  test('enables domain_discovery, http_probe, resource_enum, vuln_scan modules', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.scanModules).toEqual(['domain_discovery', 'http_probe', 'resource_enum', 'vuln_scan'])
+  })
+
+  test('Arjun enabled with all 5 methods and maxEndpoints >= 200', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.arjunEnabled).toBe(true)
+    expect(p.arjunMethods).toEqual(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    expect(p.arjunMaxEndpoints).toBeGreaterThanOrEqual(200)
+  })
+
+  test('Katana enabled with paramsOnly true', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.katanaEnabled).toBe(true)
+    expect(p.katanaParamsOnly).toBe(true)
+  })
+
+  test('ParamSpider enabled', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.paramspiderEnabled).toBe(true)
+  })
+
+  test('GAU enabled with verify and method detection', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.gauEnabled).toBe(true)
+    expect(p.gauVerifyUrls).toBe(true)
+    expect(p.gauDetectMethods).toBe(true)
+  })
+
+  test('jsluice enabled with extractUrls true', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.jsluiceEnabled).toBe(true)
+    expect(p.jsluiceExtractUrls).toBe(true)
+  })
+
+  test('Nuclei DAST mode with injection tags', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.nucleiEnabled).toBe(true)
+    expect(p.nucleiDastMode).toBe(true)
+    const tags = p.nucleiTags as string[]
+    expect(tags).toContain('sqli')
+    expect(tags).toContain('xss')
+    expect(tags).toContain('ssrf')
+    expect(tags).toContain('injection')
+  })
+
+  test('disables port scanners, hakrawler, ffuf, kiterunner, jsRecon, bannerGrab, wappalyzer, securityCheck, osint, cveLookup, mitre', () => {
+    const p = PARAMETER_INJECTION.parameters
+    expect(p.naabuEnabled).toBe(false)
+    expect(p.masscanEnabled).toBe(false)
+    expect(p.nmapEnabled).toBe(false)
+    expect(p.hakrawlerEnabled).toBe(false)
+    expect(p.ffufEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.jsReconEnabled).toBe(false)
+    expect(p.bannerGrabEnabled).toBe(false)
+    expect(p.wappalyzerEnabled).toBe(false)
+    expect(p.securityCheckEnabled).toBe(false)
+    expect(p.osintEnrichmentEnabled).toBe(false)
+    expect(p.cveLookupEnabled).toBe(false)
+    expect(p.mitreEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const keys = Object.keys(PARAMETER_INJECTION.parameters)
+    const nonReconFields = ['name', 'targetDomain', 'description', 'userId', 'projectId']
+    for (const field of nonReconFields) {
+      expect(keys).not.toContain(field)
+    }
+  })
+
+  test('fullDescription does not contain em dashes', () => {
+    expect(PARAMETER_INJECTION.fullDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(PARAMETER_INJECTION.fullDescription).toContain('### Pipeline Goal')
+    expect(PARAMETER_INJECTION.fullDescription).toContain('### Who is this for?')
+    expect(PARAMETER_INJECTION.fullDescription).toContain('### What it enables')
+    expect(PARAMETER_INJECTION.fullDescription).toContain('### What it disables')
+    expect(PARAMETER_INJECTION.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// Network Perimeter - Large Scale preset validation
+// ============================================================
+
+describe('Network Perimeter - Large Scale preset', () => {
+  test('has correct id and name', () => {
+    expect(LARGE_NETWORK.id).toBe('large-network')
+    expect(LARGE_NETWORK.name).toBe('Network Perimeter - Large Scale')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('large-network')
+    expect(preset).toBeDefined()
+    expect(preset!.name).toBe('Network Perimeter - Large Scale')
+  })
+
+  test('scan modules include domain_discovery, port_scan, http_probe only', () => {
+    const modules = LARGE_NETWORK.parameters.scanModules!
+    expect(modules).toContain('domain_discovery')
+    expect(modules).toContain('port_scan')
+    expect(modules).toContain('http_probe')
+    expect(modules).not.toContain('resource_enum')
+    expect(modules).not.toContain('vuln_scan')
+    expect(modules).not.toContain('js_recon')
+  })
+
+  test('Naabu enabled with high rate and threads', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.naabuEnabled).toBe(true)
+    expect(p.naabuRateLimit).toBeGreaterThanOrEqual(1500)
+    expect(p.naabuThreads).toBeGreaterThanOrEqual(50)
+    expect(p.naabuScanType).toBe('s')
+    expect(p.naabuVerifyPorts).toBe(true)
+  })
+
+  test('Masscan enabled with rate >= 10000', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.masscanEnabled).toBe(true)
+    expect(p.masscanRate).toBeGreaterThanOrEqual(10000)
+    expect(p.masscanBanners).toBe(true)
+  })
+
+  test('Nmap with version detection, scripts, T4', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.nmapEnabled).toBe(true)
+    expect(p.nmapVersionDetection).toBe(true)
+    expect(p.nmapScriptScan).toBe(true)
+    expect(p.nmapTimingTemplate).toBe('T4')
+  })
+
+  test('Banner grabbing enabled with high threads', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.bannerGrabEnabled).toBe(true)
+    expect(p.bannerGrabThreads).toBeGreaterThanOrEqual(40)
+  })
+
+  test('httpx enabled with ASN, CDN, JARM probes', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.httpxEnabled).toBe(true)
+    expect(p.httpxProbeAsn).toBe(true)
+    expect(p.httpxProbeCdn).toBe(true)
+    expect(p.httpxProbeJarm).toBe(true)
+    expect(p.httpxProbeTlsInfo).toBe(true)
+  })
+
+  test('Shodan + Censys enabled, other OSINT disabled', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.osintEnrichmentEnabled).toBe(true)
+    expect(p.shodanEnabled).toBe(true)
+    expect(p.censysEnabled).toBe(true)
+    expect(p.urlscanEnabled).toBe(false)
+    expect(p.otxEnabled).toBe(false)
+    expect(p.fofaEnabled).toBe(false)
+    expect(p.netlasEnabled).toBe(false)
+    expect(p.virusTotalEnabled).toBe(false)
+    expect(p.zoomEyeEnabled).toBe(false)
+    expect(p.criminalIpEnabled).toBe(false)
+    expect(p.uncoverEnabled).toBe(false)
+  })
+
+  test('CVE + MITRE enabled', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.cveLookupEnabled).toBe(true)
+    expect(p.cveLookupMaxCves).toBe(40)
+    expect(p.mitreEnabled).toBe(true)
+    expect(p.mitreIncludeCwe).toBe(true)
+    expect(p.mitreIncludeCapec).toBe(true)
+  })
+
+  test('Security checks enabled', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.securityCheckEnabled).toBe(true)
+    expect(p.securityCheckMaxWorkers).toBe(20)
+    expect(p.securityCheckAdminPortExposed).toBe(true)
+    expect(p.securityCheckDatabaseExposed).toBe(true)
+    expect(p.securityCheckKubernetesApiExposed).toBe(true)
+  })
+
+  test('web crawlers, fuzzers, JS analysis, and nuclei all disabled', () => {
+    const p = LARGE_NETWORK.parameters
+    expect(p.katanaEnabled).toBe(false)
+    expect(p.hakrawlerEnabled).toBe(false)
+    expect(p.gauEnabled).toBe(false)
+    expect(p.paramspiderEnabled).toBe(false)
+    expect(p.jsluiceEnabled).toBe(false)
+    expect(p.jsReconEnabled).toBe(false)
+    expect(p.ffufEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.arjunEnabled).toBe(false)
+    expect(p.nucleiEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = LARGE_NETWORK.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(LARGE_NETWORK.fullDescription).not.toContain('\u2014')
+    expect(LARGE_NETWORK.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(LARGE_NETWORK.fullDescription).toContain('### Pipeline Goal')
+    expect(LARGE_NETWORK.fullDescription).toContain('### Who is this for?')
+    expect(LARGE_NETWORK.fullDescription).toContain('### What it enables')
+    expect(LARGE_NETWORK.fullDescription).toContain('### What it disables')
+    expect(LARGE_NETWORK.fullDescription).toContain('### How it works')
+  })
+})
+
+// ============================================================
+// DNS & Email Security preset validation
+// ============================================================
+
+describe('DNS & Email Security preset', () => {
+  test('has correct id and name', () => {
+    expect(DNS_EMAIL_SECURITY.id).toBe('dns-email-security')
+    expect(DNS_EMAIL_SECURITY.name).toBe('DNS & Email Security')
+  })
+
+  test('is findable by getPresetById', () => {
+    const preset = getPresetById('dns-email-security')
+    expect(preset).toBeDefined()
+    expect(preset!.name).toBe('DNS & Email Security')
+  })
+
+  test('scanModules contains only domain_discovery', () => {
+    const modules = DNS_EMAIL_SECURITY.parameters.scanModules!
+    expect(modules).toEqual(['domain_discovery'])
+  })
+
+  test('all subdomain tools enabled at 10000 max, amass active+brute, bruteforce enabled', () => {
+    const p = DNS_EMAIL_SECURITY.parameters
+    expect(p.subdomainDiscoveryEnabled).toBe(true)
+    expect(p.crtshEnabled).toBe(true)
+    expect(p.crtshMaxResults).toBe(10000)
+    expect(p.hackerTargetEnabled).toBe(true)
+    expect(p.hackerTargetMaxResults).toBe(10000)
+    expect(p.knockpyReconEnabled).toBe(true)
+    expect(p.knockpyReconMaxResults).toBe(10000)
+    expect(p.subfinderEnabled).toBe(true)
+    expect(p.subfinderMaxResults).toBe(10000)
+    expect(p.amassEnabled).toBe(true)
+    expect(p.amassActive).toBe(true)
+    expect(p.amassBrute).toBe(true)
+    expect(p.amassMaxResults).toBe(10000)
+    expect(p.purednsEnabled).toBe(true)
+    expect(p.useBruteforceForSubdomains).toBe(true)
+  })
+
+  test('whoisEnabled and dnsEnabled are true', () => {
+    const p = DNS_EMAIL_SECURITY.parameters
+    expect(p.whoisEnabled).toBe(true)
+    expect(p.dnsEnabled).toBe(true)
+  })
+
+  test('security checks enabled with DNS/email checks', () => {
+    const p = DNS_EMAIL_SECURITY.parameters
+    expect(p.securityCheckEnabled).toBe(true)
+    expect(p.securityCheckSpfMissing).toBe(true)
+    expect(p.securityCheckDmarcMissing).toBe(true)
+    expect(p.securityCheckDnssecMissing).toBe(true)
+    expect(p.securityCheckZoneTransfer).toBe(true)
+    expect(p.securityCheckSmtpOpenRelay).toBe(true)
+  })
+
+  test('HTTP/web security checks disabled', () => {
+    const p = DNS_EMAIL_SECURITY.parameters
+    expect(p.securityCheckDirectIpHttp).toBe(false)
+    expect(p.securityCheckWafBypass).toBe(false)
+    expect(p.securityCheckLoginNoHttps).toBe(false)
+    expect(p.securityCheckSessionNoSecure).toBe(false)
+  })
+
+  test('Shodan enabled with domainDns and reverseDns', () => {
+    const p = DNS_EMAIL_SECURITY.parameters
+    expect(p.osintEnrichmentEnabled).toBe(true)
+    expect(p.shodanEnabled).toBe(true)
+    expect(p.shodanDomainDns).toBe(true)
+    expect(p.shodanReverseDns).toBe(true)
+  })
+
+  test('httpx, port scanners, crawlers, fuzzers, JS tools, nuclei, cveLookup, mitre all disabled', () => {
+    const p = DNS_EMAIL_SECURITY.parameters
+    expect(p.httpxEnabled).toBe(false)
+    expect(p.naabuEnabled).toBe(false)
+    expect(p.masscanEnabled).toBe(false)
+    expect(p.nmapEnabled).toBe(false)
+    expect(p.katanaEnabled).toBe(false)
+    expect(p.hakrawlerEnabled).toBe(false)
+    expect(p.gauEnabled).toBe(false)
+    expect(p.paramspiderEnabled).toBe(false)
+    expect(p.jsluiceEnabled).toBe(false)
+    expect(p.jsReconEnabled).toBe(false)
+    expect(p.ffufEnabled).toBe(false)
+    expect(p.kiterunnerEnabled).toBe(false)
+    expect(p.arjunEnabled).toBe(false)
+    expect(p.nucleiEnabled).toBe(false)
+    expect(p.cveLookupEnabled).toBe(false)
+    expect(p.mitreEnabled).toBe(false)
+  })
+
+  test('does not contain non-recon fields', () => {
+    const params = DNS_EMAIL_SECURITY.parameters as Record<string, unknown>
+    expect(params.name).toBeUndefined()
+    expect(params.description).toBeUndefined()
+    expect(params.targetDomain).toBeUndefined()
+    expect(params.subdomainList).toBeUndefined()
+    expect(params.ipMode).toBeUndefined()
+    expect(params.targetIps).toBeUndefined()
+    expect(params.agentOpenaiModel).toBeUndefined()
+    expect(params.agentMaxIterations).toBeUndefined()
+    expect(params.roeEnabled).toBeUndefined()
+    expect(params.cypherfixRequireApproval).toBeUndefined()
+  })
+
+  test('does not contain em dashes', () => {
+    expect(DNS_EMAIL_SECURITY.fullDescription).not.toContain('\u2014')
+    expect(DNS_EMAIL_SECURITY.shortDescription).not.toContain('\u2014')
+  })
+
+  test('fullDescription contains expected section headers', () => {
+    expect(DNS_EMAIL_SECURITY.fullDescription).toContain('### Pipeline Goal')
+    expect(DNS_EMAIL_SECURITY.fullDescription).toContain('### Who is this for?')
+    expect(DNS_EMAIL_SECURITY.fullDescription).toContain('### What it enables')
+    expect(DNS_EMAIL_SECURITY.fullDescription).toContain('### What it disables')
+    expect(DNS_EMAIL_SECURITY.fullDescription).toContain('### How it works')
   })
 })
 

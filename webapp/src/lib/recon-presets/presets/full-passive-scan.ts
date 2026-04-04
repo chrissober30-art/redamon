@@ -20,7 +20,7 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
 - Naabu in passive mode (queries Shodan InternetDB for known open ports -- zero scanning)
 - GAU with all 4 providers (Wayback Machine, CommonCrawl, OTX, URLScan) at 10000 URL limit
 - ParamSpider for historical parameterized URLs from Wayback CDX
-- All 11 OSINT enrichment providers at maximum results:
+- All 10 OSINT enrichment providers at maximum results:
   - Shodan (host lookup, reverse DNS, passive CVEs)
   - URLScan.io (10000 results)
   - OTX AlienVault (threat intelligence, passive DNS, malware)
@@ -57,7 +57,7 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
 4. Naabu passive mode queries Shodan InternetDB for historically known open ports on discovered IPs
 5. GAU + ParamSpider pull historical URLs and parameters from Wayback Machine, CommonCrawl, OTX, and URLScan archives
 6. Arjun in passive mode discovers parameters without sending requests to the target
-7. All 11 OSINT providers enrich discovered IPs with geolocation, services, banners, threat intelligence, and passive CVEs
+7. All 10 OSINT providers enrich discovered IPs with geolocation, services, banners, threat intelligence, and passive CVEs
 8. CVE lookup and MITRE enrichment map found service versions to known vulnerabilities and attack patterns`,
   parameters: {
     // Modules: domain_discovery + port_scan (passive) + resource_enum (GAU/ParamSpider only)

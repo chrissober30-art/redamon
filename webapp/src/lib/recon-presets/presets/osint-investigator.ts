@@ -5,9 +5,9 @@ export const OSINT_INVESTIGATOR: ReconPreset = {
   name: 'OSINT Investigator',
   icon: '',
   image: '/preset-binoculars.svg',
-  shortDescription: 'Maximum passive intelligence from all 11 OSINT providers, archives, and public databases. No active scanning.',
+  shortDescription: 'Maximum passive intelligence from all 10 OSINT providers, archives, and public databases. No active scanning.',
   fullDescription: `### Pipeline Goal
-Extract the maximum amount of intelligence from every available passive source. This preset enables all 11 OSINT providers at their highest result limits, plus GAU archive discovery, ParamSpider historical parameters, and Arjun in passive mode. The focus is on building a complete target profile from third-party data -- not on finding exploitable vulnerabilities.
+Extract the maximum amount of intelligence from every available passive source. This preset enables all 10 OSINT providers at their highest result limits, plus GAU archive discovery, ParamSpider historical parameters, and Arjun in passive mode. The focus is on building a complete target profile from third-party data -- not on finding exploitable vulnerabilities.
 
 ### Who is this for?
 OSINT analysts, threat intelligence teams, or red team operators building a target dossier before an engagement. Security teams wanting to understand their organization's external exposure from an attacker's perspective without touching production systems.
@@ -20,7 +20,7 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
 - GAU with all 4 providers at 10000 URLs (Wayback, CommonCrawl, OTX, URLScan)
 - ParamSpider for historical parameterized URLs
 - Arjun in passive mode for parameter inference
-- All 11 OSINT providers at maximum results:
+- All 10 OSINT providers at maximum results:
   - Shodan: host lookup, reverse DNS, domain DNS, passive CVEs
   - URLScan.io: 10000 results
   - OTX AlienVault: threat pulses, passive DNS, malware samples
@@ -54,7 +54,7 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
 4. Naabu passive mode queries Shodan InternetDB for historically known ports
 5. GAU + ParamSpider pull historical URLs and parameters from web archives
 6. Arjun passive mode infers parameters from archive data
-7. All 11 OSINT providers enrich discovered IPs and domains with threat intelligence, services, geolocation, reputation, and passive CVEs
+7. All 10 OSINT providers enrich discovered IPs and domains with threat intelligence, services, geolocation, reputation, and passive CVEs
 8. CVE lookup maps found service versions to known vulnerabilities
 9. MITRE enrichment classifies findings by CWE weakness and CAPEC attack patterns`,
   parameters: {
@@ -156,7 +156,7 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
     mitreIncludeCapec: true,
     mitreEnrichRecon: true,
 
-    // --- All 11 OSINT providers at maximum ---
+    // --- All 10 OSINT providers at maximum ---
     osintEnrichmentEnabled: true,
 
     shodanEnabled: true,
