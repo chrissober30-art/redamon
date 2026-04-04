@@ -87,7 +87,12 @@ const TAB_GROUPS = [
       { id: 'vuln', label: 'Vulnerability Scanning' },
       { id: 'cve', label: 'CVE & MITRE' },
       { id: 'security', label: 'Security Checks' },
-      { id: 'gvm', label: 'GVM Scan' },
+    ],
+  },
+  {
+    label: '',
+    style: 'tabGroupOther',
+    tabs: [
       { id: 'integrations', label: 'Other Scans', wide: true },
     ],
   },
@@ -493,13 +498,10 @@ export function ProjectForm({
 
         {activeTab === 'integrations' && (
           <>
+            <GvmScanSection data={formData} updateField={updateField} />
             <GithubSection data={formData} updateField={updateField} hasGithubToken={hasGithubToken} />
             <TrufflehogSection data={formData} updateField={updateField} hasGithubToken={hasGithubToken} />
           </>
-        )}
-
-        {activeTab === 'gvm' && (
-          <GvmScanSection data={formData} updateField={updateField} />
         )}
 
         {activeTab === 'agent' && (

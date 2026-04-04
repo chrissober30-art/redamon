@@ -1078,6 +1078,7 @@ export default function GraphPage() {
         currentPhase={currentPhase}
         currentPhaseNumber={currentPhaseNumber}
         status={reconState?.status || 'idle'}
+        errorMessage={reconState?.error}
         onClearLogs={clearLogs}
         onPause={handlePauseRecon}
         onResume={handleResumeRecon}
@@ -1091,6 +1092,7 @@ export default function GraphPage() {
         currentPhase={gvmCurrentPhase}
         currentPhaseNumber={gvmCurrentPhaseNumber}
         status={gvmState?.status || 'idle'}
+        errorMessage={gvmState?.error}
         onClearLogs={clearGvmLogs}
         onPause={handlePauseGvm}
         onResume={handleResumeGvm}
@@ -1107,6 +1109,7 @@ export default function GraphPage() {
         currentPhase={githubHuntCurrentPhase}
         currentPhaseNumber={githubHuntCurrentPhaseNumber}
         status={githubHuntState?.status || 'idle'}
+        errorMessage={githubHuntState?.error}
         onClearLogs={clearGithubHuntLogs}
         onPause={handlePauseGithubHunt}
         onResume={handleResumeGithubHunt}
@@ -1123,6 +1126,7 @@ export default function GraphPage() {
         currentPhase={trufflehogCurrentPhase}
         currentPhaseNumber={trufflehogCurrentPhaseNumber}
         status={trufflehogState?.status || 'idle'}
+        errorMessage={trufflehogState?.error}
         onClearLogs={clearTrufflehogLogs}
         onPause={handlePauseTrufflehog}
         onResume={handleResumeTrufflehog}

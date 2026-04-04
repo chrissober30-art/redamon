@@ -98,6 +98,7 @@ remove_redamon_images() {
         "projectdiscovery/nuclei"
         "projectdiscovery/subfinder"
         "projectdiscovery/dnsx"
+        "projectdiscovery/uncover"
         "sxcurity/gau"
         "caffix/amass"
         "frost19k/puredns"

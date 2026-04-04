@@ -20,6 +20,7 @@ interface ReconLogsDrawerProps {
   title?: string
   phases?: readonly string[]
   totalPhases?: number
+  errorMessage?: string | null
 }
 
 export function ReconLogsDrawer({
@@ -36,6 +37,7 @@ export function ReconLogsDrawer({
   title = 'Reconnaissance Logs',
   phases = RECON_PHASES,
   totalPhases = 7,
+  errorMessage,
 }: ReconLogsDrawerProps) {
   const logsEndRef = useRef<HTMLDivElement>(null)
   const logsContainerRef = useRef<HTMLDivElement>(null)
@@ -89,7 +91,7 @@ export function ReconLogsDrawer({
       case 'completed':
         return 'Completed'
       case 'error':
-        return 'Error'
+        return errorMessage ? `Error: ${errorMessage}` : 'Error'
       case 'stopping':
         return 'Stopping...'
       default:
@@ -165,7 +167,7 @@ export function ReconLogsDrawer({
       <div className={styles.statusBar}>
         <div className={styles.statusLeft}>
           {getStatusIcon()}
-          <span className={styles.statusText}>{getStatusText()}</span>
+          <span className={styles.statusText} title={getStatusText()}>{getStatusText()}</span>
         </div>
         <div className={styles.statusActions}>
           {(status === 'running' || status === 'paused') && (

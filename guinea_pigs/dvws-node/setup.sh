@@ -1,8 +1,5 @@
 #!/bin/bash
-# Install Docker and deploy DVWS-Node + CVE Lab (vulnerable services)
-# DVWS-Node:  port 80 (REST/SOAP), 4000 (GraphQL), 9090 (XML-RPC)
-# Databases:  port 3306 (MySQL), 27017 (MongoDB) -- exposed for scanning
-# CVE Lab:    port 8080 (Tomcat RCE), 8888 (Log4Shell), 21/6200 (vsftpd backdoor)
+# Install Docker and deploy RedAmon HackLab target environment
 set -e
 
 echo "=== Installing Docker ==="
@@ -41,13 +38,12 @@ rm -rf ~/dvws-node
 git clone https://github.com/snoopysecurity/dvws-node.git ~/dvws-node
 cd ~/dvws-node
 
-echo "=== Creating CVE Lab overlay ==="
+echo "=== Creating additional containers ==="
 
-# Dockerfile for Tomcat CVE-2017-12617 (PUT method RCE)
+# Tomcat container
 mkdir -p ~/dvws-node/tomcat-rce
 cat > ~/dvws-node/tomcat-rce/Dockerfile << 'DOCKERFILE'
 FROM vulhub/tomcat:8.5.19
-# Enable PUT method (readonly=false) to trigger CVE-2017-12617
 RUN cd /usr/local/tomcat/conf \
     && LINE=$(nl -ba web.xml | grep '<load-on-startup>1' | awk '{print $1}') \
     && ADDON="<init-param><param-name>readonly</param-name><param-value>false</param-value></init-param>" \
@@ -55,8 +51,7 @@ RUN cd /usr/local/tomcat/conf \
 EXPOSE 8080
 DOCKERFILE
 
-# Dockerfile for vsftpd 2.3.4 backdoor (CVE-2011-2523)
-# Built from source -- the original GPL-licensed code with the known backdoor
+# vsftpd container
 mkdir -p ~/dvws-node/vsftpd-backdoor
 cat > ~/dvws-node/vsftpd-backdoor/Dockerfile << 'DOCKERFILE'
 FROM ubuntu:20.04
@@ -89,7 +84,7 @@ cat > ~/dvws-node/landing/index.html << 'LANDING_HTML'
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RedAmon HackLab -- Vulnerable Test Server</title>
+<title>RedAmon HackLab -- Research Target</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; line-height: 1.6; }
@@ -99,11 +94,7 @@ cat > ~/dvws-node/landing/index.html << 'LANDING_HTML'
   .warning-box { background: #1a0000; border: 1px solid #ff4444; border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 2rem; }
   .warning-box strong { color: #ff6666; }
   h2 { color: #ff6666; font-size: 1.2rem; margin: 1.8rem 0 0.8rem; border-bottom: 1px solid #222; padding-bottom: 0.4rem; }
-  .services-table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
-  .services-table th { background: #1a1a1a; color: #ff8888; text-align: left; padding: 0.5rem 0.8rem; border: 1px solid #222; }
-  .services-table td { padding: 0.5rem 0.8rem; border: 1px solid #222; }
-  .services-table tr:hover { background: #111; }
-  .port { color: #ff8888; font-family: monospace; font-weight: bold; }
+  .info-box { background: #111; border: 1px solid #222; border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0; font-size: 0.95rem; }
   ol { padding-left: 1.5rem; }
   ol li { margin-bottom: 0.6rem; }
   ol li strong { color: #ffaaaa; }
@@ -118,36 +109,27 @@ cat > ~/dvws-node/landing/index.html << 'LANDING_HTML'
 <div class="container">
 
 <h1>RedAmon HackLab</h1>
-<p class="subtitle">Intentionally Vulnerable Test Server -- gpigs.devergolabs.com</p>
+<p class="subtitle">Research Target Server -- gpigs.devergolabs.com</p>
 
 <div class="warning-box">
-  <strong>WARNING:</strong> This is a deliberately vulnerable server provided for authorized security testing with <a href="https://github.com/samugit83/redamon">RedAmon</a> only. All traffic is logged and monitored. By accessing any service on this server, you accept the Rules of Engagement below.
+  <strong>WARNING:</strong> This server is a dedicated research target for authorized security testing with <a href="https://github.com/samugit83/redamon">RedAmon</a> only. All traffic is logged and monitored. By accessing any service on this server, you accept the Rules of Engagement below.
 </div>
 
-<h2>Target Services</h2>
-<table class="services-table">
-<tr><th>Port</th><th>Service</th><th>Vulnerabilities</th></tr>
-<tr><td class="port">80</td><td>Express / Node.js</td><td>REST API, SOAP, Swagger -- SQLi, XXE, CMDi, IDOR, SSRF, JWT bypass, file upload, NoSQLi</td></tr>
-<tr><td class="port">4000</td><td>Apollo GraphQL</td><td>Introspection, IDOR, SQLi, arbitrary file write</td></tr>
-<tr><td class="port">9090</td><td>XML-RPC</td><td>SSRF via method calls</td></tr>
-<tr><td class="port">3306</td><td>MySQL 8.4</td><td>Exposed database, no firewall</td></tr>
-<tr><td class="port">27017</td><td>MongoDB 4.0.4</td><td>No authentication, known CVEs</td></tr>
-<tr><td class="port">8080</td><td>Tomcat 8.5.19</td><td>CVE-2017-12617 (PUT RCE), Ghostcat</td></tr>
-<tr><td class="port">8888</td><td>Spring Boot + Log4j</td><td>CVE-2021-44228 (Log4Shell JNDI RCE)</td></tr>
-<tr><td class="port">21 / 6200</td><td>vsftpd 2.3.4</td><td>CVE-2011-2523 (backdoor root shell)</td></tr>
-</table>
+<div class="info-box">
+  This server hosts multiple services as part of the <a href="https://github.com/samugit83/redamon">RedAmon</a> HackLab research environment. The RedAmon AI agent is designed to autonomously discover and map the attack surface. No additional information about the target is provided here intentionally -- the agent must perform its own reconnaissance.
+</div>
 
 <h2>Rules of Engagement</h2>
 <ol>
   <li><strong>RedAmon-only testing.</strong> This server is provided exclusively for testing with the <a href="https://github.com/samugit83/redamon">RedAmon</a> framework. Manual exploitation, third-party scanners, and automated tools other than RedAmon are not authorized.</li>
-  <li><strong>Scope.</strong> You may only interact with the services listed above (ports 80, 4000, 9090, 3306, 27017, 8080, 8888, 21/6200). All other ports, IPs, and infrastructure behind this server are out of scope.</li>
-  <li><strong>No lateral movement.</strong> Do not attempt to pivot from this server to other systems, networks, or AWS infrastructure (including the EC2 metadata service at 169.254.169.254).</li>
-  <li><strong>No denial of service.</strong> Do not perform load testing, resource exhaustion, or any action intended to degrade availability. This includes XML bombs, fork bombs, and excessive concurrent connections.</li>
-  <li><strong>No data exfiltration beyond the server.</strong> You may read intentionally planted vulnerable data. Do not exfiltrate data to external servers, set up reverse shells to your own infrastructure, or establish persistent backdoors.</li>
+  <li><strong>Scope.</strong> Only interact with services hosted on this server. All other IPs and infrastructure behind this server are out of scope.</li>
+  <li><strong>No lateral movement.</strong> Do not attempt to pivot from this server to other systems, networks, or cloud infrastructure.</li>
+  <li><strong>No denial of service.</strong> Do not perform load testing, resource exhaustion, or any action intended to degrade availability.</li>
+  <li><strong>No data exfiltration beyond the server.</strong> Do not exfiltrate data to external servers, set up reverse shells to your own infrastructure, or establish persistent backdoors.</li>
   <li><strong>No modification of the environment.</strong> Do not delete databases, drop tables, modify other users' data, or alter running services in ways that affect other testers.</li>
-  <li><strong>Responsible disclosure.</strong> If you discover a vulnerability in RedAmon itself (not in the intentionally vulnerable target), report it via <a href="https://github.com/samugit83/redamon/issues">GitHub Issues</a>.</li>
+  <li><strong>Responsible disclosure.</strong> If you discover a vulnerability in RedAmon itself (not in the target), report it via <a href="https://github.com/samugit83/redamon/issues">GitHub Issues</a>.</li>
   <li><strong>Legal compliance.</strong> You are solely responsible for ensuring your testing complies with all applicable laws in your jurisdiction. Unauthorized access to computer systems is illegal in most countries.</li>
-  <li><strong>No warranty / liability.</strong> This server is provided "as is" for educational purposes. Devergolabs assumes no liability for any damages arising from your use. Access may be revoked at any time without notice.</li>
+  <li><strong>No warranty / liability.</strong> This server is provided "as is" for educational and research purposes. Devergolabs assumes no liability for any damages arising from your use. Access may be revoked at any time without notice.</li>
   <li><strong>Logging and monitoring.</strong> All traffic to this server is logged. IP addresses and request data are recorded for security monitoring and abuse prevention.</li>
 </ol>
 
@@ -168,7 +150,7 @@ cat > ~/dvws-node/landing/index.html << 'LANDING_HTML'
   <a href="https://github.com/samugit83/redamon">RedAmon</a> &middot;
   <a href="https://github.com/samugit83/redamon/wiki/RedAmon-HackLab">HackLab Wiki</a> &middot;
   <a href="https://devergolabs.com">Devergolabs</a>
-  <br/>Last updated: 2026-03-31
+  <br/>Last updated: 2026-04-04
 </div>
 
 </div>
@@ -201,12 +183,13 @@ server {
 }
 NGINX_CONF
 
-# docker-compose.override.yml -- expose databases + add CVE containers + nginx landing
+# docker-compose.override.yml -- expose databases + add extra containers + nginx landing
+# All services use restart: unless-stopped so they come back after EC2 reboot
 cat > ~/dvws-node/docker-compose.override.yml << 'OVERRIDE'
 version: '3'
 services:
 
-  # Nginx landing page + reverse proxy to DVWS-Node
+  # Nginx landing page + reverse proxy
   landing:
     image: nginx:alpine
     container_name: gpigs-landing
@@ -219,49 +202,45 @@ services:
       - web
     restart: unless-stopped
 
-  # Expose MongoDB 4.0.4 (2018) -- has known CVEs
+  # Base DVWS services -- add restart policy
+  web:
+    restart: unless-stopped
+
   dvws-mongo:
     ports:
       - "27017:27017"
+    restart: unless-stopped
 
-  # Expose MySQL 8 -- detectable by scanners
   dvws-mysql:
     ports:
       - "3306:3306"
+    restart: unless-stopped
 
-  # CVE-2017-12617: Apache Tomcat PUT method RCE
-  # Metasploit: exploit/multi/http/tomcat_jsp_upload_bypass
   tomcat-rce:
     build: ./tomcat-rce
-    container_name: vulnerable-tomcat-8.5.19
+    container_name: gpigs-tomcat
     ports:
       - "8080:8080"
     restart: unless-stopped
 
-  # CVE-2021-44228: Log4Shell JNDI RCE
-  # Metasploit: exploit/multi/http/log4shell_header_injection
   log4shell:
     image: ghcr.io/christophetd/log4shell-vulnerable-app:latest
-    container_name: vulnerable-log4shell
+    container_name: gpigs-log4shell
     ports:
       - "8888:8080"
     restart: unless-stopped
 
-  # CVE-2011-2523: vsftpd 2.3.4 backdoor (root shell on port 6200)
-  # Metasploit: exploit/unix/ftp/vsftpd_234_backdoor
-  # Built from source (GPL-licensed) -- no third-party image dependency
   vsftpd:
     build: ./vsftpd-backdoor
-    container_name: vulnerable-vsftpd-2.3.4
+    container_name: gpigs-vsftpd
     ports:
       - "21:21"
       - "6200:6200"
     restart: unless-stopped
 OVERRIDE
 
-# Patch: move DVWS-Node web service off public port 80 (nginx landing takes over)
-# Host port 80 is now owned by nginx; DVWS-Node API is still reachable via nginx proxy
-# and directly on host port 8081 for scanners/recon
+# Move web app off port 80 (nginx landing takes over)
+# App is reachable via nginx proxy and directly on host port 8081
 sed -i 's/"80:80"/"8081:80"/' ~/dvws-node/docker-compose.yml
 
 echo "=== Building and starting all containers ==="
@@ -272,28 +251,8 @@ PUBLIC_IP=$(curl -s ifconfig.me 2>/dev/null || echo '<IP>')
 echo ""
 echo "=== DONE ==="
 echo ""
-echo "Landing page (legal terms):"
-echo "  Homepage:            http://${PUBLIC_IP}/"
-echo "  Legal / RoE:         http://${PUBLIC_IP}/legal"
+echo "RedAmon HackLab deployed successfully."
+echo "  Landing page:  http://${PUBLIC_IP}/"
+echo "  All containers set to restart: unless-stopped"
 echo ""
-echo "DVWS-Node (application-level vulns):"
-echo "  REST API + Swagger:  http://${PUBLIC_IP}:8081/"
-echo "  via nginx proxy:     http://${PUBLIC_IP}/api/"
-echo "  Swagger UI:          http://${PUBLIC_IP}:8081/api-docs"
-echo "  GraphQL Playground:  http://${PUBLIC_IP}:4000/"
-echo "  XML-RPC:             http://${PUBLIC_IP}:9090/xmlrpc"
-echo "  SOAP WSDL:           http://${PUBLIC_IP}/dvwsuserservice?wsdl"
-echo ""
-echo "Exposed Databases:"
-echo "  MySQL 8:             ${PUBLIC_IP}:3306  (root / mysecretpassword)"
-echo "  MongoDB 4.0.4:       ${PUBLIC_IP}:27017 (no auth)"
-echo ""
-echo "CVE Lab (Metasploit-exploitable):"
-echo "  Tomcat 8.5.19 RCE:   http://${PUBLIC_IP}:8080/  (CVE-2017-12617)"
-echo "  Log4Shell:            http://${PUBLIC_IP}:8888/  (CVE-2021-44228)"
-echo "  vsftpd 2.3.4:        ftp://${PUBLIC_IP}:21      (CVE-2011-2523, backdoor on 6200)"
-echo ""
-echo "Default credentials:"
-echo "  DVWS-Node:  admin / letmein  (admin) | test / test (regular)"
-echo "  MySQL:      root / mysecretpassword"
-echo "  MongoDB:    no authentication required"
+echo "All services will auto-restart after EC2 reboot."
