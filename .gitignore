@@ -147,8 +147,6 @@ readmes/agent_prompts/
 
 
 # Internal docs
-LAUNCH.md
-TODO.INTERNAL.md
 internal/
 
 # RedAmon local config (created by redamon.sh)
@@ -156,6 +154,3 @@ internal/
 
 # Claude Code config
 .claude/
-
-# Benchmark data
-bmark/

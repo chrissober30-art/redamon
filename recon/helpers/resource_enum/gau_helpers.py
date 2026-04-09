@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, parse_qs
@@ -273,27 +274,42 @@ def run_gau_discovery(
 
     all_discovered_urls = set()
     urls_by_domain = {}
+    total_domains = len(target_domains)
+    max_workers = min(5, total_domains)
 
-    for i, domain in enumerate(sorted(target_domains), 1):
-        print(f"[*][GAU] [{i}/{len(target_domains)}] Querying GAU for: {domain}...")
+    print(f"[*][GAU] Processing {total_domains} domains with {max_workers} parallel workers...")
 
-        domain_urls = run_gau_for_domain(
-            domain=domain,
-            docker_image=docker_image,
-            providers=providers,
-            threads=threads,
-            timeout=timeout,
-            blacklist_extensions=blacklist_extensions,
-            max_urls=max_urls,
-            year_range=year_range,
-            verbose=verbose,
-            use_proxy=use_proxy,
-            urlscan_api_key=urlscan_api_key
-        )
-        urls_by_domain[domain] = domain_urls
-        all_discovered_urls.update(domain_urls)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_domain = {}
+        for domain in sorted(target_domains):
+            future = executor.submit(
+                run_gau_for_domain,
+                domain=domain,
+                docker_image=docker_image,
+                providers=providers,
+                threads=threads,
+                timeout=timeout,
+                blacklist_extensions=blacklist_extensions,
+                max_urls=max_urls,
+                year_range=year_range,
+                verbose=verbose,
+                use_proxy=use_proxy,
+                urlscan_api_key=urlscan_api_key
+            )
+            future_to_domain[future] = domain
 
-        print(f"[+][GAU] Found {len(domain_urls)} URLs")
+        completed = 0
+        for future in as_completed(future_to_domain):
+            domain = future_to_domain[future]
+            completed += 1
+            try:
+                domain_urls = future.result()
+                urls_by_domain[domain] = domain_urls
+                all_discovered_urls.update(domain_urls)
+                print(f"[+][GAU] [{completed}/{total_domains}] {domain}: {len(domain_urls)} URLs")
+            except Exception as e:
+                print(f"[!][GAU] [{completed}/{total_domains}] {domain} failed: {e}")
+                urls_by_domain[domain] = []
 
     urls_list = sorted(list(all_discovered_urls))
     print(f"[+][GAU] Discovered {len(urls_list)} total URLs")

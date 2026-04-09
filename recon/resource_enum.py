@@ -515,7 +515,10 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                     hakrawler_urls, hakrawler_meta = future.result(timeout=HAKRAWLER_TIMEOUT * 2 + 120)
                     print(f"[+][Hakrawler] Completed: {len(hakrawler_urls)} URLs")
                 elif name == 'gau':
-                    gau_urls, gau_urls_by_domain = future.result(timeout=GAU_TIMEOUT * len(GAU_PROVIDERS) + 180)
+                    gau_workers = min(5, len(target_domains))
+                    gau_per_domain_timeout = GAU_TIMEOUT * len(GAU_PROVIDERS) + 120
+                    gau_overall_timeout = gau_per_domain_timeout * (len(target_domains) // gau_workers + 1) + 180
+                    gau_urls, gau_urls_by_domain = future.result(timeout=gau_overall_timeout)
                     print(f"[+][GAU] Completed: {len(gau_urls)} URLs")
                 elif name == 'paramspider':
                     paramspider_urls, paramspider_urls_by_domain = future.result(timeout=PARAMSPIDER_TIMEOUT * len(target_domains) + 120)
