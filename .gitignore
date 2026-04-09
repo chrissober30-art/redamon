@@ -148,23 +148,23 @@ readmes/agent_prompts/
 
 
 # Internal docs
-internal/
 LAUNCH.md
 TODO.INTERNAL.md
-
-# Benchmark data
-bmark/
-
-# Knowledge base runtime artifacts
-knowledge_base/data/index.faiss
-knowledge_base/data/chunk_ids.json
-knowledge_base/data/index.faiss.manifest.json
-knowledge_base/data/.last_ingest
-knowledge_base/data/cache/.manifest.json
-**/.file_hashes.json
+internal/
 
 # RedAmon local config (created by redamon.sh)
 .gvm-enabled
 
 # Claude Code config
 .claude/
+
+# Benchmark data
+bmark/
+
+# Knowledge base
+knowledge_base/data/index.faiss
+knowledge_base/data/chunk_ids.json
+knowledge_base/data/index.faiss.manifest.json
+knowledge_base/data/.last_ingest
+knowledge_base/data/cache/.manifest.json
+**/.file_hashes.json
