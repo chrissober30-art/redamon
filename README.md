@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v3.6.0-release-2E8B57?style=flat" alt="Version 3.6.2"/>
+  <img height="24" src="https://img.shields.io/badge/v3.6.0-release-2E8B57?style=flat" alt="Version 3.7.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -40,6 +40,8 @@
 </p>
 
 > **LEGAL DISCLAIMER**: This tool is intended for **authorized security testing**, **educational purposes**, and **research only**. Never use this system to scan, probe, or attack any system you do not own or have explicit written permission to test. Unauthorized access is **illegal** and punishable by law. By using this tool, you accept **full responsibility** for your actions. **[Read Full Disclaimer](DISCLAIMER.md)**
+
+> **LOCAL USE ONLY**: RedAmon is designed to run on a **local machine** and has **not** been hardened for server or cloud deployment. It lacks the security controls required for a production environment exposed to the internet (e.g. authentication hardening, rate limiting, TLS enforcement, input sanitization across all surfaces). **Do not deploy RedAmon on a public-facing server.** Running it outside a trusted local network is entirely at your own risk.
 
 <p align="center">
   <img src="assets/agent.gif" alt="RedAmon Agent Demo" width="100%"/>
@@ -165,6 +167,7 @@ All lifecycle management is handled by a single script:
 |---------|-------------|
 | `./redamon.sh install` | Build + start without GVM |
 | `./redamon.sh install --gvm` | Build + start with GVM/OpenVAS |
+| `./redamon.sh install --skipkbase` | Build without Knowledge Base (~4.4 GB lighter, Tavily-only) |
 | **`./redamon.sh update`** | **Pull latest version, smart-rebuild only changed services** |
 | `./redamon.sh up` | Start services (auto-detects GVM mode) |
 | `./redamon.sh up dev` | Start in dev mode with hot-reload |
@@ -173,6 +176,8 @@ All lifecycle management is handled by a single script:
 | `./redamon.sh status` | Show running services, version, GVM mode |
 | `./redamon.sh clean` | Remove containers + images, keep data |
 | `./redamon.sh purge` | Remove everything including all data |
+
+> Flags can be combined: `./redamon.sh install --skipkbase --gvm`
 
 
 ### Updating to a New Version
@@ -233,6 +238,61 @@ docker compose --profile tools down --rmi local --volumes --remove-orphans  # Fu
 ```
 
 > For a complete development reference -- hot-reload rules, common commands, important rules, and AI-assisted coding guidelines -- see the **[Developer Guide](readmes/README.DEV.md)**.
+
+---
+
+### Knowledge Base (RAG-Enhanced Web Search)
+
+The agent's `web_search` tool includes a local **Knowledge Base** -- a RAG pipeline that searches curated security datasets (GTFOBins, LOLBAS, OWASP WSTG, NVD CVEs, ExploitDB, Nuclei templates, and agent skill docs) before falling back to Tavily web search. When the KB returns a high-confidence match, Tavily is skipped entirely for faster, offline-capable results.
+
+**How it works:** During `install` / `up` / `restart`, RedAmon automatically builds a lightweight KB index (~1,200 chunks in 10-15 min on CPU). At query time, the agent runs a hybrid retrieval pipeline (FAISS vector search + Neo4j fulltext), reranks with a cross-encoder, and checks a confidence threshold. If the score is high enough, results come from the local KB. Otherwise, it falls back to Tavily or merges both.
+
+**Default behavior:** The KB is enabled by default. On first install, it detects your hardware (GPU / CPU / API) and offers a quick-start option. No configuration needed.
+
+**Skip it entirely:** If you don't need the local KB (e.g., limited disk space), use `--skipkbase` to build a ~4.4 GB lighter image with Tavily-only web search:
+
+```bash
+./redamon.sh install --skipkbase
+```
+
+**Speed up ingestion with API embeddings:** By default, embeddings run locally on CPU/GPU. On CPU-only machines, large datasets (ExploitDB, NVD) can take hours. You can offload embedding to an external API by creating a `.env` file from the template:
+
+```bash
+cp .env.example .env
+```
+
+Then configure the embedding API in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KB_EMBEDDING_USE_API` | `false` | Set to `true` to use API-based embeddings instead of local model |
+| `KB_EMBEDDING_API_BASE_URL` | *(empty = OpenAI)* | Any OpenAI-compatible endpoint (Ollama, vLLM, LiteLLM, Together AI, Azure) |
+| `KB_EMBEDDING_API_KEY` | *(empty)* | API key for the embedding provider |
+| `KB_EMBEDDING_API_MODEL` | `text-embedding-3-small` | Model name (provider-specific) |
+| `NVD_API_KEY` | *(empty)* | Free NVD API key for 10x faster CVE ingestion |
+
+Example with Ollama (free, local, no API key cost):
+
+```bash
+KB_EMBEDDING_USE_API=true
+KB_EMBEDDING_API_BASE_URL=http://host.docker.internal:11434/v1
+KB_EMBEDDING_API_KEY=ollama
+KB_EMBEDDING_API_MODEL=nomic-embed-text
+```
+
+> **Important:** Ingestion and query must use the same model. If you switch models, rebuild the index: `make -C knowledge_base kb-rebuild-lite MODE=docker`
+
+**Manage the KB:**
+
+```bash
+./redamon.sh kb build lite          # Build with lite profile (~30-60s with API)
+./redamon.sh kb build standard      # Add NVD CVEs
+./redamon.sh kb update nvd          # Incremental NVD refresh
+./redamon.sh kb stats               # Show index statistics
+./redamon.sh kb rebuild lite        # Wipe and rebuild from scratch
+```
+
+> For full technical documentation -- query pipeline, data sources, ingestion profiles, scoring, security model -- see the **[Knowledge Base Technical Reference](readmes/README.KBASE.md)** or the **[Wiki: Knowledge Base & Web Search](https://github.com/samugit83/redamon/wiki/Knowledge-Base-Web-Search)**.
 
 ---
 

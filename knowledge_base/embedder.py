@@ -170,3 +170,13 @@ class Embedder:
         """Return embedding dimensions for the loaded model."""
         self._load_model()
         return self._model.get_sentence_embedding_dimension()
+
+
+def create_embedder(model_name=None):
+    """Factory: returns APIEmbedder if KB_EMBEDDING_USE_API=true, else local Embedder."""
+    use_api = os.getenv("KB_EMBEDDING_USE_API", "false").lower() == "true"
+    if use_api:
+        from .api_embedder import APIEmbedder
+
+        return APIEmbedder()
+    return Embedder(model_name=model_name)

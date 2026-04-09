@@ -22,10 +22,9 @@ neo4j>=5.0.0
 # Tavily web search
 langchain-tavily>=0.1.0
 
-# Vector knowledge base
-faiss-cpu>=1.7.0
-sentence-transformers>=2.2.0
+# Vector knowledge base (heavy deps in requirements-kb.txt)
 pyyaml>=6.0
+openai>=1.0.0
 
 # FastAPI
 fastapi>=0.115.0

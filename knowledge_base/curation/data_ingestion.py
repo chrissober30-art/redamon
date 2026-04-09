@@ -11,7 +11,7 @@ from neo4j import GraphDatabase
 
 from knowledge_base.atomic_io import ingest_lock, IngestLockError, atomic_write_json
 from knowledge_base.kb_config import load_kb_config
-from knowledge_base.embedder import Embedder
+from knowledge_base.embedder import create_embedder
 from knowledge_base.faiss_indexer import FAISSIndexer
 from knowledge_base.neo4j_loader import Neo4jLoader
 from knowledge_base.curation.tool_docs_client import ToolDocsClient
@@ -34,9 +34,10 @@ logger = logging.getLogger(__name__)
 # When editing profile membership, change kb_config.yaml FIRST and only
 # mirror to this fallback if you need parity on broken-config paths.
 _FALLBACK_PROFILE_SOURCES = {
-    "lite":     ["tool_docs", "gtfobins", "lolbas", "owasp", "exploitdb"],
-    "standard": ["tool_docs", "gtfobins", "lolbas", "owasp", "exploitdb", "nvd"],
-    "full":     ["tool_docs", "gtfobins", "lolbas", "owasp", "exploitdb", "nvd", "nuclei"],
+    "cpu-lite":  ["tool_docs", "gtfobins", "lolbas"],
+    "lite":      ["tool_docs", "gtfobins", "lolbas", "owasp", "exploitdb"],
+    "standard":  ["tool_docs", "gtfobins", "lolbas", "owasp", "exploitdb", "nvd"],
+    "full":      ["tool_docs", "gtfobins", "lolbas", "owasp", "exploitdb", "nvd", "nuclei"],
 }
 
 
@@ -182,7 +183,7 @@ def _do_ingestion(
     # Initialize components
     logger.info(f"Initializing KB ingestion (profile={profile}, rebuild={rebuild})")
     model = model_name or os.getenv("KB_EMBEDDING_MODEL", "intfloat/e5-large-v2")
-    embedder = Embedder(model_name=model)
+    embedder = create_embedder(model_name=model)
     faiss_indexer = FAISSIndexer(
         index_path=str(data_dir), dimensions=embedder.dimensions
     )
@@ -213,6 +214,16 @@ def _do_ingestion(
     # ─────────────────────────────────────────────────────────────────────
     if not rebuild:
         faiss_indexer.load()
+        # Guard against dimension mismatch when switching embedding models
+        if (faiss_indexer.count() > 0
+                and faiss_indexer.index is not None
+                and faiss_indexer.index.d != embedder.dimensions):
+            raise ValueError(
+                f"Embedding dimensions mismatch: model produces "
+                f"{embedder.dimensions}d vectors but existing index has "
+                f"{faiss_indexer.index.d}d vectors. "
+                f"Run with --rebuild to recreate the index with the new model."
+            )
     else:
         _delete_stale_faiss_files(data_dir)
 
@@ -320,7 +331,7 @@ def _do_ingestion(
         logger.info(f"Embedding {len(chunks)} chunks for {source_name} ({skipped} unchanged skipped)...")
         try:
             texts = [c["content"] for c in chunks]
-            vectors = embedder.embed_documents_batch(texts, batch_size=64)
+            vectors = embedder.embed_documents_batch(texts)
         except Exception as e:
             logger.error(f"Embedding failed for {source_name}: {e}")
             stats["sources"][source_name] = {"error": str(e)}
@@ -617,7 +628,7 @@ Examples:
     )
     parser.add_argument(
         "--profile",
-        choices=["lite", "standard", "full"],
+        choices=["cpu-lite", "lite", "standard", "full"],
         default="lite",
         help="Ingestion profile (default: lite)",
     )

@@ -1,5 +1,5 @@
 # RedAmon Knowledge Base — Makefile
-# Configuration defaults are sourced from knowledge_base/kb_config.yaml. 
+# Configuration defaults are sourced from kb_config.yaml (this directory).
 
 # =============================================================================
 # Configuration
@@ -7,7 +7,7 @@
 # Helper macro: extract a dotted key from kb_config.yaml. Returns the second
 # argument as fallback if the file/key/python is missing. Uses python (always
 # present where this Makefile runs) instead of yq (less ubiquitous).
-_KB_YAML := knowledge_base/kb_config.yaml
+_KB_YAML := kb_config.yaml
 define _kb_yaml_get
 $(shell python -c "import yaml; d=yaml.safe_load(open('$(_KB_YAML)')); \
 [d := d[k] for k in '$(1)'.split('.')]; print(d)" 2>/dev/null || echo "$(2)")
@@ -111,13 +111,13 @@ ifeq ($(_NEEDS_BOOTSTRAP),yes)
 		echo "  $(VENV_DIR) doesn't exist yet."; \
 		echo ""; \
 		echo "  Creating $(VENV_DIR) and installing from"; \
-		echo "  agentic/requirements.txt (takes 3-10 min on first run"; \
+		echo "  ../agentic/requirements.txt (takes 3-10 min on first run"; \
 		echo "  due to torch + sentence-transformers downloads)."; \
 		echo ""; \
 		echo "  To use your own Python environment instead:"; \
 		echo "    1. Ctrl-C now"; \
 		echo "    2. Activate your venv (source .../bin/activate)"; \
-		echo "    3. pip install -r agentic/requirements.txt"; \
+		echo "    3. pip install -r ../agentic/requirements.txt"; \
 		echo "    4. Re-run this make command"; \
 		echo "=========================================================="; \
 		echo ""; \
@@ -129,7 +129,7 @@ ifeq ($(_NEEDS_BOOTSTRAP),yes)
 			}; \
 		fi; \
 		$(VENV_PIP) install --quiet --upgrade pip; \
-		$(VENV_PIP) install -r agentic/requirements.txt; \
+		$(VENV_PIP) install -r ../agentic/requirements.txt; \
 		touch $(VENV_MARKER); \
 		echo ""; \
 		echo "✓ Bootstrap complete. Using $(VENV_PYTHON)"; \
@@ -157,15 +157,19 @@ kb-setup: _kb_ensure_deps ## Bootstrap Python venv + install KB dependencies (no
 # Initial KB Build (lite|standard|full)
 # =============================================================================
 
-.PHONY: kb-build-lite kb-build-standard kb-build-full
+.PHONY: kb-build-cpu-lite kb-build-lite kb-build-standard kb-build-full
+
+# CPU-lite: tool_docs + gtfobins + lolbas only (~5 min on CPU).
+# Skips owasp (~35 min) and exploitdb (~3 hours) to keep first-run
+# fast on machines without GPU or embedding API.
+kb-build-cpu-lite: _kb_ensure_deps
+kb-build-cpu-lite: ## Build CPU-lite KB (tool_docs + gtfobins + lolbas, ~5 min)
+	$(KB_CMD) --profile cpu-lite
 
 # Lite: committed source caches only — tool_docs, gtfobins, lolbas,
-# owasp, exploitdb. No NVD, no nuclei. Fully offline after initial git
-# clone. Bootstraps in ~30-60 sec on host. Use this for fast local
-# iteration; use standard or full when CVE coverage matters.
-# NVD_DAYS is intentionally NOT set — lite doesn't run the NVD client.
+# owasp, exploitdb. No NVD, no nuclei.
 kb-build-lite: _kb_ensure_deps
-kb-build-lite: ## Build lite KB (committed caches only, offline, ~30-60 sec on host)
+kb-build-lite: ## Build lite KB (all offline sources, ~4 hours on CPU)
 	$(KB_CMD) --profile lite
 
 # Standard: lite + 2 years of NVD history.
@@ -220,7 +224,7 @@ kb-update-tools: _kb_ensure_deps ## On-demand: update tool docs from agentic/ski
 # KB Rebuild
 # =============================================================================
 
-.PHONY: kb-rebuild-lite kb-rebuild-standard kb-rebuild-full
+.PHONY: kb-rebuild-cpu-lite kb-rebuild-lite kb-rebuild-standard kb-rebuild-full
 
 # Target-specific NVD_DAYS defaults mirror the kb-build-* targets so the
 # rebuild flavors don't accidentally fall through to the global NVD_DAYS
@@ -230,6 +234,9 @@ kb-update-tools: _kb_ensure_deps ## On-demand: update tool docs from agentic/ski
 # NVD_DAYS intentionally omitted — the lite profile doesn't include NVD,
 # so the lookback window is a no-op here. Command-line `NVD_DAYS=N` is
 # still accepted (for consistency with the other targets) but ignored.
+kb-rebuild-cpu-lite: _kb_ensure_deps ## Full rebuild (cpu-lite profile) — drops + re-creates all data
+	$(KB_CMD) --profile cpu-lite --rebuild
+
 kb-rebuild-lite: _kb_ensure_deps ## Full rebuild (lite profile) — drops + re-creates all data
 	$(KB_CMD) --profile lite --rebuild
 

@@ -118,7 +118,7 @@ retrieval:
   overfetch_factor: 6
   # Above this final score, the KB is considered "good enough" and the agent
   # skips the Tavily web fallback.
-  score_threshold: 0.35
+  score_threshold: 0.80
   # Reciprocal Rank Fusion constant. Standard value from Cormack et al. 2009
   # is 60. Smaller = top ranks weighted more aggressively.
   rrf_k: 60
@@ -203,6 +203,7 @@ ingestion:
   # Override at runtime: NVD_MIN_CVSS=9.0 make kb-build-standard
 
   profiles:
-    lite:     [tool_docs, gtfobins, lolbas, owasp, exploitdb]
-    standard: [tool_docs, gtfobins, lolbas, owasp, exploitdb, nvd]
-    full:     [tool_docs, gtfobins, lolbas, owasp, exploitdb, nvd, nuclei]
+    cpu-lite:  [tool_docs, gtfobins, lolbas]
+    lite:      [tool_docs, gtfobins, lolbas, owasp, exploitdb]
+    standard:  [tool_docs, gtfobins, lolbas, owasp, exploitdb, nvd]
+    full:      [tool_docs, gtfobins, lolbas, owasp, exploitdb, nvd, nuclei]

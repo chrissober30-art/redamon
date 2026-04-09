@@ -244,3 +244,20 @@ TOOL_REGISTRY = {
         ),
     },
 }
+
+# Simplified web_search entry used when Knowledge Base is not available
+# (--skipkbase install or missing KB dependencies). Replaces the full
+# KB-centric entry in TOOL_REGISTRY at runtime via orchestrator.py.
+WEB_SEARCH_TAVILY_ONLY = {
+    "purpose": "Web search via Tavily",
+    "when_to_use": "Research CVEs, exploits, tool usage, security advisories, version info",
+    "args_format": '"query": "search query"',
+    "description": (
+        '**web_search** (SECONDARY -- external web research via Tavily)\n'
+        '   - Searches the internet for security research information.\n'
+        '   - Use for: CVE details, exploit techniques, tool documentation, '
+        'security advisories, version info, methodology references.\n'
+        '   - **Args**: `query` (str, required) -- the search query.\n'
+        '   - Use AFTER query_graph when you need context not in the graph'
+    ),
+}

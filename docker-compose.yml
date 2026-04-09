@@ -362,7 +362,12 @@ services:
     build:
       context: .
       dockerfile: agentic/Dockerfile
+      args:
+        SKIP_KB: "${SKIP_KB:-false}"
     container_name: redamon-agent
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "${AGENT_PORT:-8090}:8080"
     environment:
@@ -393,7 +398,7 @@ services:
       - ./agentic/logs:/app/logs
       - cypherfix-repos:/tmp/cypherfix-repos
       - ./knowledge_base/kb_config.yaml:/app/knowledge_base/kb_config.yaml:ro
-      - ./knowledge_base/data:/app/knowledge_base/data:ro
+      - ./knowledge_base/data:/app/knowledge_base/data
     depends_on:
       neo4j:
         condition: service_healthy

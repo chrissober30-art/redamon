@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.7.0] - 2026-04-09
+
+### Added
+
+- **RAG-Enhanced Knowledge Base** -- the `web_search` tool now queries a local vector index (FAISS) and graph database (Neo4j) before falling back to Tavily. Curated security datasets are embedded, indexed, and searched locally with a 6-stage hybrid retrieval pipeline (vector search + keyword search, RRF fusion, cross-encoder reranking, MMR diversity filtering). When the KB produces high-confidence results, Tavily is skipped entirely. When confidence is low, KB and Tavily results are merged automatically
+
+- **Seven security data sources** -- tool_docs (agent skill playbooks), GTFOBins (Unix priv-esc), LOLBAS (Windows LOLBins), OWASP WSTG (web testing methodology), ExploitDB (exploit database), NVD (CVEs via REST API), and Nuclei templates. Organized in four ingestion profiles: `cpu-lite` (~900 chunks, ~15 min on CPU), `lite` (~47k chunks), `standard` (+ NVD), `full` (+ Nuclei)
+
+- **Smart ingestion on install** -- `./redamon.sh install` detects GPU and API key availability. On CPU without an API key, shows an interactive prompt with estimated times per source and lets the user choose quick start (~15 min) or full ingestion (~4 hours). With GPU or API key, ingests all sources automatically
+
+- **API embedding support** -- configure `KB_EMBEDDING_USE_API=true` in `.env` to use any OpenAI-compatible embedding API (OpenAI, Ollama, Together AI, Azure, vLLM, LiteLLM) instead of local sentence-transformers. Speeds up ingestion from hours to minutes on CPU-only machines. See `.env.example` for configuration
+
+- **Incremental updates** -- two-layer content-hash dedup (file-level + chunk-level) makes re-runs near-instant. Only new or modified content is re-embedded. NVD uses `lastModStartDate` for incremental delta fetches
+
+- **Prompt injection defense** -- KB content is untrusted (sourced from public repos). Three-layer protection: content sanitization (strips role/boundary markers), length capping, and untrusted content framing with explicit LLM instructions
+
+- **Dimension mismatch guard** -- switching embedding models (local vs API) produces different vector dimensions. The ingestion pipeline detects mismatches and requires `--rebuild` to prevent silent corruption
+
+- **Makefile for KB management** -- `knowledge_base/Makefile` with targets for build, update, rebuild, stats, and cleanup. All `redamon.sh` KB commands use `MODE=docker` to run inside the agent container
+
+### Changed
+
+- **Agent Dockerfile** -- pre-downloads embedding model (`intfloat/e5-large-v2`, ~1.3 GB) and cross-encoder reranker (`BAAI/bge-reranker-base`, ~568 MB) at build time. KB source code set to read-only via `chmod`
+
+- **docker-compose.yml** -- agent service now loads `.env` via `env_file` (optional). KB data volume mounted read-write for ingestion. Added opt-in `kb-refresh` sidecar for automated daily/weekly/monthly updates
+
+- **Bash compatibility fix** -- replaced `${confirm,,}` (Bash 4+ only) with `=~ ^[Yy]$` regex in `cmd_clean()` for compatibility with older Bash versions and macOS
+
+---
+
 ## [3.6.2] - 2026-04-06
 
 ### Fixed

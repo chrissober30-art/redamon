@@ -325,6 +325,13 @@ class AgentOrchestrator:
         # Setup Knowledge Base (FAISS + Neo4j hybrid)
         self._knowledge_base = self._setup_knowledge_base()
 
+        # If KB is not available, swap the web_search tool registry entry
+        # to a simplified Tavily-only description so the LLM doesn't use
+        # KB-specific parameters (include_sources, exclude_sources, min_cvss)
+        if self._knowledge_base is None:
+            from prompts.tool_registry import TOOL_REGISTRY, WEB_SEARCH_TAVILY_ONLY
+            TOOL_REGISTRY["web_search"] = WEB_SEARCH_TAVILY_ONLY
+
         # Setup Tavily web search tool (key resolved later via update_tavily_key)
         # KB is passed in so web_search can check it before falling back to Tavily
         self._web_search_manager = WebSearchToolManager(
@@ -364,7 +371,7 @@ class AgentOrchestrator:
             from knowledge_base import PentestKnowledgeBase
             from knowledge_base.faiss_indexer import FAISSIndexer
             from knowledge_base.neo4j_loader import Neo4jLoader
-            from knowledge_base.embedder import Embedder
+            from knowledge_base.embedder import create_embedder
             from neo4j import GraphDatabase
         except ImportError as e:
             logger.warning(f"Knowledge base dependencies missing: {e} — KB disabled")
@@ -374,7 +381,7 @@ class AgentOrchestrator:
             kb_path = os.getenv('KB_PATH', '/app/knowledge_base/data')
             model_name = os.getenv('KB_EMBEDDING_MODEL', 'intfloat/e5-large-v2')
 
-            embedder = Embedder(model_name=model_name)
+            embedder = create_embedder(model_name=model_name)
             faiss_indexer = FAISSIndexer(
                 index_path=kb_path,
                 dimensions=embedder.dimensions,

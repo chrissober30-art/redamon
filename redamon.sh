@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
 GVM_FLAG_FILE="$SCRIPT_DIR/.gvm-enabled"
+SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
 
 # Service lists
 CORE_SERVICES="postgres neo4j recon-orchestrator kali-sandbox agent webapp"
@@ -51,6 +52,10 @@ get_version() {
 
 is_gvm_enabled() {
     [[ -f "$GVM_FLAG_FILE" ]]
+}
+
+is_skipkbase() {
+    [[ -f "$SKIPKBASE_FLAG_FILE" ]]
 }
 
 check_prerequisites() {
@@ -253,14 +258,100 @@ _kb_wait_neo4j() {
     return 1
 }
 
+# Check if the agent container has a CUDA-capable GPU available.
+_kb_has_gpu() {
+    docker exec redamon-agent python -c \
+        "import torch; exit(0 if torch.cuda.is_available() else 1)" &>/dev/null
+}
+
+# Check if .env has an embedding API configured and ready to use.
+_kb_has_api_key() {
+    local env_file="$SCRIPT_DIR/.env"
+    [[ -f "$env_file" ]] || return 1
+    local use_api key
+    use_api=$(grep -E '^KB_EMBEDDING_USE_API=' "$env_file" 2>/dev/null \
+              | cut -d= -f2 | tr -d '"' | tr -d "'")
+    key=$(grep -E '^KB_EMBEDDING_API_KEY=' "$env_file" 2>/dev/null \
+          | cut -d= -f2 | tr -d '"' | tr -d "'")
+    [[ "$use_api" == "true" && -n "$key" ]]
+}
+
+# Detect the best ingestion profile and show terminal feedback.
+# Prints the chosen profile name to stdout. Shows an interactive
+# prompt on CPU-only systems asking the user whether to run full
+# ingestion or quick-start with fewer sources.
+_kb_choose_profile() {
+    if _kb_has_api_key; then
+        local base_url
+        base_url=$(grep -E '^KB_EMBEDDING_API_BASE_URL=' "$SCRIPT_DIR/.env" \
+                   | cut -d= -f2 | tr -d '"' | tr -d "'")
+        info "KB Embedding: API mode (${base_url:-https://api.openai.com/v1})" >&2
+        info "Ingesting all lite sources via API embeddings..." >&2
+        echo "lite"
+        return
+    fi
+
+    if _kb_has_gpu; then
+        info "KB Embedding: GPU detected" >&2
+        info "Ingesting all lite sources with GPU acceleration..." >&2
+        echo "lite"
+        return
+    fi
+
+    # CPU-only: show explanation and let user choose
+    echo ""                                                            >&2
+    echo "==========================================================" >&2
+    echo "  Knowledge Base -- Embedding Configuration"                 >&2
+    echo "==========================================================" >&2
+    echo ""                                                            >&2
+    echo "  No GPU and no embedding API key detected."                 >&2
+    echo "  The KB needs to convert security datasets into vector"     >&2
+    echo "  embeddings. On CPU this is slow for large datasets."       >&2
+    echo ""                                                            >&2
+    echo "  Source          Chunks    Est. time on CPU"                 >&2
+    echo "  --------------- --------- ----------------"                >&2
+    echo "  tool_docs            ~35   ~2 min"                         >&2
+    echo "  gtfobins            ~400   ~7 min"                         >&2
+    echo "  lolbas              ~450   ~7 min"                         >&2
+    echo "  owasp               ~880   ~35 min"                        >&2
+    echo "  exploitdb        ~45,000   ~3 hours"                       >&2
+    echo ""                                                            >&2
+    echo "  Option 1: Quick start (~15 min)"                           >&2
+    echo "    Ingest tool_docs + gtfobins + lolbas only."              >&2
+    echo "    You can add owasp/exploitdb later."                      >&2
+    echo ""                                                            >&2
+    echo "  Option 2: Full ingestion (~4 hours)"                       >&2
+    echo "    Ingest all 5 sources now. Go grab a coffee."             >&2
+    echo ""                                                            >&2
+    echo "  Tip: To skip this wait in the future, configure an"        >&2
+    echo "  embedding API in .env (see .env.example):"                 >&2
+    echo "    KB_EMBEDDING_USE_API=true"                                >&2
+    echo "    KB_EMBEDDING_API_KEY=sk-..."                              >&2
+    echo "    KB_EMBEDDING_API_BASE_URL=  (leave empty for OpenAI)"    >&2
+    echo "  With an API, full ingestion takes ~2-3 minutes."           >&2
+    echo ""                                                            >&2
+    echo "==========================================================" >&2
+    echo ""                                                            >&2
+
+    read -rp "  Run full ingestion now? [y/N] " full_ingest </dev/tty
+
+    if [[ "$full_ingest" =~ ^[Yy]$ ]]; then
+        info "Full ingestion selected. This will take a while..." >&2
+        echo "lite"
+    else
+        info "Quick start selected (tool_docs + gtfobins + lolbas)" >&2
+        echo "cpu-lite"
+    fi
+}
+
 # Internal: run `make kb-build-<profile>` with Neo4j health check first.
-# Fails gracefully — callers decide whether to treat failure as fatal.
+# Fails gracefully -- callers decide whether to treat failure as fatal.
 _kb_bootstrap() {
     local profile="${1:-lite}"
     _kb_export_env
     _kb_wait_neo4j || return 1
     info "Bootstrapping Knowledge Base (profile=${profile})..."
-    make "kb-build-${profile}"
+    make -C knowledge_base "kb-build-${profile}" MODE=docker
 }
 
 # Status helpers: read KB and Tavily state directly from disk/env without
@@ -316,9 +407,16 @@ _kb_get_neo4j_count() {
 
 cmd_install() {
     local gvm_mode="false"
-    if [[ "${1:-}" == "--gvm" ]]; then
-        gvm_mode="true"
-    fi
+    local skipkbase="false"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --gvm)       gvm_mode="true" ;;
+            --skipkbase) skipkbase="true" ;;
+            *) error "Unknown flag: $1"; exit 1 ;;
+        esac
+        shift
+    done
 
     print_banner
     check_prerequisites
@@ -332,6 +430,14 @@ cmd_install() {
     else
         info "Mode: Core services (without GVM/OpenVAS)"
         rm -f "$GVM_FLAG_FILE"
+    fi
+    if [[ "$skipkbase" == "true" ]]; then
+        info "Mode: Skipping Knowledge Base (--skipkbase)"
+        export SKIP_KB="true"
+        export KB_ENABLED="false"
+        touch "$SKIPKBASE_FLAG_FILE"
+    else
+        rm -f "$SKIPKBASE_FLAG_FILE"
     fi
     echo ""
 
@@ -363,15 +469,17 @@ cmd_install() {
     # and the user gets a clear retry command.
     if is_kb_enabled; then
         echo ""
-        info "Bootstrapping Knowledge Base (lite profile)..."
-        if _kb_bootstrap lite; then
-            success "Knowledge Base ready"
+        local kb_profile
+        kb_profile=$(_kb_choose_profile)
+
+        if _kb_bootstrap "$kb_profile"; then
+            success "Knowledge Base ready (profile: ${kb_profile})"
         else
-            warn "KB bootstrap failed — agent will start with an empty KB"
-            warn "Retry with: ./redamon.sh kb build lite"
+            warn "KB bootstrap failed -- agent will start with an empty KB"
+            warn "Retry with: ./redamon.sh kb build ${kb_profile}"
         fi
     else
-        info "KB_ENABLED=false — skipping Knowledge Base bootstrap"
+        info "KB_ENABLED=false -- skipping Knowledge Base bootstrap"
     fi
 
     echo ""
@@ -390,6 +498,11 @@ cmd_install() {
 }
 
 cmd_update() {
+    if is_skipkbase; then
+        export SKIP_KB="true"
+        export KB_ENABLED="false"
+    fi
+
     print_banner
     check_prerequisites
 
@@ -572,6 +685,9 @@ cmd_up_dev() {
     if [[ "${1:-}" == "--gvm" ]]; then
         gvm_flag="true"
     fi
+    if is_skipkbase; then
+        export KB_ENABLED="false"
+    fi
 
     ensure_tool_images
 
@@ -591,12 +707,14 @@ cmd_up_dev() {
     # from fresh KB on restart.
     if is_kb_enabled; then
         echo ""
-        info "Refreshing Knowledge Base (lite profile)..."
-        if _kb_bootstrap lite; then
-            success "Knowledge Base ready"
+        local kb_profile
+        kb_profile=$(_kb_choose_profile)
+
+        if _kb_bootstrap "$kb_profile"; then
+            success "Knowledge Base ready (profile: ${kb_profile})"
         else
-            warn "KB refresh failed — agent will start with the existing KB state"
-            warn "Retry with: ./redamon.sh kb build lite"
+            warn "KB refresh failed -- agent will start with the existing KB state"
+            warn "Retry with: ./redamon.sh kb build ${kb_profile}"
         fi
     fi
 
@@ -608,6 +726,9 @@ cmd_up() {
     local gvm_mode="false"
     if is_gvm_enabled; then
         gvm_mode="true"
+    fi
+    if is_skipkbase; then
+        export KB_ENABLED="false"
     fi
 
     info "Starting RedAmon (GVM: ${gvm_mode})..."
@@ -632,12 +753,14 @@ cmd_up() {
     # Fresh-clone scenario: no FAISS on disk → full bootstrap.
     if is_kb_enabled; then
         echo ""
-        info "Refreshing Knowledge Base (lite profile)..."
-        if _kb_bootstrap lite; then
-            success "Knowledge Base ready"
+        local kb_profile
+        kb_profile=$(_kb_choose_profile)
+
+        if _kb_bootstrap "$kb_profile"; then
+            success "Knowledge Base ready (profile: ${kb_profile})"
         else
-            warn "KB refresh failed — agent will start with the existing KB state"
-            warn "Retry with: ./redamon.sh kb build lite"
+            warn "KB refresh failed -- agent will start with the existing KB state"
+            warn "Retry with: ./redamon.sh kb build ${kb_profile}"
         fi
     fi
 
@@ -656,7 +779,7 @@ cmd_clean() {
     warn "Your data (databases, reports, scan results) will be preserved in Docker volumes."
     echo ""
     read -rp "Continue? [y/N] " confirm
-    if [[ "${confirm,,}" != "y" ]]; then
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         info "Cancelled."
         return
     fi
@@ -731,6 +854,7 @@ cmd_purge() {
     fi
 
     rm -f "$GVM_FLAG_FILE"
+    rm -f "$SKIPKBASE_FLAG_FILE"
     success "Full cleanup complete. All RedAmon data and images have been removed."
     echo ""
     info "To reinstall: ./redamon.sh install"
@@ -791,7 +915,7 @@ cmd_status() {
 cmd_kb_build() {
     local profile="${1:-lite}"
     case "$profile" in
-        lite|standard|full) ;;
+        cpu-lite|lite|standard|full) ;;
         *)
             error "Unknown KB profile: $profile"
             echo "Usage: ./redamon.sh kb build [lite|standard|full]"
@@ -807,14 +931,14 @@ cmd_kb_build() {
     _kb_wait_neo4j || exit 1
 
     info "Running ingestion pipeline..."
-    if ! make "kb-build-${profile}"; then
+    if ! make -C knowledge_base "kb-build-${profile}" MODE=docker; then
         error "KB build failed"
         exit 1
     fi
 
     echo ""
     success "Knowledge Base built successfully"
-    make kb-stats
+    make -C knowledge_base kb-stats MODE=docker
 }
 
 cmd_kb_update() {
@@ -834,7 +958,7 @@ cmd_kb_update() {
                 ;;
         esac
         info "Updating KB source: ${source}"
-        if ! make "kb-update-${source}"; then
+        if ! make -C knowledge_base "kb-update-${source}" MODE=docker; then
             error "KB update failed for ${source}"
             exit 1
         fi
@@ -844,7 +968,7 @@ cmd_kb_update() {
         for src in nvd exploitdb nuclei gtfobins lolbas owasp tools; do
             echo ""
             info "→ ${src}"
-            make "kb-update-${src}" || failed+=("$src")
+            make -C knowledge_base "kb-update-${src}" MODE=docker || failed+=("$src")
         done
         if [[ ${#failed[@]} -gt 0 ]]; then
             echo ""
@@ -854,16 +978,16 @@ cmd_kb_update() {
 
     echo ""
     success "Knowledge Base update complete"
-    make kb-stats
+    make -C knowledge_base kb-stats MODE=docker
 }
 
 cmd_kb_rebuild() {
     local profile="${1:-standard}"
     case "$profile" in
-        lite|standard|full) ;;
+        cpu-lite|lite|standard|full) ;;
         *)
-            error "Invalid profile '$profile'. Use lite, standard, or full."
-            echo "Usage: ./redamon.sh kb rebuild [lite|standard|full]"
+            error "Invalid profile '$profile'. Use cpu-lite, lite, standard, or full."
+            echo "Usage: ./redamon.sh kb rebuild [cpu-lite|lite|standard|full]"
             exit 1
             ;;
     esac
@@ -877,20 +1001,20 @@ cmd_kb_rebuild() {
     _kb_wait_neo4j || exit 1
 
     info "Rebuilding Knowledge Base from scratch..."
-    if ! make "kb-rebuild-${profile}"; then
+    if ! make -C knowledge_base "kb-rebuild-${profile}" MODE=docker; then
         error "KB rebuild failed"
         exit 1
     fi
 
     echo ""
     success "Knowledge Base rebuilt"
-    make kb-stats
+    make -C knowledge_base kb-stats MODE=docker
 }
 
 cmd_kb_stats() {
     _kb_export_env
     _kb_wait_neo4j || exit 1
-    make kb-stats
+    make -C knowledge_base kb-stats MODE=docker
 }
 
 cmd_kb_help() {
@@ -925,8 +1049,9 @@ cmd_help() {
     echo -e "${BOLD}Usage:${NC} ./redamon.sh <command> [options]"
     echo ""
     echo -e "${BOLD}Commands:${NC}"
-    echo -e "  ${GREEN}install${NC}          Build and start RedAmon (without GVM)"
-    echo -e "  ${GREEN}install --gvm${NC}    Build and start RedAmon (with GVM/OpenVAS)"
+    echo -e "  ${GREEN}install${NC}              Build and start RedAmon (without GVM)"
+    echo -e "  ${GREEN}install --gvm${NC}        Build and start RedAmon (with GVM/OpenVAS)"
+    echo -e "  ${GREEN}install --skipkbase${NC}  Build without Knowledge Base (~4.4 GB lighter)"
     echo -e "  ${GREEN}update${NC}           Pull latest version and smart-rebuild changed services"
     echo -e "  ${GREEN}up${NC}               Start services"
     echo -e "  ${GREEN}up dev${NC}           Start in dev mode (hot-reload, auto-builds tool images)"
@@ -939,8 +1064,9 @@ cmd_help() {
     echo -e "  ${GREEN}help${NC}             Show this help message"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo "  ./redamon.sh install          # First-time setup (no GVM)"
-    echo "  ./redamon.sh install --gvm    # First-time setup (full stack)"
+    echo "  ./redamon.sh install               # First-time setup (no GVM)"
+    echo "  ./redamon.sh install --gvm         # First-time setup (full stack)"
+    echo "  ./redamon.sh install --skipkbase   # Lightweight (Tavily-only, no KB)"
     echo "  ./redamon.sh update           # Update to latest version"
     echo "  ./redamon.sh up               # Start after reboot"
     echo "  ./redamon.sh up dev           # Dev mode with hot-reload"
@@ -958,7 +1084,7 @@ cmd_help() {
 cd "$SCRIPT_DIR"
 
 case "${1:-help}" in
-    install) cmd_install "${2:-}" ;;
+    install) shift; cmd_install "$@" ;;
     update)  cmd_update ;;
     up)
         if [[ "${2:-}" == "dev" ]]; then

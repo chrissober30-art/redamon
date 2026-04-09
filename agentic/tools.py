@@ -566,6 +566,10 @@ class WebSearchToolManager:
                     "critical/high severity only" queries: min_cvss=9.0 returns
                     only critical NVD entries; min_cvss=7.0 returns high+critical.
                     Other sources are unaffected.
+                web_only: If True, skip the local Knowledge Base entirely and
+                    search only via Tavily web search. Use when you need fresh
+                    internet results (e.g., latest software versions, recent
+                    advisories, or topics not covered by the KB).
 
             Returns:
                 Search results with titles, sources, and content snippets

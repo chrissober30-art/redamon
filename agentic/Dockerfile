@@ -67,28 +67,39 @@ ENV DOTNET_ROOT="/usr/share/dotnet"
 # Copy requirements first for better caching.
 # NOTE: build context is the project root (./), not ./agentic — see docker-compose.yml
 COPY agentic/requirements.txt .
+COPY agentic/requirements-kb.txt .
 
-# Install Python dependencies
+# Core Python dependencies (always installed)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the embedding model so the first agent boot doesn't have to wait
-# for a ~1.3GB download. The model is cached at /root/.cache/huggingface/.
+# Build arg: set to "true" to skip heavy KB dependencies (~4.4 GB saved)
+# Use ./redamon.sh install --skipkbase to activate
+# Declared AFTER core pip install so changing SKIP_KB doesn't bust that cache layer.
+ARG SKIP_KB=false
+
+# KB heavy dependencies: torch, sentence-transformers, faiss-cpu
+# Skipped when SKIP_KB=true (--skipkbase flag)
+RUN if [ "$SKIP_KB" != "true" ]; then \
+        pip install --no-cache-dir -r requirements-kb.txt; \
+    fi
+
+# Pre-download the embedding model (~1.3 GB) unless KB is skipped.
+# Cached at /root/.cache/huggingface/.
 # Override at build time with --build-arg KB_EMBEDDING_MODEL=<other-model>.
 ARG KB_EMBEDDING_MODEL=intfloat/e5-large-v2
 ENV KB_EMBEDDING_MODEL=${KB_EMBEDDING_MODEL}
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${KB_EMBEDDING_MODEL}')"
+RUN if [ "$SKIP_KB" != "true" ]; then \
+        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${KB_EMBEDDING_MODEL}')"; \
+    fi
 
-# Pre-download the cross-encoder reranker model so the first KB query doesn't
-# pay a ~568 MB download at runtime. Used by knowledge_base.reranker.CrossEncoderReranker
-# in the hybrid retrieval pipeline.
-#
-# Default is BAAI/bge-reranker-base — significantly better at security/technical
-# content than the smaller MS MARCO models. ~568 MB, ~300 ms per top-30 query
-# on CPU. Override at build time with --build-arg KB_RERANKER_MODEL=<other>.
-# Disable the reranker entirely at runtime via KB_RERANK_ENABLED=false.
+# Pre-download the cross-encoder reranker model (~568 MB) unless KB is skipped.
+# Override at build time with --build-arg KB_RERANKER_MODEL=<other>.
+# Disable the reranker at runtime via KB_RERANK_ENABLED=false.
 ARG KB_RERANKER_MODEL=BAAI/bge-reranker-base
 ENV KB_RERANKER_MODEL=${KB_RERANKER_MODEL}
-RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('${KB_RERANKER_MODEL}')"
+RUN if [ "$SKIP_KB" != "true" ]; then \
+        python -c "from sentence_transformers import CrossEncoder; CrossEncoder('${KB_RERANKER_MODEL}')"; \
+    fi
 
 # Copy application code
 # - graph_db/ : shared Neo4j schema (used by both agent and KB)
