@@ -30,9 +30,20 @@ describe('PARTIAL_RECON_SUPPORTED_TOOLS', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Nmap')).toBe(true)
   })
 
+  test('contains Httpx', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Httpx')).toBe(true)
+  })
+
+  test('contains Katana', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Katana')).toBe(true)
+  })
+
+  test('contains Hakrawler', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Hakrawler')).toBe(true)
+  })
+
   test('does not contain unsupported tools', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Nuclei')).toBe(false)
-    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Httpx')).toBe(false)
   })
 })
 
@@ -56,6 +67,21 @@ describe('PARTIAL_RECON_PHASE_MAP', () => {
   test('has Nmap phases', () => {
     expect(PARTIAL_RECON_PHASE_MAP['Nmap']).toHaveLength(1)
     expect(PARTIAL_RECON_PHASE_MAP['Nmap'][0]).toBe('Nmap Service Detection')
+  })
+
+  test('has Httpx phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['Httpx']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['Httpx'][0]).toBe('HTTP Probing')
+  })
+
+  test('has Katana phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['Katana']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['Katana'][0]).toBe('Resource Enumeration')
+  })
+
+  test('has Hakrawler phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['Hakrawler']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['Hakrawler'][0]).toBe('Resource Enumeration')
   })
 
   test('each supported tool has a phase entry', () => {
@@ -188,6 +214,30 @@ describe('GraphInputs type shape', () => {
     }
     expect(inputs.existing_ports_count).toBe(23)
   })
+
+  test('with existing_baseurls_count for Httpx', () => {
+    const inputs: GraphInputs = {
+      domain: 'example.com',
+      existing_subdomains_count: 10,
+      existing_ips_count: 5,
+      existing_ports_count: 23,
+      existing_baseurls_count: 8,
+      source: 'graph',
+    }
+    expect(inputs.existing_baseurls_count).toBe(8)
+  })
+
+  test('with existing_baseurls for Katana dropdown', () => {
+    const inputs: GraphInputs = {
+      domain: 'example.com',
+      existing_subdomains_count: 0,
+      existing_baseurls_count: 3,
+      existing_baseurls: ['https://example.com', 'https://api.example.com', 'https://www.example.com'],
+      source: 'graph',
+    }
+    expect(inputs.existing_baseurls).toHaveLength(3)
+    expect(inputs.existing_baseurls).toContain('https://api.example.com')
+  })
 })
 
 describe('PartialReconParams type shape', () => {
@@ -273,6 +323,27 @@ describe('PartialReconParams type shape', () => {
     expect(params.user_targets).toBeUndefined()
   })
 
+  test('Httpx params with structured user_targets', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Httpx',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: { subdomains: ['api.example.com'], ips: [], ip_attach_to: null },
+    }
+    expect(params.tool_id).toBe('Httpx')
+    expect(params.user_targets?.subdomains).toHaveLength(1)
+    expect(params.user_targets?.ips).toHaveLength(0)
+  })
+
+  test('Httpx params without user_targets (graph only)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Httpx',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+    }
+    expect(params.user_targets).toBeUndefined()
+  })
+
   test('Masscan params with structured user_targets', () => {
     const targets: UserTargets = {
       subdomains: ['api.example.com'],
@@ -289,6 +360,69 @@ describe('PartialReconParams type shape', () => {
     expect(params.user_targets?.subdomains).toHaveLength(1)
     expect(params.user_targets?.ips).toHaveLength(2)
     expect(params.user_targets?.ip_attach_to).toBe('api.example.com')
+  })
+
+  test('Katana params with structured user_targets (URLs)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Katana',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: {
+        subdomains: [], ips: [], ip_attach_to: null,
+        urls: ['https://example.com', 'https://api.example.com:8443'],
+        url_attach_to: 'https://example.com',
+      },
+    }
+    expect(params.tool_id).toBe('Katana')
+    expect(params.user_targets?.urls).toHaveLength(2)
+    expect(params.user_targets?.url_attach_to).toBe('https://example.com')
+  })
+
+  test('Katana params with generic URLs (no attach)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Katana',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: {
+        subdomains: [], ips: [], ip_attach_to: null,
+        urls: ['https://example.com'], url_attach_to: null,
+      },
+    }
+    expect(params.user_targets?.url_attach_to).toBeNull()
+  })
+
+  test('Katana params without user_targets (graph only)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Katana',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+    }
+    expect(params.user_targets).toBeUndefined()
+  })
+
+  test('Hakrawler params with structured user_targets (URLs)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Hakrawler',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: {
+        subdomains: [], ips: [], ip_attach_to: null,
+        urls: ['https://example.com', 'https://api.example.com'],
+        url_attach_to: null,
+      },
+    }
+    expect(params.tool_id).toBe('Hakrawler')
+    expect(params.user_targets?.urls).toHaveLength(2)
+    expect(params.user_targets?.url_attach_to).toBeNull()
+  })
+
+  test('Hakrawler params without user_targets (graph only)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Hakrawler',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+    }
+    expect(params.user_targets).toBeUndefined()
   })
 })
 

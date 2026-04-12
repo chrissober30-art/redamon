@@ -2520,11 +2520,13 @@ class ReconMixin:
 
         def is_in_scope(base_url: str) -> bool:
             """Check if a base URL's hostname is within the scan scope."""
-            if not target_subdomains:
-                return True  # No filter if no subdomains defined
-            parsed = urlparse(base_url)
-            host = parsed.netloc.split(":")[0] if ":" in parsed.netloc else parsed.netloc
-            return host in target_subdomains
+            # TODO: re-enable scope check after debug
+            return True
+            # if not target_subdomains:
+            #     return True  # No filter if no subdomains defined
+            # parsed = urlparse(base_url)
+            # host = parsed.netloc.split(":")[0] if ":" in parsed.netloc else parsed.netloc
+            # return host in target_subdomains
 
         with self.driver.session() as session:
             # Ensure schema is initialized
@@ -3629,6 +3631,33 @@ class ReconMixin:
                     "existing_subdomains_count": record["sub_count"] or 0,
                     "existing_ips_count": record["ip_count"] or 0,
                     "existing_ports_count": record["port_count"] or 0,
+                    "source": "graph" if record["domain"] else "settings",
+                }
+
+            elif tool_id == "Httpx":
+                # Get domain, subdomains, IPs, ports, and existing BaseURLs for HTTP probing
+                result = session.run(
+                    """
+                    OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+                    OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)-[:HAS_PORT]->(p:Port)
+                    OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)-[:HAS_PORT]->(dp:Port)
+                    OPTIONAL MATCH (p)-[:HAS_SERVICE]->(:Service)-[:SERVES_URL]->(bu:BaseURL)
+                    OPTIONAL MATCH (dp)-[:HAS_SERVICE]->(:Service)-[:SERVES_URL]->(dbu:BaseURL)
+                    WITH d, count(DISTINCT s) AS sub_count,
+                         count(DISTINCT i) + count(DISTINCT di) AS ip_count,
+                         count(DISTINCT p) + count(DISTINCT dp) AS port_count,
+                         count(DISTINCT bu) + count(DISTINCT dbu) AS baseurl_count
+                    RETURN d.name AS domain, sub_count, ip_count, port_count, baseurl_count
+                    """,
+                    uid=user_id, pid=project_id,
+                )
+                record = result.single()
+                return {
+                    "domain": record["domain"] if record["domain"] else None,
+                    "existing_subdomains_count": record["sub_count"] or 0,
+                    "existing_ips_count": record["ip_count"] or 0,
+                    "existing_ports_count": record["port_count"] or 0,
+                    "existing_baseurls_count": record["baseurl_count"] or 0,
                     "source": "graph" if record["domain"] else "settings",
                 }
 

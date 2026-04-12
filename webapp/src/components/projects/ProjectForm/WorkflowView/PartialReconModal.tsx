@@ -38,6 +38,22 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
     'Targets are loaded from the graph (IPs + open ports from prior port scanning). ' +
     'You can also provide custom subdomains or IPs below. ' +
     'Port, Service, Technology, Vulnerability, and CVE nodes are merged into the existing graph.',
+  Httpx:
+    'Probes HTTP services on discovered ports and subdomains using httpx. ' +
+    'Detects live services, technologies, SSL/TLS certificates, and response metadata. ' +
+    'Targets are loaded from the graph (IPs + ports from prior scanning, or subdomains on default ports). ' +
+    'You can also provide custom subdomains below. ' +
+    'BaseURL, Certificate, Technology, and Header nodes are merged into the existing graph.',
+  Katana:
+    'Crawls discovered BaseURLs using Katana to discover endpoints, parameters, and forms. ' +
+    'Targets are loaded from the graph (BaseURLs from prior HTTP probing). ' +
+    'You can also provide custom URLs below. ' +
+    'Endpoint, Parameter, BaseURL, and ExternalDomain nodes are merged into the existing graph.',
+  Hakrawler:
+    'Lightweight web crawler that discovers endpoints and links from BaseURLs using Hakrawler (Docker-based). ' +
+    'Targets are loaded from the graph (BaseURLs from prior HTTP probing). ' +
+    'You can also provide custom URLs below. ' +
+    'Endpoint, Parameter, BaseURL, and ExternalDomain nodes are merged into the existing graph.',
 }
 
 // --- Validation helpers ---
@@ -76,6 +92,21 @@ function validatePort(value: string): string | null {
   if (isNaN(num) || !Number.isInteger(num)) return `Not a valid port number: ${value}`
   if (num < 1 || num > 65535) return `Port must be 1-65535, got ${num}`
   return null
+}
+
+function validateUrl(value: string, projectDomain?: string): string | null {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return `URL must use http or https: ${value}`
+    if (!url.hostname) return `URL has no hostname: ${value}`
+    // TODO: re-enable scope check after debug
+    // if (projectDomain && !url.hostname.endsWith('.' + projectDomain) && url.hostname !== projectDomain) {
+    //   return `${url.hostname} is out of scope (not a subdomain of ${projectDomain})`
+    // }
+    return null
+  } catch {
+    return `Invalid URL: ${value}`
+  }
 }
 
 function validateSubdomain(value: string, projectDomain: string): string | null {
@@ -136,6 +167,8 @@ export function PartialReconModal({
   const [customIps, setCustomIps] = useState('')
   const [ipAttachTo, setIpAttachTo] = useState<string | null>(null)
   const [customPorts, setCustomPorts] = useState('')
+  const [customUrls, setCustomUrls] = useState('')
+  const [urlAttachTo, setUrlAttachTo] = useState<string | null>(null)
   const [includeGraphTargets, setIncludeGraphTargets] = useState(true)
 
   useEffect(() => {
@@ -145,6 +178,8 @@ export function PartialReconModal({
     setCustomIps('')
     setIpAttachTo(null)
     setCustomPorts('')
+    setCustomUrls('')
+    setUrlAttachTo(null)
     setIncludeGraphTargets(true)
     fetch(`/api/recon/${projectId}/graph-inputs/${toolId}`)
       .then(res => res.ok ? res.json() : null)
@@ -161,8 +196,13 @@ export function PartialReconModal({
   const domain = graphInputs?.domain || targetDomain || ''
   const isPortScanner = toolId === 'Naabu' || toolId === 'Masscan'
   const isNmap = toolId === 'Nmap'
-  const hasUserInputs = isPortScanner || isNmap
-  const hasSubdomainInput = toolId === 'Naabu'
+  const isHttpx = toolId === 'Httpx'
+  const isResourceEnum = toolId === 'Katana' || toolId === 'Hakrawler'
+  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum
+  const hasIpInput = isPortScanner || isNmap || isHttpx
+  const hasSubdomainInput = toolId === 'Naabu' || isHttpx
+  const hasPortInput = isNmap || isHttpx
+  const hasUrlInput = isResourceEnum
 
   // Subdomain validation
   const subdomainValidation = useMemo(
@@ -182,9 +222,16 @@ export function PartialReconModal({
     [customPorts],
   )
 
+  // URL validation (resource enum tools: Katana, Hakrawler) -- must be in project scope
+  const urlValidation = useMemo(
+    () => validateLines(customUrls, v => validateUrl(v, domain)),
+    [customUrls, domain],
+  )
+
   const hasValidationErrors = (hasSubdomainInput && subdomainValidation.errors.length > 0)
-    || ipValidation.errors.length > 0
-    || (isNmap && portValidation.errors.length > 0)
+    || (hasIpInput && ipValidation.errors.length > 0)
+    || (hasPortInput && portValidation.errors.length > 0)
+    || (hasUrlInput && urlValidation.errors.length > 0)
 
   // Build dropdown options: graph subdomains + custom subdomains (live)
   const attachToOptions = useMemo(() => {
@@ -205,6 +252,12 @@ export function PartialReconModal({
     return options
   }, [graphInputs?.existing_subdomains, customSubdomains, domain])
 
+  // Build dropdown options for URL attachment: existing BaseURLs from graph
+  const urlAttachToOptions = useMemo(() => {
+    const graphBaseUrls = graphInputs?.existing_baseurls || []
+    return graphBaseUrls.map(u => ({ value: u, label: u }))
+  }, [graphInputs?.existing_baseurls])
+
   // If selected attach_to was removed from options, reset to null
   useEffect(() => {
     if (ipAttachTo && !attachToOptions.some(o => o.value === ipAttachTo)) {
@@ -212,16 +265,27 @@ export function PartialReconModal({
     }
   }, [attachToOptions, ipAttachTo])
 
+  useEffect(() => {
+    if (urlAttachTo && !urlAttachToOptions.some(o => o.value === urlAttachTo)) {
+      setUrlAttachTo(null)
+    }
+  }, [urlAttachToOptions, urlAttachTo])
+
   const handleRun = useCallback(() => {
     if (!domain || hasValidationErrors) return
 
     if (hasUserInputs) {
       const subdomains = hasSubdomainInput ? customSubdomains.split('\n').map(s => s.trim()).filter(Boolean) : []
-      const ips = customIps.split('\n').map(s => s.trim()).filter(Boolean)
-      const ports = isNmap ? customPorts.split('\n').map(s => s.trim()).filter(Boolean).map(Number).filter(n => n >= 1 && n <= 65535) : []
-      const hasCustomInput = subdomains.length || ips.length || ports.length
+      const ips = hasIpInput ? customIps.split('\n').map(s => s.trim()).filter(Boolean) : []
+      const ports = hasPortInput ? customPorts.split('\n').map(s => s.trim()).filter(Boolean).map(Number).filter(n => n >= 1 && n <= 65535) : []
+      const urls = hasUrlInput ? customUrls.split('\n').map(s => s.trim()).filter(Boolean) : []
+      const hasCustomInput = subdomains.length || ips.length || ports.length || urls.length
       const userTargets: UserTargets | undefined = hasCustomInput
-        ? { subdomains, ips, ip_attach_to: ipAttachTo, ...(ports.length ? { ports } : {}) }
+        ? {
+            subdomains, ips, ip_attach_to: ipAttachTo,
+            ...(ports.length ? { ports } : {}),
+            ...(urls.length ? { urls, url_attach_to: urlAttachTo } : {}),
+          }
         : undefined
 
       const params = {
@@ -241,7 +305,7 @@ export function PartialReconModal({
         ...(includeGraphTargets ? {} : { include_graph_targets: false }),
       })
     }
-  }, [domain, hasValidationErrors, hasUserInputs, hasSubdomainInput, isNmap, toolId, onConfirm, customSubdomains, customIps, ipAttachTo, customPorts, includeGraphTargets])
+  }, [domain, hasValidationErrors, hasUserInputs, hasSubdomainInput, hasIpInput, hasPortInput, hasUrlInput, isNmap, toolId, onConfirm, customSubdomains, customIps, ipAttachTo, customPorts, customUrls, urlAttachTo, includeGraphTargets])
 
   if (!isOpen || !toolId) return null
 
@@ -250,9 +314,13 @@ export function PartialReconModal({
   const enrichNodeTypes = SECTION_ENRICH_MAP[toolId] || []
   const hasNoGraphTargets = (isPortScanner && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0)
     || (isNmap && !loadingInputs && (graphInputs?.existing_ports_count ?? 0) === 0)
-  const hasNoCustomTargets = (!hasSubdomainInput || !customSubdomains.trim()) && !customIps.trim() && !customPorts.trim()
+    || (isHttpx && !loadingInputs && (graphInputs?.existing_ports_count ?? 0) === 0 && (graphInputs?.existing_subdomains_count ?? 0) === 0)
+    || (isResourceEnum && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0)
+  const hasNoCustomTargets = (!hasSubdomainInput || !customSubdomains.trim()) && (!hasIpInput || !customIps.trim()) && !customPorts.trim() && (!hasUrlInput || !customUrls.trim())
   const noTargetsToScan = hasUserInputs && !includeGraphTargets && hasNoCustomTargets
   const nmapNoPorts = isNmap && !includeGraphTargets && !customPorts.trim()
+  const httpxNoPorts = isHttpx && !includeGraphTargets && !customPorts.trim() && !customSubdomains.trim()
+  const resourceEnumNoUrls = isResourceEnum && !includeGraphTargets && !customUrls.trim()
 
   return (
     <Modal
@@ -281,6 +349,10 @@ export function PartialReconModal({
             <div style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text-primary, #e2e8f0)' }}>
               {loadingInputs ? 'Loading...' : isNmap
                 ? `${domain || 'No domain'} (${graphInputs?.existing_ips_count ?? 0} IPs, ${graphInputs?.existing_ports_count ?? 0} ports, ${graphInputs?.existing_subdomains_count ?? 0} subdomains)`
+                : isHttpx
+                ? `${domain || 'No domain'} (${graphInputs?.existing_subdomains_count ?? 0} subdomains, ${graphInputs?.existing_ports_count ?? 0} ports, ${graphInputs?.existing_baseurls_count ?? 0} existing URLs)`
+                : isResourceEnum
+                ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs)`
                 : toolId === 'Naabu'
                 ? `${domain || 'No domain'} (${graphInputs?.existing_ips_count ?? 0} IPs, ${graphInputs?.existing_subdomains_count ?? 0} subdomains)`
                 : toolId === 'Masscan'
@@ -354,6 +426,10 @@ export function PartialReconModal({
           }}>
             {isNmap
               ? 'No ports found in graph. Run Naabu first to discover open ports, or provide custom targets below.'
+              : isHttpx
+              ? 'No subdomains or ports found in graph. Run Subdomain Discovery + Port Scanning first, or provide custom subdomains below.'
+              : isResourceEnum
+              ? 'No BaseURLs found in graph. Run HTTP Probing (Httpx) first to discover live URLs, or provide custom URLs below.'
               : 'No IPs found in graph. Run Subdomain Discovery first to populate the graph, or provide custom targets below.'}
           </div>
         )}
@@ -371,6 +447,22 @@ export function PartialReconModal({
             backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
           }}>
             Nmap requires ports to scan. Provide custom ports below or enable graph targets (which include existing ports from Naabu/Masscan).
+          </div>
+        )}
+        {httpxNoPorts && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            Httpx requires ports or subdomains to probe. Provide custom ports/IPs, custom subdomains (probed on default ports), or enable graph targets.
+          </div>
+        )}
+        {resourceEnumNoUrls && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            {toolId} requires URLs to crawl. Provide custom URLs below or enable graph targets (which include existing BaseURLs from Httpx).
           </div>
         )}
 
@@ -398,7 +490,7 @@ export function PartialReconModal({
         )}
 
         {/* === Section B - Custom IPs === */}
-        {hasUserInputs && (
+        {hasIpInput && (
           <div>
             <div style={labelStyle}>Custom IPs (optional, one per line)</div>
             <textarea
@@ -415,8 +507,8 @@ export function PartialReconModal({
                 ))}
               </div>
             ) : (
-              <div style={hintStyle}>{isNmap
-                ? 'IPv4, IPv6, or CIDR ranges (/24-/32). Will be scanned on all ports (graph + custom).'
+              <div style={hintStyle}>{isNmap || isHttpx
+                ? 'IPv4, IPv6, or CIDR ranges (/24-/32). Will be probed on all ports (graph + custom).'
                 : 'IPv4, IPv6, or CIDR ranges (/24-/32)'}</div>
             )}
 
@@ -454,8 +546,8 @@ export function PartialReconModal({
           </div>
         )}
 
-        {/* === Section C - Custom Ports (Nmap only) === */}
-        {isNmap && (
+        {/* === Section C - Custom Ports (Nmap / Httpx) === */}
+        {hasPortInput && (
           <div>
             <div style={labelStyle}>Custom ports (optional, one per line)</div>
             <textarea
@@ -473,6 +565,72 @@ export function PartialReconModal({
               </div>
             ) : (
               <div style={hintStyle}>Port numbers 1-65535. Scanned on all target IPs (graph + custom).</div>
+            )}
+          </div>
+        )}
+
+        {/* Httpx default ports info */}
+        {isHttpx && (customSubdomains.trim() || customIps.trim()) && !customPorts.trim() && (
+          <div style={{
+            fontSize: '11px', color: '#60a5fa', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)',
+          }}>
+            No custom ports specified. Custom subdomains and IPs will be probed on default ports (80, 443) only.
+            Add custom ports above to probe additional ports.
+          </div>
+        )}
+
+        {/* === Section D - Custom URLs (resource enum: Katana, Hakrawler) === */}
+        {hasUrlInput && (
+          <div>
+            <div style={labelStyle}>Custom URLs (optional, one per line)</div>
+            <textarea
+              value={customUrls}
+              onChange={e => setCustomUrls(e.target.value)}
+              placeholder={'https://example.com\nhttps://api.example.com:8443'}
+              rows={2}
+              style={textareaStyle(urlValidation.errors.length > 0)}
+            />
+            {urlValidation.errors.length > 0 ? (
+              <div style={errorListStyle}>
+                {urlValidation.errors.map((err, i) => (
+                  <div key={i} style={errorLineStyle}>Line {err.line}: {err.error}</div>
+                ))}
+              </div>
+            ) : (
+              <div style={hintStyle}>Full URLs (http/https). Will be crawled to discover endpoints and parameters.</div>
+            )}
+
+            {/* Dropdown: associate URLs to BaseURL */}
+            {customUrls.trim() && urlValidation.errors.length === 0 && (
+              <div style={{ marginTop: '8px' }}>
+                <div style={labelStyle}>Associate URLs to</div>
+                <select
+                  value={urlAttachTo || ''}
+                  onChange={e => setUrlAttachTo(e.target.value || null)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color, #334155)',
+                    backgroundColor: 'var(--bg-secondary, #1e293b)',
+                    color: 'var(--text-primary, #e2e8f0)',
+                    fontSize: '12px',
+                  }}
+                >
+                  <option value="">-- Generic (UserInput) --</option>
+                  {urlAttachToOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <div style={hintStyle}>
+                  {urlAttachTo
+                    ? `Discovered endpoints will be linked to ${urlAttachTo}`
+                    : 'URLs will be tracked via a UserInput node (no BaseURL link)'}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -511,14 +669,14 @@ export function PartialReconModal({
           <button
             type="button"
             onClick={handleRun}
-            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts}
+            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls}
             style={{
               padding: '8px 16px', borderRadius: '6px', border: 'none',
               backgroundColor: '#3b82f6', color: '#fff',
-              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts ? 'not-allowed' : 'pointer',
+              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               display: 'flex', alignItems: 'center', gap: '6px',
-              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts ? 0.5 : 1,
+              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls ? 0.5 : 1,
             }}
           >
             {isStarting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}

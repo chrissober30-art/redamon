@@ -1773,5 +1773,1080 @@ class TestRunNmapStructuredTargets(unittest.TestCase):
         mocks["neo4j_client"].create_user_input_node.assert_not_called()
 
 
+def _mock_http_probe_result(recon_data, output_file=None, settings=None):
+    """Mock run_http_probe: adds http_probe key to recon_data."""
+    recon_data["http_probe"] = {
+        "scan_metadata": {"scan_timestamp": "2026-04-12T10:00:00", "total_urls_probed": 2},
+        "by_url": {
+            "https://example.com": {
+                "url": "https://example.com", "host": "example.com",
+                "status_code": 200, "title": "Example", "server": "nginx",
+            },
+        },
+        "by_host": {
+            "example.com": {"host": "example.com", "ips": ["93.184.216.34"], "status_codes": [200]},
+        },
+        "technologies_found": {},
+        "summary": {"total_urls_probed": 2, "live_urls": 1, "total_hosts": 1},
+    }
+    return recon_data
+
+
+class TestRunHttpx(unittest.TestCase):
+    """Tests for run_httpx using module-level mocks."""
+
+    def _run_with_mocks(self, config, neo4j_connected=True, domain_ips=None, subdomain_ips=None,
+                        initial_settings=None, resolve_fn=None):
+        """Helper that sets up all mocks and runs run_httpx.
+
+        Args:
+            config: The partial recon config dict.
+            neo4j_connected: Whether Neo4j mock returns connected.
+            domain_ips: Override domain->IP->Port graph records.
+            subdomain_ips: Override subdomain->IP->Port graph records.
+            initial_settings: Override settings returned by get_settings().
+            resolve_fn: Optional _resolve_hostname mock override.
+        """
+        _initial_settings = initial_settings if initial_settings is not None else {"HTTPX_ENABLED": True, "HTTPX_THREADS": 50}
+        mock_settings = MagicMock()
+        mock_settings.return_value = dict(_initial_settings)
+
+        mock_http_probe = MagicMock(side_effect=_mock_http_probe_result)
+
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = neo4j_connected
+        mock_client.update_graph_from_http_probe.return_value = {
+            "baseurls_created": 1, "certificates_created": 0, "services_created": 1,
+            "technologies_created": 0, "headers_created": 0, "relationships_created": 2, "errors": [],
+        }
+
+        mock_session = MagicMock()
+        _domain_ips = domain_ips if domain_ips is not None else [
+            {"ip": "93.184.216.34", "version": "ipv4",
+             "ports": [{"number": 80, "protocol": "tcp", "service": "http"},
+                       {"number": 443, "protocol": "tcp", "service": "https"}]},
+        ]
+        _subdomain_ips = subdomain_ips if subdomain_ips is not None else [
+            {"subdomain": "www.example.com", "ip": "93.184.216.34", "version": "ipv4",
+             "ports": [{"number": 80, "protocol": "tcp", "service": "http"},
+                       {"number": 443, "protocol": "tcp", "service": "https"}]},
+        ]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "RESOLVES_TO]->(i:IP)" in query and "HAS_SUBDOMAIN" not in query and "HAS_PORT" in query:
+                records = []
+                for ip_data in _domain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query and "RESOLVES_TO" in query and "HAS_PORT" in query:
+                records = []
+                for ip_data in _subdomain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            else:
+                result.__iter__ = lambda self: iter([])
+            return result
+
+        mock_session.run = MagicMock(side_effect=mock_session_run)
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_http_probe_mod = MagicMock()
+        mock_http_probe_mod.run_http_probe = mock_http_probe
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.http_probe': mock_http_probe_mod,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            if resolve_fn is not None:
+                with patch.object(pr, '_resolve_hostname', resolve_fn):
+                    pr.run_httpx(config)
+            else:
+                pr.run_httpx(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "http_probe": mock_http_probe,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+            "mock_session": mock_session,
+        }
+
+    # --- Basic happy-path tests ---
+
+    def test_basic_scan_no_user_inputs(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["http_probe"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_http_probe.assert_called_once()
+
+    def test_settings_fetched(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["settings"].assert_called_once()
+
+    def test_scan_uses_port_scan_data(self):
+        """Httpx should receive recon_data with port_scan structure from graph."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["http_probe"].call_args
+        recon_data = call_args[0][0]
+        self.assertEqual(recon_data["domain"], "example.com")
+        self.assertIn("port_scan", recon_data)
+        self.assertIn("by_ip", recon_data["port_scan"])
+        self.assertIn("93.184.216.34", recon_data["port_scan"]["by_ip"])
+
+    def test_graph_update_calls_update_from_http_probe(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["neo4j_client"].update_graph_from_http_probe.assert_called_once()
+
+    def test_recon_data_has_dns_and_port_scan_sections(self):
+        """Verify recon_data has both dns and port_scan sections from graph."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("dns", recon_data)
+        self.assertIn("port_scan", recon_data)
+        self.assertIn("domain", recon_data["dns"])
+        self.assertIn("subdomains", recon_data["dns"])
+        self.assertIn("by_host", recon_data["port_scan"])
+        self.assertIn("all_ports", recon_data["port_scan"])
+
+    def test_port_scan_all_ports_populated(self):
+        """Verify all_ports is populated from graph data."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn(80, recon_data["port_scan"]["all_ports"])
+        self.assertIn(443, recon_data["port_scan"]["all_ports"])
+
+    # --- Force-enable tests ---
+
+    def test_httpx_enabled_forced_when_disabled_in_settings(self):
+        """HTTPX_ENABLED should be forced to True even if settings return False."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+            initial_settings={"HTTPX_ENABLED": False, "HTTPX_THREADS": 50},
+        )
+        # Verify run_http_probe was called with settings that have HTTPX_ENABLED=True
+        call_args = mocks["http_probe"].call_args
+        settings_passed = call_args[1].get("settings") or call_args[0][2] if len(call_args[0]) > 2 else None
+        if settings_passed is None and call_args[1]:
+            settings_passed = call_args[1].get("settings")
+        # The mock side_effect receives (recon_data, output_file=None, settings=settings)
+        # Call was: _run_http_probe(recon_data, output_file=None, settings=settings)
+        # So settings is keyword arg
+        settings_passed = call_args[1]["settings"]
+        self.assertTrue(settings_passed["HTTPX_ENABLED"])
+
+    def test_httpx_enabled_forced_when_already_enabled(self):
+        """Force-enable is a no-op when already True, but should still work."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+            initial_settings={"HTTPX_ENABLED": True},
+        )
+        settings_passed = mocks["http_probe"].call_args[1]["settings"]
+        self.assertTrue(settings_passed["HTTPX_ENABLED"])
+
+    # --- Exit conditions ---
+
+    def test_empty_graph_no_subdomains_exits(self):
+        """No targets in graph and no user inputs should exit."""
+        with self.assertRaises(SystemExit):
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": []},
+                domain_ips=[],
+                subdomain_ips=[],
+            )
+
+    def test_neo4j_disconnected_exits(self):
+        """Neo4j disconnected means no graph data to query, so no targets -> exit."""
+        with self.assertRaises(SystemExit):
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": []},
+                neo4j_connected=False,
+            )
+
+    def test_include_graph_targets_false_no_targets_exits(self):
+        """When include_graph_targets=False with no user inputs, should exit."""
+        with self.assertRaises(SystemExit):
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": [], "include_graph_targets": False},
+                domain_ips=[],
+                subdomain_ips=[],
+            )
+
+    # --- User subdomain tests ---
+
+    def test_user_subdomains_injected_into_dns(self):
+        """User subdomains should appear in recon_data.dns.subdomains."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": ["api.example.com"]},
+            },
+            resolve_fn=mock_resolve,
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("api.example.com", recon_data["dns"]["subdomains"])
+        sub_data = recon_data["dns"]["subdomains"]["api.example.com"]
+        self.assertEqual(sub_data["ips"]["ipv4"], ["10.0.0.1"])
+        self.assertTrue(sub_data["has_records"])
+
+    def test_user_subdomains_with_graph_targets_disabled(self):
+        """User subdomains should work even without graph targets."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": ["api.example.com"]},
+                "include_graph_targets": False,
+            },
+            domain_ips=[], subdomain_ips=[],
+            resolve_fn=mock_resolve,
+        )
+        mocks["http_probe"].assert_called_once()
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("api.example.com", recon_data["dns"]["subdomains"])
+
+    def test_user_subdomain_already_in_graph_not_re_resolved(self):
+        """Subdomain already in graph dns.subdomains should not be re-resolved."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        # www.example.com is already in the graph (from subdomain_ips default)
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": ["www.example.com"]},
+            },
+            resolve_fn=mock_resolve,
+        )
+        # _resolve_hostname should NOT be called because www.example.com is already in DNS subdomains
+        mock_resolve.assert_not_called()
+
+    def test_user_subdomain_unresolvable_skipped(self):
+        """Subdomains that don't resolve should be skipped without error."""
+        mock_resolve = MagicMock(return_value={"ipv4": [], "ipv6": []})
+        # With no graph targets and no resolvable hostnames, should exit
+        with self.assertRaises(SystemExit):
+            self._run_with_mocks(
+                {
+                    "domain": "example.com", "user_inputs": [],
+                    "user_targets": {"subdomains": ["dead.example.com"]},
+                    "include_graph_targets": False,
+                },
+                domain_ips=[], subdomain_ips=[],
+                resolve_fn=mock_resolve,
+            )
+        mock_resolve.assert_called_once_with("dead.example.com")
+
+    def test_invalid_subdomains_skipped(self):
+        """Invalid hostnames in user_targets should be skipped."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": ["not a valid hostname!!", "api.example.com"]},
+            },
+            resolve_fn=mock_resolve,
+        )
+        # Only the valid hostname should be resolved
+        mock_resolve.assert_called_once_with("api.example.com")
+
+    def test_subdomain_graph_nodes_created(self):
+        """Resolved user subdomains should create Subdomain + IP + RESOLVES_TO in Neo4j."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": ["api.example.com"]},
+            },
+            resolve_fn=mock_resolve,
+        )
+        # Verify Neo4j session.run was called with MERGE Subdomain, MERGE IP, etc.
+        session = mocks["mock_session"]
+        cypher_calls = [str(call) for call in session.run.call_args_list]
+        cypher_text = " ".join(cypher_calls)
+        self.assertIn("MERGE (s:Subdomain", cypher_text)
+        self.assertIn("MERGE (i:IP", cypher_text)
+        self.assertIn("MERGE (s)-[:RESOLVES_TO", cypher_text)
+
+    # --- user_targets edge cases ---
+
+    def test_empty_user_targets_uses_graph_only(self):
+        """Empty user_targets dict should scan graph data only."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": [], "user_targets": {}},
+        )
+        mocks["http_probe"].assert_called_once()
+
+    def test_null_user_targets_uses_graph_only(self):
+        """user_targets=None should scan graph data only."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": [], "user_targets": None},
+        )
+        mocks["http_probe"].assert_called_once()
+
+    def test_user_targets_empty_subdomains_list(self):
+        """user_targets with empty subdomains list should scan graph only."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": [], "user_targets": {"subdomains": []}},
+        )
+        mocks["http_probe"].assert_called_once()
+
+    # --- DNS fallback (no port_scan data) ---
+
+    def test_dns_only_graph_no_port_scan(self):
+        """Graph with subdomains but no ports: httpx should still receive DNS data."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+            domain_ips=[],
+            # Subdomains with no ports (empty ports list)
+            subdomain_ips=[
+                {"subdomain": "www.example.com", "ip": "93.184.216.34", "version": "ipv4",
+                 "ports": [{"number": None, "protocol": None, "service": None}]},
+            ],
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        # Should have dns subdomains populated
+        self.assertIn("www.example.com", recon_data["dns"]["subdomains"])
+        # port_scan.by_host may or may not have www.example.com, but dns is the fallback path
+
+    # --- User IP + Port tests (Nmap-like pattern) ---
+
+    def test_user_ips_injected_into_port_scan(self):
+        """User IPs should appear in recon_data.port_scan.by_ip."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
+            },
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("10.0.0.1", recon_data["port_scan"]["by_ip"])
+
+    def test_user_ips_generic_creates_userinput(self):
+        """IPs with ip_attach_to=null should create a UserInput node."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
+            },
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        _, ui_kw = mocks["neo4j_client"].create_user_input_node.call_args
+        self.assertEqual(ui_kw["user_input_data"]["tool_id"], "Httpx")
+        self.assertEqual(ui_kw["user_input_data"]["input_type"], "ips")
+
+    def test_user_ips_attached_to_subdomain_no_userinput(self):
+        """IPs attached to a subdomain should NOT create a UserInput node."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": "www.example.com"},
+            },
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
+
+    def test_user_ports_injected_into_port_scan(self):
+        """User ports should be added to all_ports and each IP's port list."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": [], "ip_attach_to": None, "ports": [8443, 9090]},
+            },
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn(8443, recon_data["port_scan"]["all_ports"])
+        self.assertIn(9090, recon_data["port_scan"]["all_ports"])
+        # Original ports should still be there
+        self.assertIn(80, recon_data["port_scan"]["all_ports"])
+
+    def test_user_ips_and_ports_combined(self):
+        """User IPs + ports: IPs should have the custom ports in port_details."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {
+                    "subdomains": [], "ips": ["10.0.0.1"],
+                    "ip_attach_to": None, "ports": [8443],
+                },
+            },
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("10.0.0.1", recon_data["port_scan"]["by_ip"])
+        ip_data = recon_data["port_scan"]["by_ip"]["10.0.0.1"]
+        self.assertIn(8443, ip_data["ports"])
+
+    def test_user_ip_linking_resolves_to(self):
+        """IPs attached to subdomain should create RESOLVES_TO after scan."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": "www.example.com"},
+            },
+        )
+        # Verify session.run was called with RESOLVES_TO for IP linking
+        session = mocks["mock_session"]
+        cypher_calls = " ".join(str(c) for c in session.run.call_args_list)
+        self.assertIn("RESOLVES_TO", cypher_calls)
+
+    def test_user_ip_linking_userinput_produced(self):
+        """Generic IPs should create UserInput PRODUCED links after scan."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
+            },
+        )
+        mocks["neo4j_client"].update_user_input_status.assert_called_once()
+        args = mocks["neo4j_client"].update_user_input_status.call_args[0]
+        self.assertEqual(args[1], "completed")
+
+    def test_all_three_inputs_combined(self):
+        """Subdomains + IPs + Ports should all be processed together."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.2"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {
+                    "subdomains": ["api.example.com"],
+                    "ips": ["10.0.0.1"],
+                    "ip_attach_to": None,
+                    "ports": [8443],
+                },
+            },
+            resolve_fn=mock_resolve,
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        # Subdomain resolved
+        self.assertIn("api.example.com", recon_data["dns"]["subdomains"])
+        # IP injected
+        self.assertIn("10.0.0.1", recon_data["port_scan"]["by_ip"])
+        # Port injected
+        self.assertIn(8443, recon_data["port_scan"]["all_ports"])
+        # UserInput created for generic IP
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+
+    # --- by_host injection tests (STEP 4) ---
+
+    def test_user_subdomain_injected_into_by_host(self):
+        """Resolved subdomain should appear in port_scan.by_host with default ports."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": ["api.example.com"]},
+            },
+            resolve_fn=mock_resolve,
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("api.example.com", recon_data["port_scan"]["by_host"])
+        host_data = recon_data["port_scan"]["by_host"]["api.example.com"]
+        self.assertIn(80, host_data["ports"])
+        self.assertIn(443, host_data["ports"])
+        self.assertEqual(host_data["ip"], "10.0.0.1")
+
+    def test_user_ip_injected_into_by_host(self):
+        """User IP should appear in port_scan.by_host with default ports."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
+            },
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        self.assertIn("10.0.0.1", recon_data["port_scan"]["by_host"])
+        host_data = recon_data["port_scan"]["by_host"]["10.0.0.1"]
+        self.assertIn(80, host_data["ports"])
+        self.assertIn(443, host_data["ports"])
+
+    def test_custom_ports_used_for_by_host_injection(self):
+        """When user provides ports, those should be used instead of defaults."""
+        mock_resolve = MagicMock(return_value={"ipv4": ["10.0.0.1"], "ipv6": []})
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {
+                    "subdomains": ["api.example.com"], "ips": ["10.0.0.2"],
+                    "ip_attach_to": None, "ports": [8443, 9090],
+                },
+            },
+            resolve_fn=mock_resolve,
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        # Subdomain should have custom ports, not defaults
+        sub_host = recon_data["port_scan"]["by_host"]["api.example.com"]
+        self.assertIn(8443, sub_host["ports"])
+        self.assertIn(9090, sub_host["ports"])
+        # IP should also have custom ports
+        ip_host = recon_data["port_scan"]["by_host"]["10.0.0.2"]
+        self.assertIn(8443, ip_host["ports"])
+        self.assertIn(9090, ip_host["ports"])
+
+    def test_existing_by_host_not_overwritten(self):
+        """Graph hosts already in by_host should NOT be overwritten by injection."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+        )
+        recon_data = mocks["http_probe"].call_args[0][0]
+        # www.example.com comes from graph with ports 80+443
+        self.assertIn("www.example.com", recon_data["port_scan"]["by_host"])
+        host_data = recon_data["port_scan"]["by_host"]["www.example.com"]
+        # Should keep original ports from graph, not replaced by defaults
+        self.assertIn(80, host_data["ports"])
+        self.assertIn(443, host_data["ports"])
+
+
+class TestRunKatana(unittest.TestCase):
+    """Tests for run_katana using module-level mocks (Katana-only, not full resource_enum)."""
+
+    def _run_with_mocks(self, config, neo4j_connected=True, graph_baseurls=None):
+        """Helper that sets up all mocks and runs run_katana."""
+        mock_settings = MagicMock()
+        mock_settings.return_value = {
+            "KATANA_ENABLED": True, "KATANA_DEPTH": 2, "KATANA_MAX_URLS": 300,
+            "KATANA_DOCKER_IMAGE": "projectdiscovery/katana:latest",
+            "KATANA_RATE_LIMIT": 50, "KATANA_TIMEOUT": 3600,
+            "KATANA_JS_CRAWL": True, "KATANA_PARAMS_ONLY": False,
+            "KATANA_CUSTOM_HEADERS": [], "KATANA_EXCLUDE_PATTERNS": [],
+            "TOR_ENABLED": False,
+        }
+
+        mock_katana_crawler = MagicMock(return_value=(
+            ["https://example.com/api/users", "https://example.com/about"],
+            {"external_domains": ["external.com"]},
+        ))
+        mock_pull_image = MagicMock()
+        mock_organize = MagicMock(return_value={
+            "by_base_url": {
+                "https://example.com": {
+                    "endpoints": {
+                        "/api/users": {
+                            "methods": ["GET"], "category": "api",
+                            "parameter_count": {"query": 0, "body": 0, "path": 0, "total": 0},
+                            "urls_found": 1, "parameters": {"query": [], "body": [], "path": []},
+                        },
+                        "/about": {
+                            "methods": ["GET"], "category": "page",
+                            "parameter_count": {"query": 0, "body": 0, "path": 0, "total": 0},
+                            "urls_found": 1, "parameters": {"query": [], "body": [], "path": []},
+                        },
+                    },
+                    "summary": {"total_endpoints": 2, "total_parameters": 0},
+                },
+            },
+            "forms": [],
+        })
+
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = neo4j_connected
+        mock_client.update_graph_from_resource_enum.return_value = {
+            "endpoints_created": 2, "parameters_created": 0,
+            "forms_created": 0, "secrets_created": 0,
+            "relationships_created": 3, "errors": [],
+        }
+
+        _graph_baseurls = graph_baseurls if graph_baseurls is not None else [
+            {"url": "https://example.com", "status_code": 200, "host": "example.com", "content_type": "text/html"},
+        ]
+        _graph_subdomains = ["www.example.com"]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "BaseURL" in query and "RETURN" in query:
+                records = []
+                for bu_data in _graph_baseurls:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=bu_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query:
+                record = MagicMock()
+                record.__getitem__ = lambda self, key: _graph_subdomains
+                result.single.return_value = record
+                result.__iter__ = lambda self: iter([])
+            else:
+                result.__iter__ = lambda self: iter([])
+                result.single.return_value = None
+            return result
+
+        mock_session = MagicMock()
+        mock_session.run = mock_session_run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_helpers_resource_enum = MagicMock()
+        mock_helpers_resource_enum.run_katana_crawler = mock_katana_crawler
+        mock_helpers_resource_enum.pull_katana_docker_image = mock_pull_image
+        mock_helpers_resource_enum.organize_endpoints = mock_organize
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        mock_helpers = MagicMock()
+
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.helpers.resource_enum': mock_helpers_resource_enum,
+            'recon.helpers': mock_helpers,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            pr.run_katana(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "katana_crawler": mock_katana_crawler,
+            "pull_image": mock_pull_image,
+            "organize": mock_organize,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+        }
+
+    def test_basic_scan_graph_only(self):
+        """Graph-only scan loads BaseURLs and runs Katana crawler (only)."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["pull_image"].assert_called_once()
+        mocks["katana_crawler"].assert_called_once()
+        mocks["organize"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_resource_enum.assert_called_once()
+
+    def test_user_urls_injected(self):
+        """User-provided URLs are added to crawler targets."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com:8443"], "url_attach_to": None},
+        })
+        mocks["katana_crawler"].assert_called_once()
+        call_args = mocks["katana_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertIn("https://custom.example.com:8443", target_urls)
+        self.assertIn("https://example.com", target_urls)
+
+    def test_user_urls_only_no_graph(self):
+        """With graph targets disabled, only user URLs are crawled."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": None},
+            "include_graph_targets": False,
+        })
+        mocks["katana_crawler"].assert_called_once()
+        call_args = mocks["katana_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertIn("https://custom.example.com", target_urls)
+        self.assertEqual(len(target_urls), 1)
+
+    def test_invalid_urls_skipped(self):
+        """Invalid URLs are skipped, only valid ones reach the crawler."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["not-a-url", "ftp://bad.com", "https://good.example.com"], "url_attach_to": None},
+        })
+        mocks["katana_crawler"].assert_called_once()
+        call_args = mocks["katana_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertIn("https://good.example.com", target_urls)
+        self.assertNotIn("not-a-url", target_urls)
+        self.assertNotIn("ftp://bad.com", target_urls)
+
+    def test_no_targets_exits(self):
+        """Exits with code 1 when no BaseURLs in graph and no user URLs."""
+        with self.assertRaises(SystemExit) as cm:
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": [], "include_graph_targets": False},
+                graph_baseurls=[],
+            )
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_katana_force_enabled(self):
+        """Settings should have KATANA_ENABLED=True."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["settings"].assert_called_once()
+
+    def test_generic_user_urls_create_userinput(self):
+        """When url_attach_to is null, a UserInput node should be created."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": None},
+        })
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        call_kwargs = mocks["neo4j_client"].create_user_input_node.call_args
+        user_input_data = call_kwargs[1].get("user_input_data") or call_kwargs[0][1]
+        self.assertEqual(user_input_data["input_type"], "urls")
+        self.assertEqual(user_input_data["tool_id"], "Katana")
+
+    def test_attached_user_urls_no_userinput(self):
+        """When url_attach_to is set, no UserInput node should be created."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": "https://example.com"},
+        })
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
+
+    def test_only_katana_runs_not_full_pipeline(self):
+        """Verify run_katana calls run_katana_crawler, NOT run_resource_enum."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["katana_crawler"].assert_called_once()
+        mocks["organize"].assert_called_once()
+        # organize_endpoints receives katana's output URLs
+        organized_urls = mocks["organize"].call_args[0][0]
+        self.assertEqual(sorted(organized_urls), ["https://example.com/about", "https://example.com/api/users"])
+
+
+class TestRunHakrawler(unittest.TestCase):
+    """Tests for run_hakrawler using module-level mocks."""
+
+    def _run_with_mocks(self, config, neo4j_connected=True, graph_baseurls=None):
+        """Helper that sets up all mocks and runs run_hakrawler."""
+        mock_settings = MagicMock()
+        mock_settings.return_value = {
+            "HAKRAWLER_ENABLED": True,
+            "HAKRAWLER_DOCKER_IMAGE": "jauderho/hakrawler:latest",
+            "HAKRAWLER_DEPTH": 2,
+            "HAKRAWLER_THREADS": 5,
+            "HAKRAWLER_TIMEOUT": 30,
+            "HAKRAWLER_MAX_URLS": 500,
+            "HAKRAWLER_INCLUDE_SUBS": False,
+            "HAKRAWLER_INSECURE": True,
+            "HAKRAWLER_CUSTOM_HEADERS": [],
+            "TOR_ENABLED": False,
+        }
+
+        mock_hakrawler_crawler = MagicMock(return_value=(
+            ["https://example.com/api/users", "https://example.com/about"],
+            {"external_domains": ["external.com"]},
+        ))
+        mock_pull_image = MagicMock()
+        mock_organize = MagicMock(return_value={
+            "by_base_url": {
+                "https://example.com": {
+                    "endpoints": {
+                        "/api/users": {
+                            "methods": ["GET"], "category": "api",
+                            "parameter_count": {"query": 0, "body": 0, "path": 0, "total": 0},
+                            "urls_found": 1, "parameters": {"query": [], "body": [], "path": []},
+                        },
+                        "/about": {
+                            "methods": ["GET"], "category": "page",
+                            "parameter_count": {"query": 0, "body": 0, "path": 0, "total": 0},
+                            "urls_found": 1, "parameters": {"query": [], "body": [], "path": []},
+                        },
+                    },
+                    "summary": {"total_endpoints": 2, "total_parameters": 0},
+                },
+            },
+            "forms": [],
+        })
+
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = neo4j_connected
+        mock_client.update_graph_from_resource_enum.return_value = {
+            "endpoints_created": 2, "parameters_created": 0,
+            "forms_created": 0, "secrets_created": 0,
+            "relationships_created": 3, "errors": [],
+        }
+
+        _graph_baseurls = graph_baseurls if graph_baseurls is not None else [
+            {"url": "https://example.com", "status_code": 200, "host": "example.com", "content_type": "text/html"},
+        ]
+        _graph_subdomains = ["www.example.com"]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "BaseURL" in query and "RETURN" in query:
+                records = []
+                for bu_data in _graph_baseurls:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=bu_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query:
+                record = MagicMock()
+                record.__getitem__ = lambda self, key: _graph_subdomains
+                result.single.return_value = record
+                result.__iter__ = lambda self: iter([])
+            else:
+                result.__iter__ = lambda self: iter([])
+                result.single.return_value = None
+            return result
+
+        mock_session = MagicMock()
+        mock_session.run = mock_session_run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_helpers_resource_enum = MagicMock()
+        mock_helpers_resource_enum.run_hakrawler_crawler = mock_hakrawler_crawler
+        mock_helpers_resource_enum.pull_hakrawler_docker_image = mock_pull_image
+        mock_helpers_resource_enum.organize_endpoints = mock_organize
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        mock_helpers = MagicMock()
+
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.helpers.resource_enum': mock_helpers_resource_enum,
+            'recon.helpers': mock_helpers,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            pr.run_hakrawler(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "hakrawler_crawler": mock_hakrawler_crawler,
+            "pull_image": mock_pull_image,
+            "organize": mock_organize,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+        }
+
+    def test_basic_scan_graph_only(self):
+        """Graph-only scan loads BaseURLs and runs hakrawler crawler."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["pull_image"].assert_called_once()
+        mocks["hakrawler_crawler"].assert_called_once()
+        mocks["organize"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_resource_enum.assert_called_once()
+
+    def test_user_urls_injected(self):
+        """User-provided URLs are added to targets."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com:8443"], "url_attach_to": None},
+        })
+        mocks["hakrawler_crawler"].assert_called_once()
+        # Verify the target_urls arg includes the custom URL
+        call_args = mocks["hakrawler_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertIn("https://custom.example.com:8443", target_urls)
+        self.assertIn("https://example.com", target_urls)
+
+    def test_user_urls_only_no_graph(self):
+        """With graph targets disabled, only user URLs are scanned."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": None},
+            "include_graph_targets": False,
+        })
+        mocks["hakrawler_crawler"].assert_called_once()
+        call_args = mocks["hakrawler_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertIn("https://custom.example.com", target_urls)
+        self.assertEqual(len(target_urls), 1)
+
+    def test_no_targets_exits(self):
+        """Exits with code 1 when no BaseURLs in graph and no user URLs."""
+        with self.assertRaises(SystemExit) as cm:
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": [], "include_graph_targets": False},
+                graph_baseurls=[],
+            )
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_hakrawler_force_enabled(self):
+        """Settings should have HAKRAWLER_ENABLED=True."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["settings"].assert_called_once()
+
+    def test_generic_user_urls_create_userinput(self):
+        """When url_attach_to is null, a UserInput node should be created."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": None},
+        })
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        call_kwargs = mocks["neo4j_client"].create_user_input_node.call_args
+        user_input_data = call_kwargs[1].get("user_input_data") or call_kwargs[0][1]
+        self.assertEqual(user_input_data["input_type"], "urls")
+        self.assertEqual(user_input_data["tool_id"], "Hakrawler")
+
+    def test_attached_user_urls_no_userinput(self):
+        """When url_attach_to is set, no UserInput node should be created."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": "https://example.com"},
+        })
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
+
+    def test_neo4j_disconnected_with_user_urls_skips_graph_update(self):
+        """Graph update skipped when Neo4j is not reachable, but scan runs with user URLs."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"urls": ["https://example.com"], "url_attach_to": None},
+                "include_graph_targets": False,
+            },
+            neo4j_connected=False,
+        )
+        mocks["hakrawler_crawler"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_resource_enum.assert_not_called()
+
+    def test_invalid_urls_skipped(self):
+        """Invalid URLs are skipped, valid ones still scanned."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["not-a-url", "ftp://bad.com", "https://good.example.com"], "url_attach_to": None},
+        })
+        mocks["hakrawler_crawler"].assert_called_once()
+        call_args = mocks["hakrawler_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertIn("https://good.example.com", target_urls)
+        self.assertNotIn("not-a-url", target_urls)
+        self.assertNotIn("ftp://bad.com", target_urls)
+
+    def test_endpoints_marked_with_hakrawler_source(self):
+        """Organized endpoints should be tagged with sources=['hakrawler']."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["neo4j_client"].update_graph_from_resource_enum.call_args
+        recon_data = call_args[1].get("recon_data") or call_args[0][0]
+        resource_enum = recon_data.get("resource_enum", {})
+        by_base_url = resource_enum.get("by_base_url", {})
+        for base_url, base_data in by_base_url.items():
+            for path, endpoint in base_data["endpoints"].items():
+                self.assertEqual(endpoint["sources"], ["hakrawler"],
+                    f"Endpoint {path} should have sources=['hakrawler'], got {endpoint.get('sources')}")
+
+    def test_result_structure_has_required_keys(self):
+        """The result dict passed to graph update must have resource_enum with required keys."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["neo4j_client"].update_graph_from_resource_enum.call_args
+        recon_data = call_args[1].get("recon_data") or call_args[0][0]
+        resource_enum = recon_data.get("resource_enum", {})
+        self.assertIn("by_base_url", resource_enum)
+        self.assertIn("forms", resource_enum)
+        self.assertIn("scan_metadata", resource_enum)
+        self.assertIn("summary", resource_enum)
+        self.assertEqual(resource_enum["summary"]["total_endpoints"], 2)
+        self.assertEqual(resource_enum["summary"]["total_base_urls"], 1)
+        self.assertIn("external_domains", resource_enum)
+        self.assertEqual(resource_enum["external_domains"], ["external.com"])
+
+    def test_crawler_receives_correct_settings(self):
+        """Verify hakrawler_crawler is called with settings from get_settings."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["hakrawler_crawler"].call_args
+        # Positional: target_urls, docker_image, depth, threads, timeout, max_urls,
+        #             include_subs, insecure, allowed_hosts, custom_headers, exclude_patterns, use_proxy
+        self.assertEqual(call_args[0][1], "jauderho/hakrawler:latest")  # docker_image
+        self.assertEqual(call_args[0][2], 2)   # depth
+        self.assertEqual(call_args[0][3], 5)   # threads
+        self.assertEqual(call_args[0][4], 30)  # timeout
+        self.assertEqual(call_args[0][5], 500) # max_urls
+        self.assertEqual(call_args[0][6], False)  # include_subs
+        self.assertEqual(call_args[0][7], True)   # insecure
+        self.assertEqual(call_args[0][10], [])    # exclude_patterns (empty, not Katana's)
+
+    def test_duplicate_user_url_not_added_twice(self):
+        """If user provides a URL already in graph, it should not be duplicated."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://example.com"], "url_attach_to": None},
+        })
+        call_args = mocks["hakrawler_crawler"].call_args
+        target_urls = call_args[0][0]
+        self.assertEqual(target_urls.count("https://example.com"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

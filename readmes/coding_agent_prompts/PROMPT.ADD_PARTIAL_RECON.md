@@ -1,8 +1,9 @@
 # ADD PARTIAL RECON FOR A NEW PIPELINE SECTION
+# THIS IS THE TOO, SECTION TO IMPLEMENT: 
 
 Extend the partial recon system to support a new tool/section from the recon pipeline. Partial recon lets users run a single pipeline phase on demand from the workflow graph, without running the full pipeline. Results are merged into the existing Neo4j graph (always deduplicated via MERGE).
 
-> **Reference implementations**: SubdomainDiscovery, Naabu, and Masscan are fully implemented. **Study Naabu** (Subdomain + IP inputs) and **Masscan** (IP-only inputs), and **Nmap** as the primary patterns -- they demonstrate user inputs, graph querying, structured targets, and the full data flow.
+> **Reference implementations**: SubdomainDiscovery, Naabu, Masscan, Nmap, Httpx, and Katana are fully implemented. **Study Naabu** (Subdomain + IP inputs), **Masscan** (IP-only inputs), **Nmap** (IP + port inputs), and **Katana** (URL inputs) as the primary patterns -- they demonstrate user inputs, graph querying, structured targets, and the full data flow.
 
 ---
 
@@ -15,6 +16,9 @@ Extend the partial recon system to support a new tool/section from the recon pip
 | **Tool name** |      |
 | **Input nodes** |     |
 | **Output nodes** |    |
+| **Enriches** |    |
+
+How to manage input fields from modal:
 
 ### How input nodes determine the modal UI
 
@@ -29,9 +33,10 @@ Extend the partial recon system to support a new tool/section from the recon pip
 **Examples:**
 - Naabu: input nodes `['IP', 'Subdomain']`, user inputs = Subdomain + IP -> two textareas
 - Masscan: input nodes `['IP']`, user inputs = IP only -> one textarea (no subdomains)
-- Httpx: input nodes `['Subdomain', 'IP', 'Port']`, user inputs = Subdomain only -> one textarea (Port comes from graph)
-- Nmap: input nodes `['IP', 'Port']`, user inputs = IP only -> one textarea (Port comes from graph)
+- Nmap: input nodes `['IP', 'Port']`, user inputs = IP + Port -> two textareas
+- Httpx: input nodes `['Subdomain', 'IP', 'Port']`, user inputs = Subdomain + IP + Port -> three textareas
 - Katana: input nodes `['BaseURL']`, user inputs = URL only -> one textarea
+- Hakrawler: input nodes `['BaseURL']`, user inputs = URL only -> one textarea
 
 ---
 
@@ -238,6 +243,50 @@ No changes needed:
 - Phase progress hidden for partial recon via `hidePhaseProgress`
 - Status shows `"Scanning: <phase>"` instead of `"Phase 1/1: <phase>"`
 
+### 9. Frontend: Section Header "Run partial recon" Button
+
+File: `webapp/src/components/projects/ProjectForm/sections/<ToolName>Section.tsx`
+
+Each tool's settings section has a header with a Toggle switch. Add a "Run partial recon" button next to it so users can launch partial recon directly from the tab view (not just the workflow graph).
+
+**Pattern (already implemented for all existing tools):**
+
+1. Add `Play` to the lucide-react import
+2. Add `onRun?: () => void` to the section's props interface
+3. Destructure `onRun` in the component function
+4. Add the button inside `sectionHeaderRight`, before the Toggle:
+
+```tsx
+{onRun && data.<toolName>Enabled && (
+  <button
+    type="button"
+    onClick={(e) => { e.stopPropagation(); onRun() }}
+    style={{
+      display: 'inline-flex', alignItems: 'center', gap: '4px',
+      padding: '3px 8px', borderRadius: '4px',
+      border: '1px solid rgba(34, 197, 94, 0.3)',
+      backgroundColor: 'rgba(34, 197, 94, 0.1)',
+      color: '#22c55e', cursor: 'pointer', fontSize: '11px', fontWeight: 500,
+    }}
+    title="Run <ToolLabel>"
+  >
+    <Play size={10} /> Run partial recon
+  </button>
+)}
+```
+
+5. In `ProjectForm.tsx`, pass `onRun` when rendering the section:
+
+```tsx
+<ToolNameSection data={formData} updateField={updateField}
+  onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('<ToolName>') : undefined} />
+```
+
+**Key rules:**
+- Button only appears when `onRun` is provided (edit mode + existing project) AND the tool's toggle is enabled
+- `e.stopPropagation()` prevents the click from toggling the section open/closed
+- Clicking the button opens the PartialReconModal, then on confirm redirects to `/graph`
+
 ---
 
 ## File Reference
@@ -259,6 +308,8 @@ No changes needed:
 | `webapp/src/lib/recon-types.ts` | Extend `GraphInputs` / `UserTargets` if tool has new input types |
 | `recon/tests/test_partial_recon.py` | Add test class for new tool |
 | `webapp/src/lib/partial-recon-types.test.ts` | Update supported tools, phase map, type shape tests |
+| `webapp/src/components/.../sections/<ToolName>Section.tsx` | Add `onRun` prop + "Run partial recon" button in section header |
+| `webapp/src/components/.../ProjectForm.tsx` | Pass `onRun` prop to the tool's section component |
 
 ### Files you should NOT modify:
 
@@ -327,49 +378,6 @@ User provides IP (generic):
   Domain -[:HAS_USER_INPUT]-> UserInput -[:PRODUCED]-> IP -[:HAS_PORT]-> Port
 ```
 
----
-
-## Tool-Specific Notes
-
-### Port Scanning (Naabu) -- IMPLEMENTED
-- **Input nodes**: `['IP', 'Subdomain']`
-- **Tool function**: `run_port_scan(recon_data, settings=settings)` from `port_scan.py`
-- **Graph update**: `update_graph_from_port_scan()` -- Port, Service nodes
-- **Result key**: `port_scan`
-- **User inputs**: Subdomains (auto-attach to Domain) + IPs (dropdown: attach to subdomain or generic)
-- **Note**: `run_port_scan` mutates `recon_data` adding `port_scan` key. Docker-in-Docker. SYN scan with CONNECT fallback.
-
-### Port Scanning (Masscan) -- IMPLEMENTED
-- **Input nodes**: `['IP']` -- raw SYN packets, no hostname support
-- **Tool function**: `run_masscan_scan(recon_data, settings=settings)` from `masscan_scan.py`
-- **Graph update**: `update_graph_from_port_scan()` -- Port, Service nodes
-- **Result key**: `masscan_scan` (normalized to `port_scan` via `_normalize_masscan_result`)
-- **User inputs**: IPs only (dropdown: attach to subdomain or generic). **No subdomain textarea.**
-- **Force-enable**: `MASSCAN_ENABLED = True` (disabled by default in project settings)
-- **Note**: Shares `_run_port_scanner()` helper with Naabu. Incompatible with Tor (raw packets bypass TCP stack).
-
-### HTTP Probing (Httpx)
-- **Input from graph**: Subdomains + Ports
-- **Tool function**: `run_http_probe(recon_data, settings=settings)` from `http_probe.py`
-- **Graph update**: `update_graph_from_http_probe()` -- BaseURL, Technology, Header, Certificate
-- **User inputs**: Subdomains (auto-attach) + URLs (dropdown: attach to subdomain or generic)
-
-### Resource Enumeration (Katana, etc.)
-- **Input from graph**: BaseURLs
-- **Tool function**: `run_resource_enum(recon_data, settings=settings)` from `resource_enum.py`
-- **Graph update**: `update_graph_from_resource_enum()` -- Endpoint, Parameter
-- **User inputs**: URLs (dropdown: attach to BaseURL or generic)
-
-### Vulnerability Scanning (Nuclei)
-- **Input from graph**: BaseURLs + Endpoints
-- **Tool function**: `run_vuln_scan(recon_data, settings=settings)` from `vuln_scan.py`
-- **Graph update**: `update_graph_from_vuln_scan()` -- Vulnerability, CVE, MitreData, Capec
-- **User inputs**: URLs (dropdown: attach to BaseURL or generic)
-
-### JS Recon
-- **Input from graph**: BaseURLs + Endpoints (JS files)
-- **Tool function**: `run_js_recon(combined_result, settings)` from `js_recon.py`
-- **Graph update**: `update_graph_from_js_recon()` -- JsReconFinding, Secret, Endpoint
 
 ---
 

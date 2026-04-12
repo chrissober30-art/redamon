@@ -578,30 +578,7 @@ export function ProjectForm({
 
         {activeTab === 'discovery' && viewMode === 'tabs' && (
           <>
-            {mode === 'edit' && projectId && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => setPartialReconToolId('SubdomainDiscovery')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                    color: '#22c55e',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                  }}
-                >
-                  <Play size={12} /> Run Subdomain Discovery
-                </button>
-              </div>
-            )}
-            <SubdomainDiscoverySection data={formData} updateField={updateField} />
+            <SubdomainDiscoverySection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('SubdomainDiscovery') : undefined} />
             <ShodanSection data={formData} updateField={updateField} />
             <UrlscanSection data={formData} updateField={updateField} />
             <OsintEnrichmentSection data={formData} updateField={updateField} />
@@ -616,20 +593,20 @@ export function ProjectForm({
                 <span>Both port scanners are disabled. The recon pipeline will skip port scanning entirely &mdash; downstream modules (HTTP probe, vulnerability scanning) require open ports to function and will produce no results.</span>
               </div>
             )}
-            <NaabuSection data={formData} updateField={updateField} />
-            <NmapSection data={formData} updateField={updateField} />
-            <MasscanSection data={formData} updateField={updateField} />
+            <NaabuSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Naabu') : undefined} />
+            <NmapSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Nmap') : undefined} />
+            <MasscanSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Masscan') : undefined} />
           </>
         )}
 
         {activeTab === 'http' && viewMode === 'tabs' && (
-          <HttpxSection data={formData} updateField={updateField} />
+          <HttpxSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Httpx') : undefined} />
         )}
 
         {activeTab === 'resource' && viewMode === 'tabs' && (
           <>
-            <KatanaSection data={formData} updateField={updateField} />
-            <HakrawlerSection data={formData} updateField={updateField} />
+            <KatanaSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Katana') : undefined} />
+            <HakrawlerSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Hakrawler') : undefined} />
             <JsluiceSection data={formData} updateField={updateField} />
             <FfufSection data={formData} updateField={updateField} projectId={projectId} mode={mode} />
             <GauSection data={formData} updateField={updateField} />
