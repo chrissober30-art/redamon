@@ -110,6 +110,8 @@ export function WorkflowNodeModal({
       onClose={onClose}
       title={title}
       size="large"
+      closeOnOverlayClick={false}
+      closeOnEscape={false}
       headerActions={onSave && (
         <button
           type="button"
@@ -119,7 +121,7 @@ export function WorkflowNodeModal({
           style={{ fontSize: '12px', padding: '4px 12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
         >
           {isSaving ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={12} />}
-          {isSaving ? 'Saving...' : 'Save Project'}
+          {isSaving ? 'Saving...' : 'Update Settings'}
         </button>
       )}
     >

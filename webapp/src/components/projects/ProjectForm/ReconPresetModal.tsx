@@ -186,7 +186,7 @@ export function ReconPresetModal({
   const drawer = (
     <>
       {/* Overlay */}
-      <div className={styles.drawerOverlay} onClick={onClose} />
+      <div className={styles.drawerOverlay} />
 
       {/* Drawer */}
       <div className={styles.drawer} onClick={(e) => e.stopPropagation()}>
@@ -348,6 +348,8 @@ export function ReconPresetModal({
           onClose={() => setDetailPreset(null)}
           title={detailPreset.name}
           size="large"
+          closeOnOverlayClick={false}
+          closeOnEscape={false}
         >
           <div className={styles.detailBody}>
             {renderDescription(detailPreset.fullDescription)}

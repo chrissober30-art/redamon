@@ -29,6 +29,7 @@ interface WorkflowViewProps {
   mode: 'create' | 'edit'
   onSave?: () => Promise<void>
   onRunPartial?: (toolId: string) => void
+  onAutoSaveField?: <K extends keyof FormData>(field: K, value: FormData[K]) => void
 }
 
 const nodeTypes = {
@@ -41,7 +42,7 @@ const edgeTypes = {
   custom: CustomEdge,
 }
 
-export function WorkflowView({ formData, updateField, projectId, mode, onSave, onRunPartial }: WorkflowViewProps) {
+export function WorkflowView({ formData, updateField, projectId, mode, onSave, onRunPartial, onAutoSaveField }: WorkflowViewProps) {
   const [selectedToolId, setSelectedToolId] = useState<string | null>(mode === 'create' ? 'input' : null)
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null)
   const [badgeNodeType, setBadgeNodeType] = useState<string | null>(null)
@@ -54,7 +55,10 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
   // Inject callbacks into tool node data
   const handleToggle = useCallback((field: string, value: boolean) => {
     updateField(field as keyof FormData, value as FormData[keyof FormData])
-  }, [updateField])
+    if (onAutoSaveField) {
+      onAutoSaveField(field as keyof FormData, value as FormData[keyof FormData])
+    }
+  }, [updateField, onAutoSaveField])
 
   const handleOpenSettings = useCallback((toolId: string) => {
     setSelectedToolId(toolId)

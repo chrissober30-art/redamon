@@ -3584,6 +3584,73 @@ class TestRunShodan(unittest.TestCase):
         combined_result = call_args[0][0]
         self.assertEqual(combined_result["domain"], "example.com")
 
+    def test_shodan_user_ips_generic(self):
+        """User-provided IPs with no attach_to are injected into domain IPs."""
+        config = {
+            "domain": "example.com",
+            "user_targets": {"ips": ["10.0.0.1", "10.0.0.2"], "ip_attach_to": None},
+        }
+        mocks = self._run_with_mocks(config, graph_ips=[])
+        mocks["run_enrichment"].assert_called_once()
+        call_args = mocks["run_enrichment"].call_args
+        combined_result = call_args[0][0]
+        domain_ipv4 = combined_result["dns"]["domain"]["ips"]["ipv4"]
+        self.assertIn("10.0.0.1", domain_ipv4)
+        self.assertIn("10.0.0.2", domain_ipv4)
+
+    def test_shodan_user_ips_attached_to_subdomain(self):
+        """User-provided IPs attached to subdomain are injected into subdomain bucket."""
+        config = {
+            "domain": "example.com",
+            "user_targets": {"ips": ["10.0.0.1"], "ip_attach_to": "web.example.com"},
+        }
+        mocks = self._run_with_mocks(config, graph_ips=[])
+        mocks["run_enrichment"].assert_called_once()
+        call_args = mocks["run_enrichment"].call_args
+        combined_result = call_args[0][0]
+        self.assertIn("web.example.com", combined_result["dns"]["subdomains"])
+        sub_ipv4 = combined_result["dns"]["subdomains"]["web.example.com"]["ips"]["ipv4"]
+        self.assertIn("10.0.0.1", sub_ipv4)
+
+    def test_shodan_user_ips_with_graph(self):
+        """User IPs are merged with graph IPs."""
+        config = {
+            "domain": "example.com",
+            "user_targets": {"ips": ["10.0.0.1"], "ip_attach_to": None},
+        }
+        graph_ips = [{"address": "1.2.3.4", "version": "ipv4"}]
+        mocks = self._run_with_mocks(config, graph_ips=graph_ips)
+        mocks["run_enrichment"].assert_called_once()
+        call_args = mocks["run_enrichment"].call_args
+        combined_result = call_args[0][0]
+        domain_ipv4 = combined_result["dns"]["domain"]["ips"]["ipv4"]
+        self.assertIn("10.0.0.1", domain_ipv4)
+
+    def test_shodan_user_ips_no_graph(self):
+        """User IPs alone (no graph targets) still trigger enrichment."""
+        config = {
+            "domain": "example.com",
+            "include_graph_targets": False,
+            "user_targets": {"ips": ["192.168.1.1"], "ip_attach_to": None},
+        }
+        mocks = self._run_with_mocks(config, graph_ips=[])
+        mocks["run_enrichment"].assert_called_once()
+
+    def test_shodan_invalid_ips_skipped(self):
+        """Invalid IPs are skipped during validation."""
+        config = {
+            "domain": "example.com",
+            "user_targets": {"ips": ["10.0.0.1", "not-an-ip", "192.168.1.1"], "ip_attach_to": None},
+        }
+        mocks = self._run_with_mocks(config, graph_ips=[])
+        mocks["run_enrichment"].assert_called_once()
+        call_args = mocks["run_enrichment"].call_args
+        combined_result = call_args[0][0]
+        domain_ipv4 = combined_result["dns"]["domain"]["ips"]["ipv4"]
+        self.assertIn("10.0.0.1", domain_ipv4)
+        self.assertIn("192.168.1.1", domain_ipv4)
+        self.assertNotIn("not-an-ip", domain_ipv4)
+
 
 class TestShodanMainDispatcher(unittest.TestCase):
     """Test that main() correctly dispatches to run_shodan."""

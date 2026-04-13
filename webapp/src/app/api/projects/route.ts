@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import prisma from '@/lib/prisma'
+import { getSession } from '@/app/api/graph/neo4j'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8080'
 
@@ -240,6 +241,24 @@ export async function POST(request: NextRequest) {
         ...sanitizedParams
       }
     })
+
+    // Create Domain node in Neo4j so it's visible in the graph immediately
+    if (!ipMode && project.targetDomain) {
+      try {
+        const session = getSession()
+        try {
+          await session.run(
+            `MERGE (d:Domain {name: $name, user_id: $userId, project_id: $projectId})
+             ON CREATE SET d.source = 'project_creation', d.updated_at = datetime()`,
+            { name: project.targetDomain, userId: project.userId, projectId: project.id }
+          )
+        } finally {
+          await session.close()
+        }
+      } catch (e) {
+        console.warn('Failed to create Domain node in Neo4j on project creation:', e)
+      }
+    }
 
     // Sync JS Recon files uploaded during creation (before project existed in DB)
     if (clientId) {

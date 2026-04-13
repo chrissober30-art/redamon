@@ -30,16 +30,31 @@ URLSCAN_API_BASE = "https://urlscan.io/api/v1"
 
 
 def _urlscan_search(domain: str, api_key: str, max_results: int = 500, key_rotator=None) -> list[dict]:
-    """Query URLScan.io Search API for domain results."""
+    """Query URLScan.io Search API for domain results.
+
+    Uses page.domain field for accurate matching:
+    - Without API key: exact match on page.domain (root domain only)
+    - With API key: also searches page.domain:*.domain for subdomain discovery
+    """
     effective_key = key_rotator.current_key if key_rotator and key_rotator.has_keys else api_key
     url = f"{URLSCAN_API_BASE}/search/"
+
+    # page.domain: matches the actual page domain (not a full-text index)
+    # Wildcard *.domain requires authentication (403 for anonymous users)
+    if effective_key:
+        query = f"page.domain:{domain} OR page.domain:*.{domain}"
+    else:
+        query = f"page.domain:{domain}"
+
     params = {
-        "q": f"domain:{domain}",
+        "q": query,
         "size": min(max_results, 10000),
     }
     headers = {}
     if effective_key:
         headers["API-Key"] = effective_key
+
+    all_results = []
 
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=60)
@@ -49,10 +64,10 @@ def _urlscan_search(domain: str, api_key: str, max_results: int = 500, key_rotat
             data = resp.json()
             results = data.get("results", [])
             logger.info(f"URLScan search returned {len(results)} results for {domain}")
-            return results
+            all_results.extend(results)
         elif resp.status_code == 429:
             logger.warning("URLScan rate limit hit")
-            print("[!][URLScan] Rate limit hit — try adding an API key in Global Settings")
+            print("[!][URLScan] Rate limit hit -- try adding an API key in Global Settings")
             return []
         else:
             logger.warning(f"URLScan {resp.status_code}: {resp.text[:200]}")
@@ -62,6 +77,8 @@ def _urlscan_search(domain: str, api_key: str, max_results: int = 500, key_rotat
         logger.warning(f"URLScan request failed: {e}")
         print(f"[!][URLScan] Request failed: {e}")
         return []
+
+    return all_results
 
 
 def _parse_url_path(full_url: str) -> dict | None:

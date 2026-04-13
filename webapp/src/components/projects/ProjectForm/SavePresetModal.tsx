@@ -64,6 +64,8 @@ export function SavePresetModal({ isOpen, onClose, formData, userId }: SavePrese
       isOpen={isOpen}
       onClose={onClose}
       title="Save as Preset"
+      closeOnOverlayClick={false}
+      closeOnEscape={false}
       footer={
         <>
           <button

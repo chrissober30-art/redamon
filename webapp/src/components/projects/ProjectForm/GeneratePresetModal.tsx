@@ -194,6 +194,8 @@ export function GeneratePresetModal({
         onClose={onClose}
         title="Generate Recon Preset with AI"
         size="large"
+        closeOnOverlayClick={false}
+        closeOnEscape={false}
         footer={
           <>
             <button type="button" className="secondaryButton" onClick={onClose} disabled={isGenerating}>
@@ -263,6 +265,8 @@ export function GeneratePresetModal({
       onClose={onClose}
       title="Review Generated Preset"
       size="large"
+      closeOnOverlayClick={false}
+      closeOnEscape={false}
       footer={
         <>
           <button type="button" className="secondaryButton" onClick={handleRegenerate} disabled={isSaving}>

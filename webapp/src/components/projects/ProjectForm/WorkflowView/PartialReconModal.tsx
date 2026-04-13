@@ -16,6 +16,47 @@ interface PartialReconModalProps {
   targetDomain?: string
   subdomainPrefixes?: string[]
   isStarting?: boolean
+  userId?: string
+}
+
+// --- API key requirements per tool ---
+// Each entry maps a tool ID to the API keys it benefits from.
+// `key`: the camelCase field name from /api/users/:id/settings
+// `label`: human-readable name shown in the warning
+// `impact`: what happens without it
+interface ApiKeyReq { key: string; label: string; impact: string }
+
+const TOOL_API_KEYS: Record<string, ApiKeyReq[]> = {
+  Shodan: [
+    { key: 'shodanApiKey', label: 'Shodan', impact: 'Falls back to InternetDB (free) -- no geolocation, banners, or Domain DNS.' },
+  ],
+  Urlscan: [
+    { key: 'urlscanApiKey', label: 'URLScan.io', impact: 'Public results only with lower rate limits.' },
+  ],
+  Gau: [
+    { key: 'urlscanApiKey', label: 'URLScan.io', impact: 'GAU URLScan source will have lower rate limits.' },
+  ],
+  Uncover: [
+    { key: 'shodanApiKey', label: 'Shodan', impact: 'Shodan engine disabled.' },
+    { key: 'censysApiToken', label: 'Censys', impact: 'Censys engine disabled.' },
+    { key: 'fofaApiKey', label: 'FOFA', impact: 'FOFA engine disabled.' },
+    { key: 'zoomEyeApiKey', label: 'ZoomEye', impact: 'ZoomEye engine disabled.' },
+    { key: 'netlasApiKey', label: 'Netlas', impact: 'Netlas engine disabled.' },
+    { key: 'criminalIpApiKey', label: 'Criminal IP', impact: 'Criminal IP engine disabled.' },
+  ],
+  OsintEnrichment: [
+    { key: 'censysApiToken', label: 'Censys', impact: 'Censys enrichment disabled.' },
+    { key: 'fofaApiKey', label: 'FOFA', impact: 'FOFA enrichment disabled.' },
+    { key: 'otxApiKey', label: 'OTX', impact: 'OTX limited to public data.' },
+    { key: 'netlasApiKey', label: 'Netlas', impact: 'Netlas enrichment disabled.' },
+    { key: 'virusTotalApiKey', label: 'VirusTotal', impact: 'VirusTotal enrichment disabled.' },
+    { key: 'zoomEyeApiKey', label: 'ZoomEye', impact: 'ZoomEye enrichment disabled.' },
+    { key: 'criminalIpApiKey', label: 'Criminal IP', impact: 'Criminal IP enrichment disabled.' },
+  ],
+  Nuclei: [
+    { key: 'nvdApiKey', label: 'NVD', impact: 'CVE lookup rate-limited (no key).' },
+    { key: 'vulnersApiKey', label: 'Vulners', impact: 'Vulners CVE enrichment disabled.' },
+  ],
 }
 
 const TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -230,9 +271,11 @@ export function PartialReconModal({
   targetDomain = '',
   subdomainPrefixes = [],
   isStarting = false,
+  userId,
 }: PartialReconModalProps) {
   const [graphInputs, setGraphInputs] = useState<GraphInputs | null>(null)
   const [loadingInputs, setLoadingInputs] = useState(false)
+  const [userSettings, setUserSettings] = useState<Record<string, string> | null>(null)
   const [customSubdomains, setCustomSubdomains] = useState('')
   const [customIps, setCustomIps] = useState('')
   const [ipAttachTo, setIpAttachTo] = useState<string | null>(null)
@@ -240,6 +283,11 @@ export function PartialReconModal({
   const [customUrls, setCustomUrls] = useState('')
   const [urlAttachTo, setUrlAttachTo] = useState<string | null>(null)
   const [includeGraphTargets, setIncludeGraphTargets] = useState(true)
+
+  // Nuclei sub-feature toggles (override project settings)
+  const [nucleiCveLookup, setNucleiCveLookup] = useState(true)
+  const [nucleiMitre, setNucleiMitre] = useState(true)
+  const [nucleiSecurityChecks, setNucleiSecurityChecks] = useState(true)
 
   // JS file upload state (JsRecon only)
   const [uploadedJsFiles, setUploadedJsFiles] = useState<{ name: string; size: number; uploaded_at: string }[]>([])
@@ -257,6 +305,9 @@ export function PartialReconModal({
     setCustomUrls('')
     setUrlAttachTo(null)
     setIncludeGraphTargets(true)
+    setNucleiCveLookup(true)
+    setNucleiMitre(true)
+    setNucleiSecurityChecks(true)
     setUploadedJsFiles([])
     setUploadError(null)
     fetch(`/api/recon/${projectId}/graph-inputs/${toolId}`)
@@ -276,7 +327,16 @@ export function PartialReconModal({
         .then(data => setUploadedJsFiles(data?.files || []))
         .catch(() => setUploadedJsFiles([]))
     }
-  }, [isOpen, toolId, projectId, targetDomain])
+    // Fetch user settings for API key warnings (only for tools that need keys)
+    if (userId && TOOL_API_KEYS[toolId]) {
+      fetch(`/api/users/${userId}/settings`)
+        .then(r => r.ok ? r.json() : null)
+        .then(s => setUserSettings(s || {}))
+        .catch(() => setUserSettings(null))
+    } else {
+      setUserSettings(null)
+    }
+  }, [isOpen, toolId, projectId, targetDomain, userId])
 
   // JS file upload handlers (JsRecon only)
   const handleJsFileUpload = useCallback(async (file: File) => {
@@ -327,11 +387,13 @@ export function PartialReconModal({
   const isArjun = toolId === 'Arjun'
   const isGau = toolId === 'Gau'
   const isParamSpider = toolId === 'ParamSpider'
-  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum || isArjun || isGau || isParamSpider
-  const hasIpInput = isPortScanner || isNmap || isHttpx
-  const hasSubdomainInput = toolId === 'Naabu' || isHttpx || isGau || isParamSpider
+  const isShodan = toolId === 'Shodan'
+  const isOsintEnrichment = toolId === 'OsintEnrichment'
+  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum || isArjun || isGau || isParamSpider || isSecurityChecks || isShodan || isOsintEnrichment
+  const hasIpInput = isPortScanner || isNmap || isHttpx || isSecurityChecks || isShodan || isOsintEnrichment
+  const hasSubdomainInput = toolId === 'Naabu' || isHttpx || isGau || isParamSpider || isSecurityChecks
   const hasPortInput = isNmap || isHttpx
-  const hasUrlInput = isResourceEnum || isArjun
+  const hasUrlInput = isResourceEnum || isArjun || isSecurityChecks
 
   // Subdomain validation
   const subdomainValidation = useMemo(
@@ -361,6 +423,12 @@ export function PartialReconModal({
     || (hasIpInput && ipValidation.errors.length > 0)
     || (hasPortInput && portValidation.errors.length > 0)
     || (hasUrlInput && urlValidation.errors.length > 0)
+
+  // Compute missing API keys for the current tool
+  const missingApiKeys = useMemo(() => {
+    if (!toolId || !userSettings || !TOOL_API_KEYS[toolId]) return []
+    return TOOL_API_KEYS[toolId].filter(req => !userSettings[req.key])
+  }, [toolId, userSettings])
 
   // Build dropdown options: graph subdomains + custom subdomains (live)
   const attachToOptions = useMemo(() => {
@@ -417,24 +485,44 @@ export function PartialReconModal({
           }
         : undefined
 
+      // Build Nuclei settings overrides from modal checkboxes
+      const nucleiOverrides = isNuclei ? {
+        settings_overrides: {
+          CVE_LOOKUP_ENABLED: nucleiCveLookup,
+          MITRE_ENABLED: nucleiMitre,
+          SECURITY_CHECK_ENABLED: nucleiSecurityChecks,
+        },
+      } : {}
+
       const params = {
         tool_id: toolId || '',
         graph_inputs: { domain },
         user_inputs: [],
         user_targets: userTargets,
         ...(includeGraphTargets ? {} : { include_graph_targets: false }),
+        ...nucleiOverrides,
       }
       console.log('[PartialReconModal] handleRun params:', JSON.stringify(params))
       onConfirm(params)
     } else {
+      // Build Nuclei settings overrides from modal checkboxes
+      const nucleiOverrides = isNuclei ? {
+        settings_overrides: {
+          CVE_LOOKUP_ENABLED: nucleiCveLookup,
+          MITRE_ENABLED: nucleiMitre,
+          SECURITY_CHECK_ENABLED: nucleiSecurityChecks,
+        },
+      } : {}
+
       onConfirm({
         tool_id: toolId || '',
         graph_inputs: { domain },
         user_inputs: [],
         ...(includeGraphTargets ? {} : { include_graph_targets: false }),
+        ...nucleiOverrides,
       })
     }
-  }, [domain, hasValidationErrors, hasUserInputs, hasSubdomainInput, hasIpInput, hasPortInput, hasUrlInput, isNmap, toolId, onConfirm, customSubdomains, customIps, ipAttachTo, customPorts, customUrls, urlAttachTo, includeGraphTargets])
+  }, [domain, hasValidationErrors, hasUserInputs, hasSubdomainInput, hasIpInput, hasPortInput, hasUrlInput, isNmap, toolId, onConfirm, customSubdomains, customIps, ipAttachTo, customPorts, customUrls, urlAttachTo, includeGraphTargets, isNuclei, nucleiCveLookup, nucleiMitre, nucleiSecurityChecks])
 
   if (!isOpen || !toolId) return null
 
@@ -458,9 +546,9 @@ export function PartialReconModal({
   const httpxNoPorts = isHttpx && !includeGraphTargets && !customPorts.trim() && !customSubdomains.trim()
   const resourceEnumNoUrls = isResourceEnum && !includeGraphTargets && !customUrls.trim() && !hasJsUploads
   const arjunNoUrls = isArjun && !includeGraphTargets && !customUrls.trim()
-  const securityChecksNoTargets = isSecurityChecks && hasNoGraphTargets
-  const shodanNoIps = toolId === 'Shodan' && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0
-  const osintNoIps = toolId === 'OsintEnrichment' && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0
+  const securityChecksNoUrls = isSecurityChecks && !includeGraphTargets && !customUrls.trim() && !customSubdomains.trim() && !customIps.trim()
+  const shodanNoIps = isShodan && !includeGraphTargets && !customIps.trim()
+  const osintNoIps = isOsintEnrichment && !includeGraphTargets && !customIps.trim()
 
   return (
     <Modal
@@ -468,6 +556,8 @@ export function PartialReconModal({
       onClose={onClose}
       title={`Partial Recon: ${WORKFLOW_TOOLS.find(t => t.id === toolId)?.label || toolId}`}
       size="default"
+      closeOnOverlayClick={false}
+      closeOnEscape={false}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {/* Input / Output flow */}
@@ -557,6 +647,27 @@ export function PartialReconModal({
           {TOOL_DESCRIPTIONS[toolId] || 'Runs this pipeline phase independently and merges results into the existing graph.'}
         </div>
 
+        {/* API key warning */}
+        {missingApiKeys.length > 0 && (
+          <div style={{
+            fontSize: '11px', color: '#facc15', lineHeight: '1.6', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(234, 179, 8, 0.08)', border: '1px solid rgba(234, 179, 8, 0.2)',
+            display: 'flex', flexDirection: 'column', gap: '4px',
+          }}>
+            <div style={{ fontWeight: 600 }}>
+              Missing API {missingApiKeys.length === 1 ? 'key' : 'keys'} -- results may be limited:
+            </div>
+            {missingApiKeys.map(req => (
+              <div key={req.key} style={{ paddingLeft: '8px' }}>
+                <span style={{ fontWeight: 600 }}>{req.label}:</span> {req.impact}
+              </div>
+            ))}
+            <div style={{ fontSize: '10px', color: 'var(--text-muted, #64748b)', marginTop: '2px' }}>
+              Configure API keys in Global Settings to get full results.
+            </div>
+          </div>
+        )}
+
         {/* Include graph targets checkbox */}
         {hasUserInputs && (
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
@@ -593,7 +704,7 @@ export function PartialReconModal({
               : isSecurityChecks
               ? 'No IPs, subdomains, or BaseURLs found in graph. Run Subdomain Discovery and HTTP Probing first to populate the graph.'
               : toolId === 'Shodan'
-              ? 'No IPs found in graph. Run Subdomain Discovery first to populate IPs for Shodan enrichment.'
+              ? 'No IPs found in graph. Run Subdomain Discovery first to populate IPs, or provide custom IPs below.'
               : toolId === 'OsintEnrichment'
               ? 'No IPs found in graph. Run Subdomain Discovery first to populate IPs for OSINT enrichment.'
               : 'No IPs found in graph. Run Subdomain Discovery first to populate the graph, or provide custom targets below.'}
@@ -643,6 +754,30 @@ export function PartialReconModal({
             backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
           }}>
             Arjun requires endpoints to test for parameters. Provide custom URLs below or enable graph targets (which include existing BaseURLs + Endpoints from crawling).
+          </div>
+        )}
+        {securityChecksNoUrls && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            Security Checks require targets to scan. Provide custom subdomains, IPs, or URLs below, or enable graph targets.
+          </div>
+        )}
+        {shodanNoIps && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            Shodan requires IPs to enrich. Provide custom IPs below or enable graph targets (which include existing IPs from Subdomain Discovery).
+          </div>
+        )}
+        {osintNoIps && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            OSINT Enrichment requires IPs to enrich. Provide custom IPs below or enable graph targets (which include existing IPs from Subdomain Discovery).
           </div>
         )}
 
@@ -904,6 +1039,32 @@ export function PartialReconModal({
           </div>
         )}
 
+        {/* Nuclei sub-feature toggles */}
+        {isNuclei && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: '6px',
+            padding: '10px 12px', borderRadius: '6px',
+            backgroundColor: 'var(--bg-secondary, #1e293b)',
+            border: '1px solid var(--border-color, #334155)',
+          }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary, #94a3b8)', marginBottom: '2px' }}>
+              Additional scans (override project settings)
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={nucleiCveLookup} onChange={e => setNucleiCveLookup(e.target.checked)} style={{ accentColor: '#3b82f6' }} />
+              <span style={{ fontSize: '12px', color: 'var(--text-primary, #e2e8f0)' }}>CVE Lookup (enrich findings with NVD/Vulners data)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={nucleiMitre} onChange={e => setNucleiMitre(e.target.checked)} style={{ accentColor: '#3b82f6' }} />
+              <span style={{ fontSize: '12px', color: 'var(--text-primary, #e2e8f0)' }}>MITRE ATT&CK Mapping (map vulnerabilities to techniques)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={nucleiSecurityChecks} onChange={e => setNucleiSecurityChecks(e.target.checked)} style={{ accentColor: '#3b82f6' }} />
+              <span style={{ fontSize: '12px', color: 'var(--text-primary, #e2e8f0)' }}>Security Checks (TLS, headers, direct IP access, DNS)</span>
+            </label>
+          </div>
+        )}
+
         {/* Actions */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color, #334155)' }}>
           <button
@@ -926,14 +1087,14 @@ export function PartialReconModal({
           <button
             type="button"
             onClick={handleRun}
-            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || arjunNoUrls || securityChecksNoTargets || shodanNoIps || osintNoIps}
+            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || arjunNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps}
             style={{
               padding: '8px 16px', borderRadius: '6px', border: 'none',
               backgroundColor: '#3b82f6', color: '#fff',
-              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || arjunNoUrls || securityChecksNoTargets || shodanNoIps || osintNoIps ? 'not-allowed' : 'pointer',
+              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || arjunNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               display: 'flex', alignItems: 'center', gap: '6px',
-              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || arjunNoUrls || securityChecksNoTargets || shodanNoIps || osintNoIps ? 0.5 : 1,
+              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || arjunNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps ? 0.5 : 1,
             }}
           >
             {isStarting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}

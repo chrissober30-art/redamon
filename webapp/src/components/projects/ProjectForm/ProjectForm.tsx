@@ -235,6 +235,27 @@ export function ProjectForm({
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  // Auto-save a single toggle field directly to DB (used in workflow mode)
+  const autoSaveField = useCallback(async <K extends keyof ProjectFormData>(
+    field: K,
+    value: ProjectFormData[K]
+  ) => {
+    if (!projectId || mode !== 'edit') return
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error || 'Failed to save')
+      }
+    } catch {
+      toast.error('Failed to save setting')
+    }
+  }, [projectId, mode, toast])
+
   const updateMultipleFields = (fields: Partial<ProjectFormData>) => {
     setFormData(prev => ({ ...prev, ...fields }))
   }
@@ -434,24 +455,26 @@ export function ProjectForm({
               Export
             </button>
           )}
-          <button
-            type="submit"
-            className="primaryButton"
-            disabled={!canSubmit}
-            title={mode === 'create' ? 'Create the project with the current settings and start working' : 'Save all changes to the project settings'}
-          >
-            {isLoadingDefaults ? (
-              <>
-                <Loader2 size={14} className={styles.spinner} />
-                Loading...
-              </>
-            ) : (
-              <>
-                <Save size={14} />
-                {isSubmitting ? 'Saving...' : 'Save Project'}
-              </>
-            )}
-          </button>
+          {!(mode === 'edit' && viewMode === 'workflow') && (
+            <button
+              type="submit"
+              className="primaryButton"
+              disabled={!canSubmit}
+              title={mode === 'create' ? 'Create the project with the current settings and start working' : 'Save all changes to the project settings'}
+            >
+              {isLoadingDefaults ? (
+                <>
+                  <Loader2 size={14} className={styles.spinner} />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <Save size={14} />
+                  {isSubmitting ? 'Saving...' : mode === 'edit' ? 'Update Settings' : 'Save Project'}
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -555,6 +578,7 @@ export function ProjectForm({
                 mode={mode}
                 onSave={onSaveAndStay ? handleSaveAndStay : undefined}
                 onRunPartial={(toolId) => setPartialReconToolId(toolId)}
+                onAutoSaveField={autoSaveField}
               />
             )}
 
@@ -699,6 +723,7 @@ export function ProjectForm({
         targetDomain={formData.targetDomain || ''}
         subdomainPrefixes={formData.subdomainList as string[] || []}
         isStarting={isPartialReconStarting}
+        userId={userId}
       />
 
       {/* Guardrail block modal */}

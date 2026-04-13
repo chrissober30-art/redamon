@@ -104,6 +104,24 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       data: updateData
     })
 
+    // Ensure Domain node exists in Neo4j (create if missing, update if domain changed)
+    if (!project.ipMode && project.targetDomain) {
+      try {
+        const session = getSession()
+        try {
+          await session.run(
+            `MERGE (d:Domain {name: $name, user_id: $userId, project_id: $projectId})
+             ON CREATE SET d.source = 'project_creation', d.updated_at = datetime()`,
+            { name: project.targetDomain, userId: project.userId, projectId: project.id }
+          )
+        } finally {
+          await session.close()
+        }
+      } catch (e) {
+        console.warn('Failed to ensure Domain node in Neo4j on project update:', e)
+      }
+    }
+
     // Exclude binary document data from response (same as GET)
     const { roeDocumentData: _binary, ...projectWithoutBinary } = project
     return NextResponse.json(projectWithoutBinary)

@@ -4112,12 +4112,21 @@ def run_jsrecon(config: dict) -> None:
             if url not in target_urls:
                 target_urls.append(url)
 
-    if not target_urls:
-        print("[!][Partial Recon] No URLs to analyze (graph has no BaseURLs/Endpoints and no valid user URLs provided).")
-        print("[!][Partial Recon] Run HTTP Probing (Httpx) and Resource Enumeration (Katana/Hakrawler) first, or provide URLs manually.")
+    # Check for uploaded JS files (they're loaded by run_js_recon internally)
+    has_uploaded_files = False
+    upload_dir = Path(f'/data/js-recon-uploads/{project_id}')
+    if upload_dir.exists():
+        uploaded = [f for f in upload_dir.iterdir() if f.is_file()]
+        if uploaded:
+            has_uploaded_files = True
+            print(f"[+][Partial Recon] Found {len(uploaded)} uploaded JS file(s) in {upload_dir}")
+
+    if not target_urls and not has_uploaded_files:
+        print("[!][Partial Recon] No URLs to analyze and no uploaded JS files found.")
+        print("[!][Partial Recon] Run HTTP Probing (Httpx) and Resource Enumeration (Katana/Hakrawler) first, provide URLs manually, or upload JS files.")
         sys.exit(1)
 
-    print(f"[+][Partial Recon] Total {len(target_urls)} URLs for JS Recon analysis")
+    print(f"[+][Partial Recon] Total {len(target_urls)} URLs for JS Recon analysis{f' + {len(uploaded)} uploaded files' if has_uploaded_files else ''}")
 
     # Build a combined_result structure that run_js_recon expects
     # It reads from resource_enum.discovered_urls and http_probe.by_url
@@ -4408,6 +4417,11 @@ def run_nuclei(config: dict) -> None:
     # Force-enable Nuclei since the user explicitly chose to run it
     settings['NUCLEI_ENABLED'] = True
 
+    # Apply settings_overrides from modal checkboxes (bypass DB settings)
+    settings_overrides = config.get("settings_overrides") or {}
+    for key, value in settings_overrides.items():
+        settings[key] = value
+
     print(f"\n{'=' * 50}")
     print(f"[*][Partial Recon] Nuclei Vulnerability Scanning")
     print(f"[*][Partial Recon] Domain: {domain}")
@@ -4508,25 +4522,18 @@ def run_nuclei(config: dict) -> None:
         except Exception as e:
             print(f"[!][Partial Recon] MITRE enrichment failed: {e}")
 
-    # Update the graph database
-    print(f"[*][Partial Recon] Updating graph database...")
-    try:
-        from graph_db import Neo4jClient
-        with Neo4jClient() as graph_client:
-            if graph_client.verify_connection():
-                stats = graph_client.update_graph_from_vuln_scan(
-                    recon_data=result,
-                    user_id=user_id,
-                    project_id=project_id,
-                )
-
-                # Link user-provided URLs to graph
-                if user_urls:
-                    from urllib.parse import urlparse as _urlparse
+    # Pre-create BaseURL + UserInput BEFORE graph update so vuln_scan can find and attach to them
+    if user_urls:
+        print(f"[*][Partial Recon] Pre-creating BaseURL nodes for user-provided URLs...")
+        try:
+            from graph_db import Neo4jClient
+            from urllib.parse import urlparse as _urlparse
+            with Neo4jClient() as graph_client:
+                if graph_client.verify_connection():
                     driver = graph_client.driver
                     with driver.session() as session:
                         if url_attach_to:
-                            # Verify the BaseURL still exists
+                            # Verify the attachment BaseURL still exists
                             check = session.run(
                                 """
                                 MATCH (b:BaseURL {url: $url, user_id: $uid, project_id: $pid})
@@ -4542,7 +4549,6 @@ def run_nuclei(config: dict) -> None:
                                 url_attach_to = None
 
                         if needs_user_input:
-                            # Create UserInput node for orphan URLs
                             import uuid
                             user_input_id = str(uuid.uuid4())
                             session.run(
@@ -4558,17 +4564,50 @@ def run_nuclei(config: dict) -> None:
                                 domain=domain, uid=user_id, pid=project_id,
                                 ui_id=user_input_id, urls=user_urls,
                             )
-                            # Link UserInput to any BaseURLs created from user URLs
-                            for url in user_urls:
+
+                        # Create BaseURL nodes for each user URL (so vuln_scan attaches findings here)
+                        for url in user_urls:
+                            parsed = _urlparse(url)
+                            base_url = f"{parsed.scheme}://{parsed.netloc}"
+                            if needs_user_input:
                                 session.run(
                                     """
                                     MATCH (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
-                                    MATCH (b:BaseURL {url: $url, user_id: $uid, project_id: $pid})
+                                    MERGE (b:BaseURL {url: $url, user_id: $uid, project_id: $pid})
+                                    ON CREATE SET b.host = $host,
+                                                  b.source = 'partial_recon_user_input',
+                                                  b.updated_at = datetime()
                                     MERGE (ui)-[:PRODUCED]->(b)
                                     """,
-                                    ui_id=user_input_id, uid=user_id, pid=project_id, url=url,
+                                    ui_id=user_input_id, uid=user_id, pid=project_id,
+                                    url=base_url, host=parsed.netloc.split(":")[0],
                                 )
-                            print(f"[+][Partial Recon] Created UserInput + linked user URLs via PRODUCED")
+                            else:
+                                session.run(
+                                    """
+                                    MERGE (b:BaseURL {url: $url, user_id: $uid, project_id: $pid})
+                                    ON CREATE SET b.host = $host,
+                                                  b.source = 'partial_recon_user_input',
+                                                  b.updated_at = datetime()
+                                    """,
+                                    uid=user_id, pid=project_id,
+                                    url=base_url, host=parsed.netloc.split(":")[0],
+                                )
+                        print(f"[+][Partial Recon] Pre-created BaseURL + UserInput nodes for user URLs")
+        except Exception as e:
+            print(f"[!][Partial Recon] Failed to pre-create BaseURL nodes: {e}")
+
+    # Update the graph database (vuln_scan will find the BaseURLs and attach findings to them)
+    print(f"[*][Partial Recon] Updating graph database...")
+    try:
+        from graph_db import Neo4jClient
+        with Neo4jClient() as graph_client:
+            if graph_client.verify_connection():
+                stats = graph_client.update_graph_from_vuln_scan(
+                    recon_data=result,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
 
                 print(f"[+][Partial Recon] Graph updated successfully")
                 print(f"[+][Partial Recon] Stats: {json.dumps(stats, default=str)}")
@@ -4586,8 +4625,8 @@ def run_security_checks_partial(config: dict) -> None:
     Run partial security checks (Direct IP Access, TLS/SSL, Security Headers, DNS, etc.)
 
     Uses the same run_security_checks() function from the full pipeline.
-    Targets are loaded from the graph (IPs, subdomains, BaseURLs).
-    No user-provided inputs -- security checks operate on existing graph data.
+    Targets are loaded from the graph (IPs, subdomains, BaseURLs) and/or
+    user-provided custom subdomains, IPs, and URLs.
     Results are stored as Vulnerability nodes via update_graph_from_vuln_scan.
     """
     from recon.helpers import run_security_checks
@@ -4608,6 +4647,61 @@ def run_security_checks_partial(config: dict) -> None:
     print(f"[*][Partial Recon] Security Checks")
     print(f"[*][Partial Recon] Domain: {domain}")
     print(f"{'=' * 50}\n")
+
+    # Parse user targets
+    user_targets = config.get("user_targets") or {}
+    user_subdomains = []
+    user_ips = []
+    user_urls = []
+    ip_attach_to = None
+    url_attach_to = None
+
+    if user_targets:
+        # Validate subdomains
+        for entry in user_targets.get("subdomains", []):
+            entry = entry.strip().lower()
+            if entry and _is_valid_hostname(entry):
+                if entry.endswith("." + domain) or entry == domain:
+                    user_subdomains.append(entry)
+                else:
+                    print(f"[!][Partial Recon] Skipping out-of-scope subdomain: {entry}")
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid hostname: {entry}")
+
+        # Validate IPs
+        for entry in user_targets.get("ips", []):
+            entry = entry.strip()
+            if entry and _is_ip_or_cidr(entry):
+                user_ips.append(entry)
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid IP: {entry}")
+
+        ip_attach_to = user_targets.get("ip_attach_to")
+
+        # Validate URLs
+        for entry in user_targets.get("urls", []):
+            entry = entry.strip()
+            if entry and _is_valid_url(entry):
+                user_urls.append(entry)
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid URL: {entry}")
+
+        url_attach_to = user_targets.get("url_attach_to")
+
+    if user_subdomains:
+        print(f"[+][Partial Recon] Validated {len(user_subdomains)} custom subdomains")
+    if user_ips:
+        print(f"[+][Partial Recon] Validated {len(user_ips)} custom IPs")
+        if ip_attach_to:
+            print(f"[+][Partial Recon] IPs will be attached to subdomain: {ip_attach_to}")
+    if user_urls:
+        print(f"[+][Partial Recon] Validated {len(user_urls)} custom URLs")
+        if url_attach_to:
+            print(f"[+][Partial Recon] URLs will be attached to BaseURL: {url_attach_to}")
+
+    # Track whether we need UserInput nodes
+    needs_ip_user_input = bool(user_ips and not ip_attach_to)
+    needs_url_user_input = bool(user_urls and not url_attach_to)
 
     # Build recon_data from Neo4j graph
     include_graph = config.get("include_graph_targets", True)
@@ -4632,12 +4726,71 @@ def run_security_checks_partial(config: dict) -> None:
             },
         }
 
+    # STEP 1: Resolve user subdomains and inject into recon_data DNS
+    resolved_sub_ips = {}
+    if user_subdomains:
+        print(f"[*][Partial Recon] Resolving {len(user_subdomains)} custom subdomains...")
+        for sub in user_subdomains:
+            ips = _resolve_hostname(sub)
+            all_ips = ips.get("ipv4", []) + ips.get("ipv6", [])
+            if all_ips:
+                resolved_sub_ips[sub] = ips
+                if sub not in recon_data["dns"]["subdomains"]:
+                    recon_data["dns"]["subdomains"][sub] = {
+                        "ips": ips,
+                        "has_records": True,
+                    }
+                else:
+                    for bucket in ("ipv4", "ipv6"):
+                        for addr in ips.get(bucket, []):
+                            if addr not in recon_data["dns"]["subdomains"][sub]["ips"][bucket]:
+                                recon_data["dns"]["subdomains"][sub]["ips"][bucket].append(addr)
+                if sub not in recon_data.get("subdomains", []):
+                    recon_data.setdefault("subdomains", []).append(sub)
+                print(f"[+][Partial Recon] Resolved {sub} -> {all_ips}")
+            else:
+                print(f"[!][Partial Recon] Could not resolve {sub}")
+
+    # STEP 2: Inject user IPs into recon_data DNS
+    if user_ips:
+        print(f"[*][Partial Recon] Adding {len(user_ips)} user-provided IPs to DNS data")
+        for ip_str in user_ips:
+            bucket = _classify_ip(ip_str)
+            if ip_attach_to:
+                # Inject into subdomain's IP list
+                if ip_attach_to not in recon_data["dns"]["subdomains"]:
+                    recon_data["dns"]["subdomains"][ip_attach_to] = {
+                        "ips": {"ipv4": [], "ipv6": []},
+                        "has_records": True,
+                    }
+                if ip_str not in recon_data["dns"]["subdomains"][ip_attach_to]["ips"][bucket]:
+                    recon_data["dns"]["subdomains"][ip_attach_to]["ips"][bucket].append(ip_str)
+            else:
+                # Inject into domain's IP list
+                if ip_str not in recon_data["dns"]["domain"]["ips"][bucket]:
+                    recon_data["dns"]["domain"]["ips"][bucket].append(ip_str)
+                    recon_data["dns"]["domain"]["has_records"] = True
+
+    # STEP 3: Inject user URLs into http_probe targets
+    if user_urls:
+        print(f"[*][Partial Recon] Adding {len(user_urls)} user-provided URLs to scan targets")
+        for url in user_urls:
+            if url not in recon_data["http_probe"]["by_url"]:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                recon_data["http_probe"]["by_url"][url] = {
+                    "url": url,
+                    "host": parsed.netloc.split(":")[0],
+                    "status_code": 200,
+                    "content_type": "text/html",
+                }
+
     # Check we have something to scan
     has_http_targets = bool(recon_data["http_probe"]["by_url"])
     has_dns_targets = bool(recon_data["dns"]["domain"]["has_records"] or recon_data["dns"]["subdomains"])
     if not has_http_targets and not has_dns_targets:
         print("[!][Partial Recon] No targets to scan (no IPs, subdomains, or BaseURLs in graph).")
-        print("[!][Partial Recon] Run Subdomain Discovery and HTTP Probing first.")
+        print("[!][Partial Recon] Run Subdomain Discovery and HTTP Probing first, or provide custom targets.")
         sys.exit(1)
 
     # Build enabled checks dict from settings
@@ -4709,6 +4862,150 @@ def run_security_checks_partial(config: dict) -> None:
                     user_id=user_id,
                     project_id=project_id,
                 )
+
+                # Link user-provided subdomains to graph
+                if user_subdomains and resolved_sub_ips:
+                    driver = graph_client.driver
+                    with driver.session() as session:
+                        for sub, ips in resolved_sub_ips.items():
+                            session.run(
+                                """
+                                MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                                MERGE (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                ON CREATE SET s.source = 'partial_recon_user_input',
+                                              s.created_at = datetime()
+                                MERGE (d)-[:HAS_SUBDOMAIN]->(s)
+                                """,
+                                domain=domain, uid=user_id, pid=project_id, sub=sub,
+                            )
+                            for bucket in ("ipv4", "ipv6"):
+                                for addr in ips.get(bucket, []):
+                                    session.run(
+                                        """
+                                        MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                        ON CREATE SET i.version = $version,
+                                                      i.source = 'partial_recon_user_input',
+                                                      i.created_at = datetime()
+                                        WITH i
+                                        MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                        MERGE (s)-[:RESOLVES_TO]->(i)
+                                        """,
+                                        addr=addr, uid=user_id, pid=project_id,
+                                        version=bucket, sub=sub,
+                                    )
+                    print(f"[+][Partial Recon] Linked {len(resolved_sub_ips)} user subdomains to graph")
+
+                # Link user-provided IPs to graph
+                if user_ips:
+                    driver = graph_client.driver
+                    with driver.session() as session:
+                        if ip_attach_to:
+                            # Check if subdomain exists
+                            check = session.run(
+                                """
+                                MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                RETURN s.name AS name
+                                """,
+                                sub=ip_attach_to, uid=user_id, pid=project_id,
+                            )
+                            if check.single():
+                                for ip_str in user_ips:
+                                    version = _classify_ip(ip_str)
+                                    session.run(
+                                        """
+                                        MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                        ON CREATE SET i.version = $version,
+                                                      i.source = 'partial_recon_user_input',
+                                                      i.created_at = datetime()
+                                        WITH i
+                                        MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                        MERGE (s)-[:RESOLVES_TO]->(i)
+                                        """,
+                                        addr=ip_str, uid=user_id, pid=project_id,
+                                        version=version, sub=ip_attach_to,
+                                    )
+                                print(f"[+][Partial Recon] Linked {len(user_ips)} IPs to {ip_attach_to}")
+                            else:
+                                print(f"[!][Partial Recon] Subdomain {ip_attach_to} not found, falling back to UserInput")
+                                needs_ip_user_input = True
+
+                        if needs_ip_user_input:
+                            user_input_id = str(uuid.uuid4())
+                            session.run(
+                                """
+                                MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                                MERGE (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                ON CREATE SET ui.type = 'ip',
+                                              ui.values = $ips,
+                                              ui.created_at = datetime(),
+                                              ui.tool = 'SecurityChecks'
+                                MERGE (d)-[:HAS_USER_INPUT]->(ui)
+                                """,
+                                domain=domain, uid=user_id, pid=project_id,
+                                ui_id=user_input_id, ips=user_ips,
+                            )
+                            for ip_str in user_ips:
+                                version = _classify_ip(ip_str)
+                                session.run(
+                                    """
+                                    MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                    ON CREATE SET i.version = $version,
+                                                  i.source = 'partial_recon_user_input',
+                                                  i.created_at = datetime()
+                                    WITH i
+                                    MATCH (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                    MERGE (ui)-[:PRODUCED]->(i)
+                                    """,
+                                    addr=ip_str, uid=user_id, pid=project_id,
+                                    version=version, ui_id=user_input_id,
+                                )
+                            print(f"[+][Partial Recon] Created UserInput + linked {len(user_ips)} IPs via PRODUCED")
+
+                # Link user-provided URLs to graph
+                if user_urls:
+                    driver = graph_client.driver
+                    with driver.session() as session:
+                        if url_attach_to:
+                            check = session.run(
+                                """
+                                MATCH (b:BaseURL {url: $url, user_id: $uid, project_id: $pid})
+                                RETURN b.url AS url
+                                """,
+                                url=url_attach_to, uid=user_id, pid=project_id,
+                            )
+                            if check.single():
+                                print(f"[+][Partial Recon] BaseURL {url_attach_to} exists, linking user URLs")
+                            else:
+                                print(f"[!][Partial Recon] BaseURL {url_attach_to} not found, falling back to UserInput")
+                                needs_url_user_input = True
+                                url_attach_to = None
+
+                        if needs_url_user_input:
+                            user_input_id = str(uuid.uuid4())
+                            session.run(
+                                """
+                                MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                                MERGE (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                ON CREATE SET ui.type = 'url',
+                                              ui.values = $urls,
+                                              ui.created_at = datetime(),
+                                              ui.tool = 'SecurityChecks'
+                                MERGE (d)-[:HAS_USER_INPUT]->(ui)
+                                """,
+                                domain=domain, uid=user_id, pid=project_id,
+                                ui_id=user_input_id, urls=user_urls,
+                            )
+                            for url in user_urls:
+                                session.run(
+                                    """
+                                    MATCH (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                    MATCH (b:BaseURL {url: $url, user_id: $uid, project_id: $pid})
+                                    MERGE (ui)-[:PRODUCED]->(b)
+                                    """,
+                                    ui_id=user_input_id, uid=user_id, pid=project_id, url=url,
+                                )
+                            print(f"[+][Partial Recon] Created UserInput + linked user URLs via PRODUCED")
+
                 print(f"[+][Partial Recon] Graph updated successfully")
                 print(f"[+][Partial Recon] Stats: {json.dumps(stats, default=str)}")
             else:
@@ -4726,7 +5023,7 @@ def run_shodan(config: dict) -> None:
 
     Queries existing IPs from the graph and enriches them with Shodan data
     (host lookup, reverse DNS, domain DNS, passive CVEs).
-    No user inputs -- Shodan starts from the domain and its discovered IPs.
+    Users can also provide custom IPs to enrich.
     """
     from recon.shodan_enrich import run_shodan_enrichment
     from recon.project_settings import get_settings
@@ -4747,10 +5044,36 @@ def run_shodan(config: dict) -> None:
     # Force-enable Shodan for partial recon (user explicitly triggered it)
     settings["SHODAN_ENABLED"] = True
 
+    # Parse user-provided IPs from structured targets
+    user_targets = config.get("user_targets") or {}
+    user_ips = []
+    ip_attach_to = None
+
+    if user_targets:
+        for entry in user_targets.get("ips", []):
+            entry = entry.strip()
+            if entry and _is_ip_or_cidr(entry):
+                user_ips.append(entry)
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid IP: {entry}")
+        ip_attach_to = user_targets.get("ip_attach_to")
+
+    if user_ips:
+        print(f"[+][Partial Recon] Validated {len(user_ips)} custom IPs/CIDRs")
+        if ip_attach_to:
+            print(f"[+][Partial Recon] IPs will be attached to subdomain: {ip_attach_to}")
+        else:
+            print(f"[+][Partial Recon] IPs will be tracked via UserInput (generic)")
+
+    needs_user_input = bool(user_ips and not ip_attach_to)
+    user_input_id = str(uuid.uuid4()) if needs_user_input else None
+
     # Build combined_result from graph (IPs + subdomains)
     if include_graph:
+        print(f"[*][Partial Recon] Querying graph for targets (IPs and subdomains)...")
         combined_result = _build_recon_data_from_graph(domain, user_id, project_id)
     else:
+        print(f"[*][Partial Recon] Skipping graph targets (user opted out)")
         combined_result = {
             "domain": domain,
             "dns": {
@@ -4759,14 +5082,32 @@ def run_shodan(config: dict) -> None:
             },
         }
 
+    # Inject user-provided IPs into combined_result DNS structure
+    if user_ips:
+        print(f"[*][Partial Recon] Adding {len(user_ips)} user-provided IPs to DNS data")
+        for ip_str in user_ips:
+            bucket = _classify_ip(ip_str)
+            if ip_attach_to:
+                if ip_attach_to not in combined_result["dns"]["subdomains"]:
+                    combined_result["dns"]["subdomains"][ip_attach_to] = {
+                        "ips": {"ipv4": [], "ipv6": []},
+                        "has_records": True,
+                    }
+                if ip_str not in combined_result["dns"]["subdomains"][ip_attach_to]["ips"][bucket]:
+                    combined_result["dns"]["subdomains"][ip_attach_to]["ips"][bucket].append(ip_str)
+            else:
+                if ip_str not in combined_result["dns"]["domain"]["ips"][bucket]:
+                    combined_result["dns"]["domain"]["ips"][bucket].append(ip_str)
+                    combined_result["dns"]["domain"]["has_records"] = True
+
     # Count IPs for logging
     ip_count = len(combined_result.get("dns", {}).get("domain", {}).get("ips", {}).get("ipv4", []))
     for _sub, info in combined_result.get("dns", {}).get("subdomains", {}).items():
         ip_count += len(info.get("ips", {}).get("ipv4", []))
-    print(f"[+][Partial Recon] Found {ip_count} IPs from graph for enrichment")
+    print(f"[+][Partial Recon] Total IPs for enrichment: {ip_count}")
 
     if ip_count == 0:
-        print(f"[-][Partial Recon] No IPs found in graph. Run Subdomain Discovery first to populate IPs.")
+        print(f"[-][Partial Recon] No IPs to enrich. Run Subdomain Discovery first or provide custom IPs.")
         return
 
     # Run Shodan enrichment (same function as full pipeline)
@@ -4795,6 +5136,71 @@ def run_shodan(config: dict) -> None:
                 )
                 print(f"[+][Partial Recon] Graph updated successfully")
                 print(f"[+][Partial Recon] Stats: {json.dumps(stats, default=str)}")
+
+                # Link user-provided IPs to graph
+                if user_ips:
+                    needs_ip_user_input = needs_user_input
+                    driver = graph_client.driver
+                    with driver.session() as session:
+                        if ip_attach_to:
+                            check = session.run(
+                                """
+                                MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                RETURN s.name AS name
+                                """,
+                                sub=ip_attach_to, uid=user_id, pid=project_id,
+                            )
+                            if check.single():
+                                for ip_str in user_ips:
+                                    version = _classify_ip(ip_str)
+                                    session.run(
+                                        """
+                                        MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                        ON CREATE SET i.version = $version,
+                                                      i.source = 'partial_recon_user_input',
+                                                      i.created_at = datetime()
+                                        WITH i
+                                        MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                        MERGE (s)-[:RESOLVES_TO]->(i)
+                                        """,
+                                        addr=ip_str, uid=user_id, pid=project_id,
+                                        version=version, sub=ip_attach_to,
+                                    )
+                                print(f"[+][Partial Recon] Linked {len(user_ips)} IPs to {ip_attach_to}")
+                            else:
+                                print(f"[!][Partial Recon] Subdomain {ip_attach_to} not found, falling back to UserInput")
+                                needs_ip_user_input = True
+
+                        if needs_ip_user_input:
+                            session.run(
+                                """
+                                MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                                MERGE (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                ON CREATE SET ui.type = 'ip',
+                                              ui.values = $ips,
+                                              ui.created_at = datetime(),
+                                              ui.tool = 'Shodan'
+                                MERGE (d)-[:HAS_USER_INPUT]->(ui)
+                                """,
+                                domain=domain, uid=user_id, pid=project_id,
+                                ui_id=user_input_id, ips=user_ips,
+                            )
+                            for ip_str in user_ips:
+                                version = _classify_ip(ip_str)
+                                session.run(
+                                    """
+                                    MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                    ON CREATE SET i.version = $version,
+                                                  i.source = 'partial_recon_user_input',
+                                                  i.created_at = datetime()
+                                    WITH i
+                                    MATCH (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                    MERGE (ui)-[:PRODUCED]->(i)
+                                    """,
+                                    addr=ip_str, uid=user_id, pid=project_id,
+                                    version=version, ui_id=user_input_id,
+                                )
+                            print(f"[+][Partial Recon] Created UserInput node for {len(user_ips)} IPs")
             else:
                 print("[!][Partial Recon] Neo4j not reachable, graph not updated")
     except Exception as e:
@@ -4905,6 +5311,43 @@ def run_uncover(config: dict) -> None:
     settings["UNCOVER_ENABLED"] = True
     settings["OSINT_ENRICHMENT_ENABLED"] = True
 
+    # API keys for Uncover engines are only loaded by get_settings() when
+    # UNCOVER_ENABLED is True in the project config.  Since we force-enable it
+    # after the fact, we must manually load the keys from user global settings.
+    webapp_url = os.environ.get("WEBAPP_API_URL", "")
+    if webapp_url and user_id:
+        try:
+            from recon.project_settings import _fetch_user_settings_full
+            user_global = _fetch_user_settings_full(user_id, webapp_url)
+            if user_global:
+                # Shared OSINT keys (may already be set if the per-tool toggle was on)
+                if not settings.get('SHODAN_API_KEY'):
+                    settings['SHODAN_API_KEY'] = user_global.get('shodanApiKey', '')
+                if not settings.get('FOFA_API_KEY'):
+                    settings['FOFA_API_KEY'] = user_global.get('fofaApiKey', '')
+                if not settings.get('ZOOMEYE_API_KEY'):
+                    settings['ZOOMEYE_API_KEY'] = user_global.get('zoomEyeApiKey', '')
+                if not settings.get('NETLAS_API_KEY'):
+                    settings['NETLAS_API_KEY'] = user_global.get('netlasApiKey', '')
+                if not settings.get('CRIMINALIP_API_KEY'):
+                    settings['CRIMINALIP_API_KEY'] = user_global.get('criminalIpApiKey', '')
+                if not settings.get('CENSYS_API_TOKEN'):
+                    settings['CENSYS_API_TOKEN'] = user_global.get('censysApiToken', '')
+                if not settings.get('CENSYS_ORG_ID'):
+                    settings['CENSYS_ORG_ID'] = user_global.get('censysOrgId', '')
+                # Uncover-specific keys
+                settings['UNCOVER_QUAKE_API_KEY'] = user_global.get('quakeApiKey', '')
+                settings['UNCOVER_HUNTER_API_KEY'] = user_global.get('hunterApiKey', '')
+                settings['UNCOVER_PUBLICWWW_API_KEY'] = user_global.get('publicWwwApiKey', '')
+                settings['UNCOVER_HUNTERHOW_API_KEY'] = user_global.get('hunterHowApiKey', '')
+                settings['UNCOVER_GOOGLE_API_KEY'] = user_global.get('googleApiKey', '')
+                settings['UNCOVER_GOOGLE_API_CX'] = user_global.get('googleApiCx', '')
+                settings['UNCOVER_ONYPHE_API_KEY'] = user_global.get('onypheApiKey', '')
+                settings['UNCOVER_DRIFTNET_API_KEY'] = user_global.get('driftnetApiKey', '')
+                print(f"[+][Partial Recon] Loaded API keys from user settings")
+        except Exception as e:
+            print(f"[!][Partial Recon] Could not load user API keys: {e}")
+
     # Build minimal combined_result structure expected by run_uncover_expansion
     combined_result = {
         "domain": domain,
@@ -4953,7 +5396,7 @@ def run_osint_enrichment(config: dict) -> None:
 
     Queries existing IPs from the graph and enriches them with passive OSINT data.
     Enabled sub-tools run in parallel (same as the full pipeline GROUP 3b).
-    No user inputs -- OSINT enrichment starts from the domain and its discovered IPs.
+    Users can also provide custom IPs to enrich.
     """
     import importlib
     from concurrent.futures import ThreadPoolExecutor
@@ -4987,14 +5430,72 @@ def run_osint_enrichment(config: dict) -> None:
             },
         }
 
+    # Parse user-provided IPs
+    user_targets = config.get("user_targets") or {}
+    user_ips = []
+    ip_attach_to = None
+    needs_user_input = False
+
+    if user_targets:
+        for entry in user_targets.get("ips", []):
+            entry = entry.strip()
+            if entry and _is_ip_or_cidr(entry):
+                user_ips.append(entry)
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid IP: {entry}")
+        ip_attach_to = user_targets.get("ip_attach_to")
+
+    if user_ips:
+        print(f"[+][Partial Recon] Validated {len(user_ips)} custom IPs/CIDRs")
+        if ip_attach_to:
+            print(f"[+][Partial Recon] IPs will be attached to subdomain: {ip_attach_to}")
+        else:
+            print(f"[+][Partial Recon] IPs will be tracked via UserInput (generic)")
+        needs_user_input = bool(user_ips and not ip_attach_to)
+
+        # Inject user IPs into combined_result so enrichment tools can see them
+        import ipaddress as _ipaddress
+        for raw_ip in user_ips:
+            raw_ip = raw_ip.strip()
+            # Expand CIDRs
+            expanded = []
+            if "/" in raw_ip:
+                try:
+                    net = _ipaddress.ip_network(raw_ip, strict=False)
+                    expanded = [str(h) for h in net.hosts()]
+                    if not expanded:
+                        expanded = [str(net.network_address)]
+                except ValueError:
+                    expanded = [raw_ip]
+            else:
+                expanded = [raw_ip]
+
+            for ip_addr in expanded:
+                ip_type = _classify_ip(ip_addr)
+                if ip_attach_to:
+                    # Inject into subdomain bucket
+                    sub_key = ip_attach_to
+                    if sub_key not in combined_result["dns"]["subdomains"]:
+                        combined_result["dns"]["subdomains"][sub_key] = {
+                            "ips": {"ipv4": [], "ipv6": []}, "has_records": True,
+                        }
+                    sub_ips = combined_result["dns"]["subdomains"][sub_key]["ips"]
+                    if ip_addr not in sub_ips.get(ip_type, []):
+                        sub_ips.setdefault(ip_type, []).append(ip_addr)
+                else:
+                    # Inject into domain-level IPs
+                    domain_ips = combined_result["dns"]["domain"]["ips"]
+                    if ip_addr not in domain_ips.get(ip_type, []):
+                        domain_ips.setdefault(ip_type, []).append(ip_addr)
+
     # Count IPs for logging
     ip_count = len(combined_result.get("dns", {}).get("domain", {}).get("ips", {}).get("ipv4", []))
     for _sub, info in combined_result.get("dns", {}).get("subdomains", {}).items():
         ip_count += len(info.get("ips", {}).get("ipv4", []))
-    print(f"[+][Partial Recon] Found {ip_count} IPs from graph for enrichment")
+    print(f"[+][Partial Recon] Total IPs for enrichment: {ip_count}")
 
     if ip_count == 0:
-        print(f"[-][Partial Recon] No IPs found in graph. Run Subdomain Discovery first to populate IPs.")
+        print(f"[-][Partial Recon] No IPs to enrich. Provide custom IPs or run Subdomain Discovery first.")
         return
 
     # OSINT sub-tool registry (same as main.py GROUP 3b)
@@ -5070,19 +5571,93 @@ def run_osint_enrichment(config: dict) -> None:
         print(f"[!][Partial Recon] Graph update failed: {e}")
         raise
 
+    # Link user-provided IPs to graph (RESOLVES_TO or UserInput PRODUCED)
+    if user_ips:
+        print(f"[*][Partial Recon] Linking {len(user_ips)} user-provided IPs to graph...")
+        try:
+            from graph_db import Neo4jClient as _Neo4jClient2
+            with _Neo4jClient2() as gc:
+                if gc.verify_connection():
+                    with gc.driver.session() as sess:
+                        if needs_user_input:
+                            # Create UserInput node for generic IPs
+                            user_input_id = str(uuid.uuid4())
+                            sess.run(
+                                """
+                                MATCH (d:Domain {user_id: $uid, project_id: $pid})
+                                MERGE (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                ON CREATE SET ui.source = 'OsintEnrichment',
+                                              ui.created_at = datetime(),
+                                              ui.label = 'Custom IPs for OSINT enrichment'
+                                MERGE (d)-[:HAS_USER_INPUT]->(ui)
+                                """,
+                                uid=user_id, pid=project_id, ui_id=user_input_id,
+                            )
+                            # Link each IP to UserInput
+                            for raw_ip in user_ips:
+                                expanded = [raw_ip]
+                                if "/" in raw_ip:
+                                    import ipaddress as _ipa
+                                    try:
+                                        net = _ipa.ip_network(raw_ip, strict=False)
+                                        expanded = [str(h) for h in net.hosts()] or [str(net.network_address)]
+                                    except ValueError:
+                                        pass
+                                for ip_addr in expanded:
+                                    sess.run(
+                                        """
+                                        MATCH (ui:UserInput {id: $ui_id, user_id: $uid, project_id: $pid})
+                                        MERGE (ip:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                        MERGE (ui)-[:PRODUCED]->(ip)
+                                        """,
+                                        uid=user_id, pid=project_id, ui_id=user_input_id, addr=ip_addr,
+                                    )
+                            print(f"[+][Partial Recon] Created UserInput -> PRODUCED -> IP links")
+                        elif ip_attach_to:
+                            # Attach IPs to existing subdomain via RESOLVES_TO
+                            for raw_ip in user_ips:
+                                expanded = [raw_ip]
+                                if "/" in raw_ip:
+                                    import ipaddress as _ipa
+                                    try:
+                                        net = _ipa.ip_network(raw_ip, strict=False)
+                                        expanded = [str(h) for h in net.hosts()] or [str(net.network_address)]
+                                    except ValueError:
+                                        pass
+                                for ip_addr in expanded:
+                                    sess.run(
+                                        """
+                                        MERGE (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                        MERGE (ip:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                        MERGE (s)-[:RESOLVES_TO]->(ip)
+                                        """,
+                                        uid=user_id, pid=project_id, sub=ip_attach_to, addr=ip_addr,
+                                    )
+                            print(f"[+][Partial Recon] Created Subdomain -> RESOLVES_TO -> IP links")
+        except Exception as e:
+            print(f"[!][Partial Recon] User IP linking failed: {e}")
+
     print(f"\n[+][Partial Recon] OSINT enrichment completed successfully")
 
 
 def _cleanup_orphan_user_inputs(user_id: str, project_id: str) -> int:
     """
-    Delete UserInput nodes that have no outgoing PRODUCED relationships.
+    Delete UserInput nodes that have no outgoing relationships (except
+    the incoming HAS_USER_INPUT from Domain).
 
     After a partial recon tool runs, a UserInput node may have been created
     for user-provided targets (generic IPs, URLs, etc.). If the scan produced
     no results for those targets, the UserInput sits orphaned -- connected to
-    the Domain via HAS_USER_INPUT but with no PRODUCED children.
+    the Domain via HAS_USER_INPUT but with no outgoing children.
 
-    This function finds and deletes such orphans.
+    Different tools create different outgoing relationships from UserInput:
+      - PRODUCED (port scanners, resource enum tools)
+      - HAS_VULNERABILITY (Nuclei via BaseURL)
+      - etc.
+
+    This function checks for ANY outgoing relationship from UserInput.
+    If the node only has the incoming HAS_USER_INPUT and nothing going out,
+    it's an orphan and gets deleted.
 
     Returns:
         Number of orphan UserInput nodes deleted.
@@ -5096,7 +5671,7 @@ def _cleanup_orphan_user_inputs(user_id: str, project_id: str) -> int:
                 result = session.run(
                     """
                     MATCH (ui:UserInput {user_id: $uid, project_id: $pid})
-                    WHERE NOT (ui)-[:PRODUCED]->()
+                    WHERE NOT (ui)-->()
                     WITH ui, ui.id AS uid_id
                     DETACH DELETE ui
                     RETURN count(uid_id) AS deleted
@@ -5106,7 +5681,7 @@ def _cleanup_orphan_user_inputs(user_id: str, project_id: str) -> int:
                 record = result.single()
                 deleted = record["deleted"] if record else 0
                 if deleted:
-                    print(f"[+][Partial Recon] Cleaned up {deleted} orphan UserInput node(s) (no PRODUCED children)")
+                    print(f"[+][Partial Recon] Cleaned up {deleted} orphan UserInput node(s) (no outgoing relationships)")
                 return deleted
     except Exception as e:
         print(f"[!][Partial Recon] UserInput cleanup failed: {e}")

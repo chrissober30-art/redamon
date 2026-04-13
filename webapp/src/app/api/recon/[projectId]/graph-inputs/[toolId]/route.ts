@@ -442,24 +442,28 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
              OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)
              OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)
-             WITH d, count(DISTINCT s) AS subCount,
+             WITH d, collect(DISTINCT s.name) AS subdomains,
                   count(DISTINCT i) + count(DISTINCT di) AS ipCount
              OPTIONAL MATCH (b:BaseURL {user_id: $uid, project_id: $pid})
-             WITH d, subCount, ipCount, count(DISTINCT b) AS baseurlCount
-             RETURN d.name AS domain, subCount, ipCount, baseurlCount`,
+             WITH d, subdomains, ipCount, collect(DISTINCT b.url) AS baseurls
+             RETURN d.name AS domain, subdomains, size(subdomains) AS subCount, ipCount, baseurls, size(baseurls) AS baseurlCount`,
             { uid: project.userId, pid: projectId }
           )
           const record = result.records[0]
           const domain = record?.get('domain') || null
+          const subdomains: string[] = record?.get('subdomains') || []
           const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
           const ipCount = record?.get('ipCount')?.toNumber?.() ?? record?.get('ipCount') ?? 0
+          const baseurls: string[] = record?.get('baseurls') || []
           const baseurlCount = record?.get('baseurlCount')?.toNumber?.() ?? record?.get('baseurlCount') ?? 0
 
           if (domain) {
             return NextResponse.json({
               domain,
+              existing_subdomains: subdomains,
               existing_subdomains_count: subCount,
               existing_ips_count: ipCount,
+              existing_baseurls: baseurls,
               existing_baseurls_count: baseurlCount,
               source: 'graph',
             })
@@ -562,18 +566,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
              OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)
              OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)
-             WITH d, count(DISTINCT i) + count(DISTINCT di) AS ipCount
-             RETURN d.name AS domain, ipCount`,
+             WITH d, collect(DISTINCT s.name) AS subdomains,
+                  count(DISTINCT i) + count(DISTINCT di) AS ipCount
+             RETURN d.name AS domain, subdomains, size(subdomains) AS subCount, ipCount`,
             { uid: project.userId, pid: projectId }
           )
           const record = result.records[0]
           const domain = record?.get('domain') || null
+          const subdomains: string[] = record?.get('subdomains') || []
+          const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
           const ipCount = record?.get('ipCount')?.toNumber?.() ?? record?.get('ipCount') ?? 0
 
           if (domain) {
             return NextResponse.json({
               domain,
-              existing_subdomains_count: 0,
+              existing_subdomains: subdomains,
+              existing_subdomains_count: subCount,
               existing_ips_count: ipCount,
               source: 'graph',
             })
@@ -652,19 +660,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
              OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)
              OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)
-             WITH d, count(DISTINCT s) AS subCount,
+             WITH d, collect(DISTINCT s.name) AS subdomains,
                   count(DISTINCT i) + count(DISTINCT di) AS ipCount
-             RETURN d.name AS domain, subCount, ipCount`,
+             RETURN d.name AS domain, subdomains, size(subdomains) AS subCount, ipCount`,
             { uid: project.userId, pid: projectId }
           )
           const record = result.records[0]
           const domain = record?.get('domain') || null
+          const subdomains: string[] = record?.get('subdomains') || []
           const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
           const ipCount = record?.get('ipCount')?.toNumber?.() ?? record?.get('ipCount') ?? 0
 
           if (domain) {
             return NextResponse.json({
               domain,
+              existing_subdomains: subdomains,
               existing_subdomains_count: subCount,
               existing_ips_count: ipCount,
               source: 'graph',

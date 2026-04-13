@@ -597,6 +597,14 @@ Each parallelized tool function is thread-safe:
 
 ---
 
+## 🎯 Partial Recon
+
+Partial Recon lets you run any single tool from the pipeline independently, without triggering a full scan. From the Workflow View or section headers, click the play button on any tool to open a modal that shows existing graph data (subdomains, IPs, ports, BaseURLs, endpoints), accepts custom targets, and launches the tool in isolation. Results are merged into the existing Neo4j graph via `MERGE` -- no duplicates. All 20 pipeline tools are supported. The tool runs with the project's saved settings (timeouts, wordlists, API keys, proxy, Tor). Custom inputs are validated in real time (scope checks, IP/CIDR format, port ranges). See `recon/partial_recon.py` for the implementation.
+
+> **[Wiki: Recon Pipeline Workflow -- Partial Recon](https://github.com/samugit83/redamon/wiki/Recon-Pipeline-Workflow#partial-recon)**
+
+---
+
 ## 📋 Scan Modules Explained
 
 ### Configure Which Modules to Run

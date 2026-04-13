@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v3.8.0-release-2E8B57?style=flat" alt="Version 3.8.0"/>
+  <img height="24" src="https://img.shields.io/badge/v3.9.1-release-2E8B57?style=flat" alt="Version 3.9.1"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -391,6 +391,12 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 | | **MITRE Enrichment** | CWE / CAPEC mapping | Passive | Sequential |
 
 <sub>*Amass can run in active mode when configured. Knockpy performs active DNS probing.</sub>
+
+#### Partial Recon
+
+Run **any single tool** from the pipeline independently without re-running the entire scan. Each tool section has a play button that opens a modal where you can review existing graph data, add custom targets (subdomains, IPs, ports, or URLs), and launch the tool in isolation. Results are merged back into the Neo4j graph using `MERGE` operations -- duplicates are updated, not recreated. The tool runs with all project settings (timeouts, wordlists, API keys, proxy) applied automatically. All pipeline tools support partial recon.
+
+> **[Wiki: Recon Pipeline Workflow -- Partial Recon](https://github.com/samugit83/redamon/wiki/Recon-Pipeline-Workflow#partial-recon)**
 
 ### GVM Vulnerability Scanner
 

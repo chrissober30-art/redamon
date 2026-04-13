@@ -82,18 +82,18 @@ export const getLinkWidth3D = (link: GraphLink, selectedNodeId?: string): number
  * Get particle width based on selection state and chain flow membership
  */
 export const getParticleWidth = (link: GraphLink, selectedNodeId?: string): number => {
-  if (isChainFlowLink(link)) return 3
   if (!selectedNodeId) return 0
-  return isLinkConnectedToNode(link, selectedNodeId) ? LINK_SIZES.particleWidth : 0
+  if (!isLinkConnectedToNode(link, selectedNodeId)) return 0
+  return isChainFlowLink(link) ? 3 : LINK_SIZES.particleWidth
 }
 
 /**
  * Get particle count based on selection state and chain flow membership
  */
 export const getParticleCount = (link: GraphLink, selectedNodeId?: string): number => {
-  if (isChainFlowLink(link)) return 4
   if (!selectedNodeId) return 0
-  return isLinkConnectedToNode(link, selectedNodeId) ? LINK_SIZES.particleCount : 0
+  if (!isLinkConnectedToNode(link, selectedNodeId)) return 0
+  return isChainFlowLink(link) ? 4 : LINK_SIZES.particleCount
 }
 
 /**

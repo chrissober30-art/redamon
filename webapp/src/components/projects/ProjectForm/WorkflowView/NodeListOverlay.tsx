@@ -28,6 +28,8 @@ export function NodeListOverlay({ isOpen, onClose, toolLabel, nodes }: NodeListO
       onClose={onClose}
       title={`${toolLabel} -- ${nodes.length}`}
       size="small"
+      closeOnOverlayClick={false}
+      closeOnEscape={false}
     >
       <div className={styles.nodeList}>
         {visible.map(node => (
