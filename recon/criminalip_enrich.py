@@ -6,7 +6,9 @@ IP intelligence and domain risk reports via Criminal IP API v1.
 from __future__ import annotations
 
 import time
+import threading
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -18,6 +20,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 CRIMINALIP_API_BASE = "https://api.criminalip.io/v1/"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _extract_ips_from_recon(combined_result: dict) -> list[str]:
@@ -372,47 +390,64 @@ def run_criminalip_enrichment(combined_result: dict, settings: dict) -> dict:
                     print(f"[!][CriminalIP] No domain report data for {domain}")
             need_sleep = True
 
-        consecutive_fails = 0
-        ips_attempted = 0
-        for ip in ips:
-            if stopped:
-                break
-            if need_sleep:
-                time.sleep(1)
-            need_sleep = True
-            ips_attempted += 1
+        max_workers = settings.get("CRIMINALIP_WORKERS", 5)
+        rate_limiter = _RateLimiter(1.0)
+        stop_event = threading.Event()
+        if stopped:
+            stop_event.set()
+
+        def _enrich_single_ip(ip, api_key, key_rotator, rate_limiter):
+            """Enrich a single IP via Criminal IP. Returns (report_or_None, stop_reason_or_None)."""
+            if stop_event.is_set():
+                return None, None
+            rate_limiter.wait()
+            if stop_event.is_set():
+                return None, None
             print(f"[*][CriminalIP] Fetching IP data for {ip}...")
             raw, stop = _cip_get("ip/data", api_key, key_rotator, params={"ip": ip, "full": "true"})
-
             if stop:
-                _handle_stop(stop)
-                stopped = True
-                break
-
+                stop_event.set()
+                return None, stop
             report = _parse_ip_report(ip, raw)
             if report:
-                cip_data["ip_reports"].append(report)
-                consecutive_fails = 0
                 vuln_count = len(report.get("vulnerabilities") or [])
                 print(
                     f"[+][CriminalIP] IP data retrieved for {ip} "
                     f"(ports={len(report['ports'])}, vulns={vuln_count})"
                 )
             else:
-                consecutive_fails += 1
                 logger.warning(f"CriminalIP: no data for {ip}")
-                if consecutive_fails >= _MAX_CONSECUTIVE_FAILURES:
-                    print(
-                        f"[!][CriminalIP] {consecutive_fails} consecutive failures "
-                        f"— skipping remaining IPs"
-                    )
-                    stopped = True
-                    break
+            return report, None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_enrich_single_ip, ip, api_key, key_rotator, rate_limiter): ip
+                for ip in ips
+            }
+            consecutive_fails = 0
+            for future in as_completed(futures):
+                try:
+                    report, stop_reason = future.result()
+                    if stop_reason:
+                        _handle_stop(stop_reason)
+                        stopped = True
+                    elif report is not None:
+                        cip_data["ip_reports"].append(report)
+                        consecutive_fails = 0
+                    else:
+                        consecutive_fails += 1
+                        if consecutive_fails >= _MAX_CONSECUTIVE_FAILURES:
+                            print(
+                                f"[!][CriminalIP] {consecutive_fails} consecutive failures "
+                                f"-- skipping remaining IPs"
+                            )
+                            stopped = True
+                            stop_event.set()
+                except Exception as exc:
+                    logger.warning(f"CriminalIP enrichment thread error for {futures[future]}: {exc}")
 
         if stopped:
-            skipped = len(ips) - ips_attempted
-            if skipped > 0:
-                print(f"[!][CriminalIP] Skipped {skipped} remaining IP(s)")
+            print(f"[!][CriminalIP] Some IPs may have been skipped due to early stop")
         print(
             f"[+][CriminalIP] Enrichment complete: "
             f"{len(cip_data['ip_reports'])} IP report(s), "

@@ -70,6 +70,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'NMAP_TIMING_TEMPLATE': 'T3',
     'NMAP_TIMEOUT': 600,
     'NMAP_HOST_TIMEOUT': 300,
+    'NMAP_PARALLELISM': 2,
 
     # Masscan Port Scanner (disabled by default -- only useful for large IP ranges/CIDRs)
     'MASSCAN_ENABLED': False,
@@ -445,6 +446,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'ZOOMEYE_API_KEY': '',
     'CRIMINALIP_ENABLED': False,
     'CRIMINALIP_API_KEY': '',
+    # OSINT Enrichment Parallelism
+    'OTX_WORKERS': 5,
+    'VIRUSTOTAL_WORKERS': 3,
+    'CENSYS_WORKERS': 5,
+    'CRIMINALIP_WORKERS': 5,
+    'FOFA_WORKERS': 5,
+    'NETLAS_WORKERS': 5,
+    'ZOOMEYE_WORKERS': 5,
 
     # Uncover (ProjectDiscovery multi-engine search)
     'UNCOVER_ENABLED': False,
@@ -624,6 +633,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['NMAP_TIMING_TEMPLATE'] = project.get('nmapTimingTemplate', DEFAULT_SETTINGS['NMAP_TIMING_TEMPLATE'])
     settings['NMAP_TIMEOUT'] = project.get('nmapTimeout', DEFAULT_SETTINGS['NMAP_TIMEOUT'])
     settings['NMAP_HOST_TIMEOUT'] = project.get('nmapHostTimeout', DEFAULT_SETTINGS['NMAP_HOST_TIMEOUT'])
+    settings['NMAP_PARALLELISM'] = project.get('nmapParallelism', DEFAULT_SETTINGS['NMAP_PARALLELISM'])
 
     # httpx HTTP Probing
     settings['HTTPX_ENABLED'] = project.get('httpxEnabled', DEFAULT_SETTINGS['HTTPX_ENABLED'])
@@ -913,6 +923,13 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['ZOOMEYE_ENABLED'] = project.get('zoomEyeEnabled', DEFAULT_SETTINGS['ZOOMEYE_ENABLED'])
     settings['ZOOMEYE_MAX_RESULTS'] = project.get('zoomEyeMaxResults', DEFAULT_SETTINGS['ZOOMEYE_MAX_RESULTS'])
     settings['CRIMINALIP_ENABLED'] = project.get('criminalIpEnabled', DEFAULT_SETTINGS['CRIMINALIP_ENABLED'])
+    settings['OTX_WORKERS'] = project.get('otxWorkers', DEFAULT_SETTINGS['OTX_WORKERS'])
+    settings['VIRUSTOTAL_WORKERS'] = project.get('virusTotalWorkers', DEFAULT_SETTINGS['VIRUSTOTAL_WORKERS'])
+    settings['CENSYS_WORKERS'] = project.get('censysWorkers', DEFAULT_SETTINGS['CENSYS_WORKERS'])
+    settings['CRIMINALIP_WORKERS'] = project.get('criminalIpWorkers', DEFAULT_SETTINGS['CRIMINALIP_WORKERS'])
+    settings['FOFA_WORKERS'] = project.get('fofaWorkers', DEFAULT_SETTINGS['FOFA_WORKERS'])
+    settings['NETLAS_WORKERS'] = project.get('netlasWorkers', DEFAULT_SETTINGS['NETLAS_WORKERS'])
+    settings['ZOOMEYE_WORKERS'] = project.get('zoomEyeWorkers', DEFAULT_SETTINGS['ZOOMEYE_WORKERS'])
     settings['UNCOVER_ENABLED'] = project.get('uncoverEnabled', DEFAULT_SETTINGS['UNCOVER_ENABLED'])
     settings['UNCOVER_MAX_RESULTS'] = int(project.get('uncoverMaxResults', DEFAULT_SETTINGS['UNCOVER_MAX_RESULTS']) or DEFAULT_SETTINGS['UNCOVER_MAX_RESULTS'])
     settings['UNCOVER_DOCKER_IMAGE'] = project.get('uncoverDockerImage', DEFAULT_SETTINGS['UNCOVER_DOCKER_IMAGE'])
@@ -1229,8 +1246,20 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     # --- Banner Grabbing: DISABLED (direct socket connections) ---
     settings['BANNER_GRAB_ENABLED'] = False
 
+    # --- Nmap: minimal parallelism ---
+    settings['NMAP_PARALLELISM'] = 1
+
     # --- Shodan: reduce parallel workers ---
     settings['SHODAN_WORKERS'] = 1
+
+    # --- OSINT enrichment: reduce parallel workers ---
+    settings['OTX_WORKERS'] = 1
+    settings['VIRUSTOTAL_WORKERS'] = 1
+    settings['CENSYS_WORKERS'] = 1
+    settings['CRIMINALIP_WORKERS'] = 1
+    settings['FOFA_WORKERS'] = 1
+    settings['NETLAS_WORKERS'] = 1
+    settings['ZOOMEYE_WORKERS'] = 1
 
     # --- DNS: reduce parallel workers ---
     settings['DNS_MAX_WORKERS'] = 5

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import time
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -18,6 +20,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 ZOOMEYE_API_BASE = "https://api.zoomeye.ai/"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _extract_ips_from_recon(combined_result: dict) -> list[str]:
@@ -246,11 +264,9 @@ def run_zoomeye_enrichment(combined_result: dict, settings: dict) -> dict:
         if is_ip_mode:
             print(f"[+][ZoomEye] IP mode: {len(ips)} target(s)")
             grand_total = 0
-            first = True
-            for ip in ips:
-                if not first:
-                    time.sleep(1)
-                first = False
+
+            def _enrich_single_ip_zoomeye(ip, rate_limiter):
+                rate_limiter.wait()
                 print(f"[*][ZoomEye] Searching ip:{ip}...")
                 rows, t = _zoomeye_search(
                     f"ip:{ip}",
@@ -258,9 +274,29 @@ def run_zoomeye_enrichment(combined_result: dict, settings: dict) -> dict:
                     key_rotator,
                     max_results,
                 )
+                print(f"[+][ZoomEye] ip:{ip} -- {len(rows)} row(s)")
+                return ip, rows, t
+
+            max_workers = settings.get('ZOOMEYE_WORKERS', 5)
+            rl = _RateLimiter(1.0)
+            ip_results: list[tuple[str, list, int]] = []
+            futures = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for ip in ips:
+                    futures[executor.submit(_enrich_single_ip_zoomeye, ip, rl)] = ip
+                for fut in as_completed(futures):
+                    try:
+                        _ip, rows, t = fut.result()
+                        ip_results.append((_ip, rows, t))
+                        grand_total = max(grand_total, t, len(rows))
+                    except Exception as e:
+                        ip = futures[fut]
+                        logger.warning(f"ZoomEye worker error for {ip}: {e}")
+            # Preserve original IP ordering
+            ip_order = {ip: i for i, ip in enumerate(ips)}
+            ip_results.sort(key=lambda r: ip_order.get(r[0], 0))
+            for _ip, rows, _t in ip_results:
                 ze_data["results"].extend(rows)
-                grand_total = max(grand_total, t, len(rows))
-                print(f"[+][ZoomEye] ip:{ip} — {len(rows)} row(s)")
             ze_data["total"] = grand_total or len(ze_data["results"])
         else:
             if not domain:

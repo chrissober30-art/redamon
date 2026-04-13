@@ -89,15 +89,18 @@ export function GraphCanvas2D({
     return () => clearTimeout(timer)
   }, [forceConfig.collisionIterations])
 
-  // Reheat on structural changes (new/removed nodes)
+  // Reheat on structural changes (new/removed nodes or links)
+  const prevLinkCountRef = useRef<number>(0)
   useEffect(() => {
-    const prevCount = prevNodeCountRef.current
-    const newCount = data.nodes.length
-    const isFirstRender = prevCount === 0
-    const structureChanged = newCount !== prevCount
-    prevNodeCountRef.current = newCount
+    const prevNodeCount = prevNodeCountRef.current
+    const prevLinkCount = prevLinkCountRef.current
+    const newNodeCount = data.nodes.length
+    const newLinkCount = data.links.length
+    const structureChanged = newNodeCount !== prevNodeCount || newLinkCount !== prevLinkCount
+    prevNodeCountRef.current = newNodeCount
+    prevLinkCountRef.current = newLinkCount
 
-    if (!isFirstRender && structureChanged) {
+    if (structureChanged) {
       const timer = setTimeout(() => {
         graphRef.current?.d3ReheatSimulation()
       }, ANIMATION_CONFIG.initDelay)

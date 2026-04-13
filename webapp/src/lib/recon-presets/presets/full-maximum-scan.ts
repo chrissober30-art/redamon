@@ -110,6 +110,7 @@ Pentesters running a final comprehensive sweep on a target they have full author
     nmapTimingTemplate: 'T4',
     nmapTimeout: 1200,
     nmapHostTimeout: 600,
+    nmapParallelism: 5,
 
     // --- httpx: all probes maxed ---
     httpxEnabled: true,
@@ -328,20 +329,27 @@ Pentesters running a final comprehensive sweep on a target they have full author
     urlscanMaxResults: 10000,
 
     otxEnabled: true,
+    otxWorkers: 10,
 
     censysEnabled: true,
+    censysWorkers: 10,
 
     fofaEnabled: true,
     fofaMaxResults: 5000,
+    fofaWorkers: 10,
 
     netlasEnabled: true,
+    netlasWorkers: 10,
 
     virusTotalEnabled: true,
+    virusTotalWorkers: 4,
 
     zoomEyeEnabled: true,
     zoomEyeMaxResults: 5000,
+    zoomEyeWorkers: 10,
 
     criminalIpEnabled: true,
+    criminalIpWorkers: 10,
 
     uncoverEnabled: true,
     uncoverMaxResults: 1000,

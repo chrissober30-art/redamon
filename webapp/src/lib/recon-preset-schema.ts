@@ -82,6 +82,7 @@ export const reconPresetSchema = z.object({
   nmapTimingTemplate: str,
   nmapTimeout: int,
   nmapHostTimeout: int,
+  nmapParallelism: int,
 
   // -- HTTP Probing: httpx --
   httpxEnabled: bool,
@@ -334,8 +335,15 @@ export const reconPresetSchema = z.object({
   zoomEyeEnabled: bool,
   zoomEyeMaxResults: int,
   criminalIpEnabled: bool,
+  criminalIpWorkers: int,
   uncoverEnabled: bool,
   uncoverMaxResults: int,
+  otxWorkers: int,
+  virusTotalWorkers: int,
+  censysWorkers: int,
+  fofaWorkers: int,
+  netlasWorkers: int,
+  zoomEyeWorkers: int,
 }).strip()
 
 export type ReconPresetParams = z.infer<typeof reconPresetSchema>
@@ -415,6 +423,7 @@ export const RECON_PARAMETER_CATALOG = `
 - nmapTimingTemplate: string - "T0" to "T5"
 - nmapTimeout: integer - Timeout in seconds
 - nmapHostTimeout: integer - Per-host timeout in seconds
+- nmapParallelism: integer - IPs scanned concurrently by Nmap
 
 ## HTTP Probing - httpx
 - httpxEnabled: boolean - Run httpx HTTP prober
@@ -667,8 +676,15 @@ export const RECON_PARAMETER_CATALOG = `
 - zoomEyeEnabled: boolean
 - zoomEyeMaxResults: integer
 - criminalIpEnabled: boolean
+- criminalIpWorkers: integer - Parallel CriminalIP IP enrichment workers
 - uncoverEnabled: boolean - ProjectDiscovery Uncover
 - uncoverMaxResults: integer
+- otxWorkers: integer - Parallel OTX IP enrichment workers
+- virusTotalWorkers: integer - Parallel VirusTotal IP enrichment workers
+- censysWorkers: integer - Parallel Censys IP enrichment workers
+- fofaWorkers: integer - Parallel FOFA IP enrichment workers
+- netlasWorkers: integer - Parallel Netlas IP enrichment workers
+- zoomEyeWorkers: integer - Parallel ZoomEye IP enrichment workers
 `.trim()
 
 // ---------------------------------------------------------------------------

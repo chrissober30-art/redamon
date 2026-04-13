@@ -37,6 +37,14 @@ def test_default_settings_have_new_fields():
         'SHODAN_WORKERS': 5,
         'DNS_MAX_WORKERS': 50,
         'DNS_RECORD_PARALLELISM': True,
+        'NMAP_PARALLELISM': 2,
+        'OTX_WORKERS': 5,
+        'VIRUSTOTAL_WORKERS': 3,
+        'CENSYS_WORKERS': 5,
+        'CRIMINALIP_WORKERS': 5,
+        'FOFA_WORKERS': 5,
+        'NETLAS_WORKERS': 5,
+        'ZOOMEYE_WORKERS': 5,
     }
 
     for key, default_val in expected.items():
@@ -314,6 +322,9 @@ def test_prisma_schema_fields():
         'ffufParallelism', 'gauWorkers',
         'paramspiderWorkers', 'kiterunnerParallelism',
         'shodanWorkers', 'dnsMaxWorkers', 'dnsRecordParallelism',
+        'nmapParallelism',
+        'otxWorkers', 'virusTotalWorkers', 'censysWorkers',
+        'criminalIpWorkers', 'fofaWorkers', 'netlasWorkers', 'zoomEyeWorkers',
     ]
 
     for field in expected_fields:
@@ -335,6 +346,9 @@ def test_preset_schema_fields():
         'paramspiderWorkers', 'ffufParallelism',
         'kiterunnerParallelism', 'jsluiceParallelism',
         'shodanWorkers', 'dnsMaxWorkers', 'dnsRecordParallelism',
+        'nmapParallelism',
+        'otxWorkers', 'virusTotalWorkers', 'censysWorkers',
+        'criminalIpWorkers', 'fofaWorkers', 'netlasWorkers', 'zoomEyeWorkers',
     ]
 
     for field in expected_fields:
@@ -483,6 +497,67 @@ def test_rate_limiter_no_lock_during_sleep():
 
 
 # ============================================================
+# Test 21: Nmap parallelism
+# ============================================================
+
+def test_nmap_parallelism():
+    source = (PROJECT_ROOT / "recon" / "nmap_scan.py").read_text()
+
+    assert 'NMAP_PARALLELISM' in source, "Nmap should reference NMAP_PARALLELISM"
+    assert 'ThreadPoolExecutor' in source, "Nmap should use ThreadPoolExecutor"
+    assert '_scan_single_ip' in source, "Nmap should have _scan_single_ip helper"
+
+    print("PASS: test_nmap_parallelism")
+
+
+# ============================================================
+# Test 22: All 7 enrichment tools have parallelism
+# ============================================================
+
+def test_enrichment_tools_parallelism():
+    tools = {
+        'otx_enrich.py': ('OTX_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+        'virustotal_enrich.py': ('VIRUSTOTAL_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+        'censys_enrich.py': ('CENSYS_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+        'criminalip_enrich.py': ('CRIMINALIP_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+        'fofa_enrich.py': ('FOFA_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+        'netlas_enrich.py': ('NETLAS_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+        'zoomeye_enrich.py': ('ZOOMEYE_WORKERS', 'ThreadPoolExecutor', '_RateLimiter'),
+    }
+
+    for filename, (workers_setting, executor_class, rate_limiter) in tools.items():
+        source = (PROJECT_ROOT / "recon" / filename).read_text()
+        assert workers_setting in source, f"{filename}: missing {workers_setting}"
+        assert executor_class in source, f"{filename}: missing {executor_class}"
+        assert rate_limiter in source, f"{filename}: missing {rate_limiter}"
+
+    print("PASS: test_enrichment_tools_parallelism")
+
+
+# ============================================================
+# Test 23: Stealth overrides include new settings
+# ============================================================
+
+def test_stealth_overrides_complete():
+    from recon.project_settings import DEFAULT_SETTINGS, apply_stealth_overrides
+
+    settings = DEFAULT_SETTINGS.copy()
+    settings['STEALTH_MODE'] = True
+    result = apply_stealth_overrides(settings)
+
+    assert result['NMAP_PARALLELISM'] == 1, f"Stealth NMAP_PARALLELISM should be 1"
+    assert result['OTX_WORKERS'] == 1, f"Stealth OTX_WORKERS should be 1"
+    assert result['VIRUSTOTAL_WORKERS'] == 1
+    assert result['CENSYS_WORKERS'] == 1
+    assert result['CRIMINALIP_WORKERS'] == 1
+    assert result['FOFA_WORKERS'] == 1
+    assert result['NETLAS_WORKERS'] == 1
+    assert result['ZOOMEYE_WORKERS'] == 1
+
+    print("PASS: test_stealth_overrides_complete")
+
+
+# ============================================================
 # Run all tests
 # ============================================================
 
@@ -508,6 +583,9 @@ if __name__ == "__main__":
         test_kiterunner_wired,
         test_stealth_preset_values,
         test_rate_limiter_no_lock_during_sleep,
+        test_nmap_parallelism,
+        test_enrichment_tools_parallelism,
+        test_stealth_overrides_complete,
     ]
 
     passed = 0

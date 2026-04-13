@@ -92,6 +92,7 @@ Red team operators performing authorized reconnaissance against targets with act
     // --- DISABLE active port scanners ---
     masscanEnabled: false,
     nmapEnabled: false,
+    nmapParallelism: 1,
 
     // --- httpx: minimal probes, throttled ---
     httpxEnabled: true,

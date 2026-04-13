@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import time
 import logging
+import threading
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -21,6 +23,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 NETLAS_API_BASE = "https://app.netlas.io/api"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _extract_ips_from_recon(combined_result: dict) -> list[str]:
@@ -226,18 +244,33 @@ def run_netlas_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     try:
         if is_ip_mode:
             print(f"[+][Netlas] IP mode — querying host: for {len(ips)} IP(s)")
-            for ip in ips:
-                if len(all_rows) >= max_results:
-                    break
+
+            def _enrich_single_ip_netlas(ip, rate_limiter):
+                rate_limiter.wait()
                 q = f"host:{ip}"
-                remaining = max_results - len(all_rows)
-                body = _netlas_responses_get(q, api_key, remaining, key_rotator=key_rotator)
+                body = _netlas_responses_get(q, api_key, max_results, key_rotator=key_rotator)
                 if body is None:
-                    break
+                    return ip, [], 0
                 rows, t = _parse_netlas_body(body)
-                total_hint = max(total_hint, t)
-                all_rows.extend(rows[:remaining])
-                time.sleep(1)
+                return ip, rows, t
+
+            max_workers = settings.get('NETLAS_WORKERS', 5)
+            rl = _RateLimiter(1.0)
+            futures = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for ip in ips:
+                    futures[executor.submit(_enrich_single_ip_netlas, ip, rl)] = ip
+                for fut in as_completed(futures):
+                    try:
+                        _ip, rows, t = fut.result()
+                        total_hint = max(total_hint, t)
+                        all_rows.extend(rows)
+                    except Exception as e:
+                        ip = futures[fut]
+                        logger.warning(f"Netlas worker error for {ip}: {e}")
+            # Preserve original IP ordering
+            ip_order = {ip: i for i, ip in enumerate(ips)}
+            all_rows.sort(key=lambda r: ip_order.get(r.get("ip", ""), 0))
         else:
             if not domain:
                 print("[!][Netlas] No domain in scope — skipping")

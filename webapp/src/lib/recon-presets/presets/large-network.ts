@@ -105,6 +105,7 @@ Network security teams and pentesters who need to map large external perimeters 
     nmapTimingTemplate: 'T4',
     nmapTimeout: 1200,
     nmapHostTimeout: 600,
+    nmapParallelism: 4,
 
     // --- httpx: high throughput with full fingerprinting ---
     httpxEnabled: true,
@@ -227,10 +228,12 @@ Network security teams and pentesters who need to map large external perimeters 
     shodanPassiveCves: true,
 
     censysEnabled: true,
+    censysWorkers: 8,
 
     // Disable non-infrastructure OSINT
     urlscanEnabled: false,
     otxEnabled: false,
+    otxWorkers: 8,
     fofaEnabled: false,
     netlasEnabled: false,
     virusTotalEnabled: false,

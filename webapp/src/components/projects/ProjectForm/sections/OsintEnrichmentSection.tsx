@@ -128,6 +128,22 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                 disabled={noKey('censys')}
               />
             </div>
+            {data.censysEnabled && !noKey('censys') && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.censysWorkers ?? 5}
+                    onChange={(e) => updateField('censysWorkers', parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={20}
+                  />
+                  <span className={styles.fieldHint}>Parallel Censys IP enrichment workers (1-20)</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* FOFA */}
@@ -164,7 +180,19 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                     min={1}
                     max={10000}
                   />
-                  <span className={styles.fieldHint}>Maximum results to fetch from FOFA API (1–10 000)</span>
+                  <span className={styles.fieldHint}>Maximum results to fetch from FOFA API (1-10 000)</span>
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.fofaWorkers ?? 5}
+                    onChange={(e) => updateField('fofaWorkers', parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={20}
+                  />
+                  <span className={styles.fieldHint}>Parallel FOFA IP enrichment workers (1-20)</span>
                 </div>
               </div>
             )}
@@ -186,6 +214,22 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                 onChange={(checked) => updateField('otxEnabled', checked)}
               />
             </div>
+            {data.otxEnabled && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.otxWorkers ?? 5}
+                    onChange={(e) => updateField('otxWorkers', parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={20}
+                  />
+                  <span className={styles.fieldHint}>Parallel OTX IP enrichment workers (1-20)</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Netlas */}
@@ -210,6 +254,22 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                 disabled={noKey('netlas')}
               />
             </div>
+            {data.netlasEnabled && !noKey('netlas') && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.netlasWorkers ?? 5}
+                    onChange={(e) => updateField('netlasWorkers', parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={20}
+                  />
+                  <span className={styles.fieldHint}>Parallel Netlas IP enrichment workers (1-20)</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* VirusTotal */}
@@ -234,6 +294,22 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                 disabled={noKey('virusTotal')}
               />
             </div>
+            {data.virusTotalEnabled && !noKey('virusTotal') && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.virusTotalWorkers ?? 3}
+                    onChange={(e) => updateField('virusTotalWorkers', parseInt(e.target.value) || 3)}
+                    min={1}
+                    max={10}
+                  />
+                  <span className={styles.fieldHint}>Parallel VirusTotal IP enrichment workers (1-10)</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ZoomEye */}
@@ -270,7 +346,19 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                     min={1}
                     max={10000}
                   />
-                  <span className={styles.fieldHint}>Maximum results to fetch from ZoomEye API (1–10 000)</span>
+                  <span className={styles.fieldHint}>Maximum results to fetch from ZoomEye API (1-10 000)</span>
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.zoomEyeWorkers ?? 5}
+                    onChange={(e) => updateField('zoomEyeWorkers', parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={20}
+                  />
+                  <span className={styles.fieldHint}>Parallel ZoomEye IP enrichment workers (1-20)</span>
                 </div>
               </div>
             )}
@@ -298,6 +386,22 @@ export function OsintEnrichmentSection({ data, updateField, onRun, onRunUncover 
                 disabled={noKey('criminalIp')}
               />
             </div>
+            {data.criminalIpEnabled && !noKey('criminalIp') && (
+              <div className={styles.fieldRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Workers</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.criminalIpWorkers ?? 5}
+                    onChange={(e) => updateField('criminalIpWorkers', parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={20}
+                  />
+                  <span className={styles.fieldHint}>Parallel CriminalIP IP enrichment workers (1-20)</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Uncover */}

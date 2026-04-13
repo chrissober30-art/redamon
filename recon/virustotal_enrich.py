@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import time
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -19,6 +21,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 VIRUSTOTAL_API_BASE = "https://www.virustotal.com/api/v3/"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _extract_ips_from_recon(combined_result: dict) -> list[str]:
@@ -202,34 +220,52 @@ def run_virustotal_enrichment(combined_result: dict, settings: dict) -> dict:
             else:
                 print(f"[!][VirusTotal] No domain report data for {domain}")
 
-        for ip in ip_slice:
-            if need_sleep:
-                time.sleep(throttle)
-            need_sleep = True
+        def _enrich_single_ip(ip, rate_limiter):
+            rate_limiter.wait()
             print(f"[*][VirusTotal] Fetching IP report for {ip}...")
             raw = _vt_get(f"ip_addresses/{ip}", api_key, key_rotator)
             parsed = _parse_ip_attrs(raw)
             if not parsed:
                 logger.warning(f"VirusTotal: no IP data for {ip}")
-                continue
-            vt_data["ip_reports"].append(
-                {
-                    "ip": ip,
-                    "reputation": parsed["reputation"],
-                    "analysis_stats": parsed["analysis_stats"],
-                    "asn": parsed["asn"],
-                    "as_owner": parsed["as_owner"],
-                    "country": parsed["country"],
-                    "total_votes": parsed["total_votes"],
-                    "tags": parsed["tags"],
-                    "last_analysis_date": parsed["last_analysis_date"],
-                    "network": parsed["network"],
-                    "regional_internet_registry": parsed["regional_internet_registry"],
-                    "continent": parsed["continent"],
-                    "jarm": parsed["jarm"],
-                }
-            )
+                return None
+            report = {
+                "ip": ip,
+                "reputation": parsed["reputation"],
+                "analysis_stats": parsed["analysis_stats"],
+                "asn": parsed["asn"],
+                "as_owner": parsed["as_owner"],
+                "country": parsed["country"],
+                "total_votes": parsed["total_votes"],
+                "tags": parsed["tags"],
+                "last_analysis_date": parsed["last_analysis_date"],
+                "network": parsed["network"],
+                "regional_internet_registry": parsed["regional_internet_registry"],
+                "continent": parsed["continent"],
+                "jarm": parsed["jarm"],
+            }
             print(f"[+][VirusTotal] IP report retrieved for {ip}")
+            return report
+
+        max_workers = settings.get('VIRUSTOTAL_WORKERS', 3)
+        rl = _RateLimiter(throttle)
+        # Honour the domain request's timing: seed the rate limiter if we already made a request
+        if need_sleep:
+            rl._last = time.time()
+        futures = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for ip in ip_slice:
+                futures[executor.submit(_enrich_single_ip, ip, rl)] = ip
+            for fut in as_completed(futures):
+                try:
+                    result = fut.result()
+                    if result is not None:
+                        vt_data["ip_reports"].append(result)
+                except Exception as e:
+                    ip = futures[fut]
+                    logger.warning(f"VirusTotal worker error for {ip}: {e}")
+        # Preserve original ordering (sorted IPs)
+        ip_order = {ip: i for i, ip in enumerate(ip_slice)}
+        vt_data["ip_reports"].sort(key=lambda r: ip_order.get(r["ip"], 0))
 
         print(
             f"[+][VirusTotal] Enrichment complete: "

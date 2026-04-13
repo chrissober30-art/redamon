@@ -18,8 +18,10 @@ Optional API key rotation via OTX_KEY_ROTATOR.
 from __future__ import annotations
 
 import time
+import threading
 import logging
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -31,6 +33,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 OTX_API_BASE = "https://otx.alienvault.com/api/v1/indicators"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 # TLP severity order for picking the "most restrictive" value across pulses
 _TLP_ORDER = {"white": 0, "green": 1, "amber": 2, "red": 3}
@@ -368,23 +386,26 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
     }
 
     try:
-        stop_rl = False
+        stop_rl = threading.Event()
+        rate_limiter = _RateLimiter(0.3)
+        max_workers = settings.get("OTX_WORKERS", 5)
 
-        # ── IPv4 enrichment ──────────────────────────────────────────────────
-        for ip in ips:
-            if stop_rl:
-                break
+        def _enrich_single_ip(ip, api_key, key_rotator, rate_limiter):
+            """Enrich a single IP via OTX. Returns report dict or None."""
+            if stop_rl.is_set():
+                return None
 
             # general
+            rate_limiter.wait()
             gen, rl = _otx_get(f"/IPv4/{ip}/general", api_key, key_rotator=key_rotator)
             if rl:
-                stop_rl = True
-                break
+                stop_rl.set()
+                return None
             if gen is None:
-                continue
-            time.sleep(0.3)
+                return None
 
             # passive_dns
+            rate_limiter.wait()
             pd_body, rl2 = _otx_get(
                 f"/IPv4/{ip}/passive_dns",
                 api_key,
@@ -392,13 +413,13 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                 empty_on_404=True,
             )
             if rl2:
-                stop_rl = True
+                stop_rl.set()
             pdns_records = _otx_passive_dns_records(pd_body)
-            time.sleep(0.3)
 
             # malware
             malware_list: list[dict] = []
-            if not stop_rl:
+            if not stop_rl.is_set():
+                rate_limiter.wait()
                 ml_body, rl3 = _otx_get(
                     f"/IPv4/{ip}/malware",
                     api_key,
@@ -406,14 +427,14 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                     empty_on_404=True,
                 )
                 if rl3:
-                    stop_rl = True
+                    stop_rl.set()
                 else:
                     malware_list = _otx_malware_samples(ml_body)
-                time.sleep(0.3)
 
             # url_list
             url_count = 0
-            if not stop_rl:
+            if not stop_rl.is_set():
+                rate_limiter.wait()
                 ul_body, rl4 = _otx_get(
                     f"/IPv4/{ip}/url_list",
                     api_key,
@@ -421,35 +442,50 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                     empty_on_404=True,
                 )
                 if rl4:
-                    stop_rl = True
+                    stop_rl.set()
                 else:
                     url_count = _otx_url_count(ul_body)
-                time.sleep(0.3)
 
             pulse_details = _otx_pulse_details(gen)
-            otx_data["ip_reports"].append({
+            report = {
                 "ip": ip,
                 "pulse_count": _otx_pulse_count(gen),
                 "pulse_details": pulse_details,
                 "reputation": gen.get("reputation"),
                 "geo": _otx_geo_from_general(gen),
                 "passive_dns": pdns_records,
-                # Legacy field for backward compat — just the hostname strings
+                # Legacy field for backward compat -- just the hostname strings
                 "passive_dns_hostnames": [r["hostname"] for r in pdns_records],
                 "malware": malware_list,
                 "url_count": url_count,
-            })
+            }
             logger.info(
-                f"  OTX IPv4: {ip} — pulses {_otx_pulse_count(gen)}, "
+                f"  OTX IPv4: {ip} -- pulses {_otx_pulse_count(gen)}, "
                 f"pdns {len(pdns_records)}, malware {len(malware_list)}"
             )
+            return report
 
-        if stop_rl and otx_data["ip_reports"]:
-            print("[!][OTX] Stopped early due to rate limit — partial ip_reports")
+        # ── IPv4 enrichment (parallel) ───────────────────────────────────────
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_enrich_single_ip, ip, api_key, key_rotator, rate_limiter): ip
+                for ip in ips
+            }
+            for future in as_completed(futures):
+                try:
+                    report = future.result()
+                    if report is not None:
+                        otx_data["ip_reports"].append(report)
+                except Exception as exc:
+                    logger.warning(f"OTX IP enrichment thread error for {futures[future]}: {exc}")
+
+        if stop_rl.is_set() and otx_data["ip_reports"]:
+            print("[!][OTX] Stopped early due to rate limit -- partial ip_reports")
 
         # ── Domain enrichment ────────────────────────────────────────────────
-        if domain and not is_ip_mode and not stop_rl:
+        if domain and not is_ip_mode and not stop_rl.is_set():
             # general
+            rate_limiter.wait()
             dg, rl_dg = _otx_get(
                 f"/domain/{domain}/general", api_key, key_rotator=key_rotator
             )
@@ -469,12 +505,12 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                     "whois": whois,
                 })
                 logger.info(
-                    f"  OTX domain: {domain} — pulses {otx_data['domain_report']['pulse_count']}"
+                    f"  OTX domain: {domain} -- pulses {otx_data['domain_report']['pulse_count']}"
                 )
-            time.sleep(0.3)
 
-            # domain/passive_dns — IPs the domain has historically resolved to
-            if not stop_rl:
+            # domain/passive_dns -- IPs the domain has historically resolved to
+            if not stop_rl.is_set():
+                rate_limiter.wait()
                 dpd_body, rl_dpd = _otx_get(
                     f"/domain/{domain}/passive_dns",
                     api_key,
@@ -482,15 +518,15 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                     empty_on_404=True,
                 )
                 if rl_dpd:
-                    stop_rl = True
+                    stop_rl.set()
                 else:
                     otx_data["domain_report"]["historical_ips"] = (
                         _otx_domain_passive_dns_ips(dpd_body)
                     )
-                time.sleep(0.3)
 
             # domain/malware
-            if not stop_rl:
+            if not stop_rl.is_set():
+                rate_limiter.wait()
                 dm_body, rl_dm = _otx_get(
                     f"/domain/{domain}/malware",
                     api_key,
@@ -498,13 +534,13 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                     empty_on_404=True,
                 )
                 if rl_dm:
-                    stop_rl = True
+                    stop_rl.set()
                 else:
                     otx_data["domain_report"]["malware"] = _otx_malware_samples(dm_body)
-                time.sleep(0.3)
 
             # domain/url_list
-            if not stop_rl:
+            if not stop_rl.is_set():
+                rate_limiter.wait()
                 dul_body, rl_dul = _otx_get(
                     f"/domain/{domain}/url_list",
                     api_key,
@@ -513,7 +549,6 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
                 )
                 if not rl_dul:
                     otx_data["domain_report"]["url_count"] = _otx_url_count(dul_body)
-                time.sleep(0.3)
 
         ip_count = len(otx_data["ip_reports"])
         dom_pulse = otx_data["domain_report"].get("pulse_count", 0)

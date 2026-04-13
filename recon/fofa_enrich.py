@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import base64
 import time
+import threading
 import logging
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -22,6 +24,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 FOFA_API_URL = "https://fofa.info/api/v1/search/all"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 FOFA_FIELDS = (
     "ip,port,host,domain,title,server,protocol,country,country_name,region,city,"
@@ -189,20 +207,43 @@ def run_fofa_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict
 
     try:
         if is_ip_mode:
-            print(f"[+][FOFA] IP mode — {len(ips)} address(es)")
-            for ip in ips:
-                if len(aggregated) >= max_results:
-                    break
+            print(f"[+][FOFA] IP mode -- {len(ips)} address(es)")
+            max_workers = settings.get("FOFA_WORKERS", 5)
+            rate_limiter = _RateLimiter(1.0)
+            stop_flag = threading.Event()
+            results_lock = threading.Lock()
+
+            def _enrich_single_ip(ip, api_key, key_rotator, rate_limiter):
+                """Query FOFA for a single IP. Returns (rows, total_hint) or None."""
+                if stop_flag.is_set():
+                    return None
+                rate_limiter.wait()
+                if stop_flag.is_set():
+                    return None
                 q = f'ip="{ip}"'
-                remaining = max_results - len(aggregated)
-                size = min(per_request_size, remaining)
+                size = min(per_request_size, max_results)
                 data = _fofa_search(q, api_key, size, key_rotator=key_rotator)
                 if data is None:
-                    break
+                    stop_flag.set()
+                    return None
                 rows, t = _parse_fofa_rows(data)
-                total_hint = max(total_hint, t)
-                aggregated.extend(rows)
-                time.sleep(1)
+                return rows, t
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_enrich_single_ip, ip, api_key, key_rotator, rate_limiter): ip
+                    for ip in ips
+                }
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        if result is not None:
+                            rows, t = result
+                            with results_lock:
+                                total_hint = max(total_hint, t)
+                                aggregated.extend(rows)
+                    except Exception as exc:
+                        logger.warning(f"FOFA enrichment thread error for {futures[future]}: {exc}")
         else:
             if not domain:
                 print("[!][FOFA] No domain in scope — skipping")

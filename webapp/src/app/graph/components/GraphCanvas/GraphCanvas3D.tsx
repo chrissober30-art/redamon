@@ -424,12 +424,15 @@ export function GraphCanvas3D({
 
   // ── Reheat simulation + clean cache when data changes ──
   const prevNodeCount3DRef = useRef(0)
+  const prevLinkCount3DRef = useRef(0)
   useEffect(() => {
-    const prevCount = prevNodeCount3DRef.current
-    const newCount = data.nodes.length
-    const isFirstRender = prevCount === 0
-    const structureChanged = newCount !== prevCount
-    prevNodeCount3DRef.current = newCount
+    const prevNodeCount = prevNodeCount3DRef.current
+    const prevLinkCount = prevLinkCount3DRef.current
+    const newNodeCount = data.nodes.length
+    const newLinkCount = data.links.length
+    const structureChanged = newNodeCount !== prevNodeCount || newLinkCount !== prevLinkCount
+    prevNodeCount3DRef.current = newNodeCount
+    prevLinkCount3DRef.current = newLinkCount
 
     // Clean up removed nodes from cache
     const currentIds = new Set(data.nodes.map(n => n.id))
@@ -438,7 +441,7 @@ export function GraphCanvas3D({
         nodeCache.current.delete(id)
       }
     })
-    if (structureChanged && !isFirstRender) {
+    if (structureChanged) {
       const timer = setTimeout(() => {
         graphRef.current?.d3ReheatSimulation()
       }, ANIMATION_CONFIG.initDelay)

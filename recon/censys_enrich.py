@@ -11,8 +11,10 @@ Requires CENSYS_API_TOKEN (Personal Access Token) and CENSYS_ORG_ID
 from __future__ import annotations
 
 import time
+import threading
 import logging
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from recon.ip_filter import filter_ips_for_enrichment
@@ -24,6 +26,22 @@ import requests
 logger = logging.getLogger(__name__)
 
 CENSYS_API_BASE = "https://api.platform.censys.io/v3/global"
+
+
+class _RateLimiter:
+    """Thread-safe rate limiter."""
+    def __init__(self, interval: float):
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._last = 0.0
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self._last
+            delay = self._interval - elapsed if elapsed < self._interval else 0.0
+            self._last = now + delay
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _extract_ips_from_recon(combined_result: dict) -> list[str]:
@@ -290,19 +308,41 @@ def run_censys_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
 
     try:
         if not ips:
-            print("[*][Censys] No IPs to query — empty hosts list")
+            print("[*][Censys] No IPs to query -- empty hosts list")
         else:
-            print(f"[*][Censys] Querying host view for {len(ips)} IPs...")
-            for ip in ips:
+            max_workers = settings.get("CENSYS_WORKERS", 5)
+            rate_limiter = _RateLimiter(0.5)
+            stop_rl = threading.Event()
+
+            def _enrich_single_ip(ip, api_token, org_id, rate_limiter):
+                """Enrich a single IP via Censys. Returns entry dict or None."""
+                if stop_rl.is_set():
+                    return None
+                rate_limiter.wait()
                 result, rate_limited = _censys_get_host(ip, api_token, org_id)
                 if rate_limited:
-                    break
+                    stop_rl.set()
+                    return None
                 if result is None:
-                    continue
+                    return None
                 entry = _build_censys_host_entry(ip, result)
-                censys_data["hosts"].append(entry)
-                logger.info(f"  Censys host: {ip} — {len(entry['services'])} services")
-                time.sleep(0.5)
+                logger.info(f"  Censys host: {ip} -- {len(entry['services'])} services")
+                return entry
+
+            print(f"[*][Censys] Querying host view for {len(ips)} IPs...")
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_enrich_single_ip, ip, api_token, org_id, rate_limiter): ip
+                    for ip in ips
+                }
+                for future in as_completed(futures):
+                    try:
+                        entry = future.result()
+                        if entry is not None:
+                            censys_data["hosts"].append(entry)
+                    except Exception as exc:
+                        logger.warning(f"Censys enrichment thread error for {futures[future]}: {exc}")
+
             print(f"[+][Censys] Enrichment complete: {len(censys_data['hosts'])} hosts")
 
     except Exception as e:

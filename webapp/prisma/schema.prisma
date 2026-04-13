@@ -206,6 +206,7 @@ model Project {
   nmapTimingTemplate          String   @default("T3") @map("nmap_timing_template")
   nmapTimeout                 Int      @default(600) @map("nmap_timeout")
   nmapHostTimeout             Int      @default(300) @map("nmap_host_timeout")
+  nmapParallelism             Int      @default(2) @map("nmap_parallelism")
 
   // ========== HTTPX HTTP PROBING ==========
   httpxEnabled                Boolean  @default(true)  @map("httpx_enabled")
@@ -550,6 +551,14 @@ model Project {
   zoomEyeEnabled                        Boolean  @default(false)  @map("zoomeye_enabled")
   zoomEyeMaxResults                     Int      @default(1000)   @map("zoomeye_max_results")
   criminalIpEnabled                     Boolean  @default(false)  @map("criminalip_enabled")
+  // OSINT Enrichment Parallelism
+  otxWorkers                            Int      @default(5) @map("otx_workers")
+  virusTotalWorkers                     Int      @default(3) @map("virustotal_workers")
+  censysWorkers                         Int      @default(5) @map("censys_workers")
+  criminalIpWorkers                     Int      @default(5) @map("criminalip_workers")
+  fofaWorkers                           Int      @default(5) @map("fofa_workers")
+  netlasWorkers                         Int      @default(5) @map("netlas_workers")
+  zoomEyeWorkers                        Int      @default(5) @map("zoomeye_workers")
   uncoverEnabled                        Boolean  @default(false)  @map("uncover_enabled")
   uncoverMaxResults                     Int      @default(500)    @map("uncover_max_results")
   uncoverDockerImage                    String   @default("projectdiscovery/uncover:latest") @map("uncover_docker_image")

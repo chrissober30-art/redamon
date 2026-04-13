@@ -19,6 +19,7 @@ import subprocess
 import shutil
 import uuid
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Set, Tuple
@@ -413,9 +414,56 @@ def run_nmap_scan(recon_data: dict, output_file: Path = None, settings: dict = N
     print(f"[*][Nmap] Timing: {NMAP_TIMING}")
     print(f"[*][Nmap] Host timeout: {NMAP_HOST_TIMEOUT}")
 
+    nmap_parallelism = (settings or {}).get('NMAP_PARALLELISM', 2)
+    print(f"[*][Nmap] Parallelism: {nmap_parallelism} concurrent IPs")
+
     scan_id = uuid.uuid4().hex[:12]
     scan_temp_dir = Path(f"/tmp/redamon/.nmap_scan_{scan_id}")
     scan_temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def _scan_single_ip(target_ip, idx, total, port_string, nmap_timeout, output_dir):
+        """Scan a single IP with nmap and return parsed results."""
+        xml_output = str(output_dir / f"nmap_{idx}_{target_ip.replace(':', '_')}.xml")
+
+        cmd = build_nmap_command(target_ip, port_string, xml_output, settings)
+
+        print(f"[*][Nmap] Scanning {target_ip} ({idx}/{total})...")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            _, stderr = process.communicate(timeout=nmap_timeout)
+
+            if process.returncode != 0 and not Path(xml_output).exists():
+                print(f"[!][Nmap] Scan failed for {target_ip}: {(stderr or '')[:200]}")
+                return [], [], ""
+
+        except subprocess.TimeoutExpired:
+            print(f"[!][Nmap] Scan timed out for {target_ip} after {nmap_timeout}s -- killing")
+            try:
+                process.kill()
+                process.wait(timeout=10)
+            except Exception:
+                pass
+            return [], [], ""
+        except Exception as e:
+            print(f"[!][Nmap] Error scanning {target_ip}: {e}")
+            return [], [], ""
+
+        # Parse XML results for this target
+        parsed = parse_nmap_xml(xml_output, ip_to_hostnames)
+
+        hosts = list(parsed.get("by_host", {}).items())
+        services = parsed.get("services_detected", [])
+        vulns = parsed.get("nse_vulns", [])
+        version = parsed.get("nmap_version", "")
+
+        return hosts, services, vulns, version, " ".join(cmd)
 
     try:
         # Aggregate results across all target IPs
@@ -427,65 +475,47 @@ def run_nmap_scan(recon_data: dict, output_file: Path = None, settings: dict = N
 
         start_time = datetime.now()
 
-        for idx, target_ip in enumerate(ip_list, 1):
-            xml_output = str(scan_temp_dir / f"nmap_{target_ip.replace(':', '_')}.xml")
-
-            cmd = build_nmap_command(target_ip, port_string, xml_output, settings)
-
-            if idx == 1:
-                full_command = " ".join(cmd)
-
-            print(f"[*][Nmap] Scanning {target_ip} ({idx}/{len(ip_list)})...")
-
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-
-                _, stderr = process.communicate(timeout=NMAP_TIMEOUT)
-
-                if process.returncode != 0 and not Path(xml_output).exists():
-                    print(f"[!][Nmap] Scan failed for {target_ip}: {(stderr or '')[:200]}")
-                    continue
-
-            except subprocess.TimeoutExpired:
-                print(f"[!][Nmap] Scan timed out for {target_ip} after {NMAP_TIMEOUT}s -- killing")
+        max_workers = min(nmap_parallelism, len(ip_list))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    _scan_single_ip, ip, idx, len(ip_list),
+                    port_string, NMAP_TIMEOUT, scan_temp_dir
+                ): ip
+                for idx, ip in enumerate(ip_list, 1)
+            }
+            for future in as_completed(futures):
+                ip = futures[future]
                 try:
-                    process.kill()
-                    process.wait(timeout=10)
-                except Exception:
-                    pass
-                continue
-            except Exception as e:
-                print(f"[!][Nmap] Error scanning {target_ip}: {e}")
-                continue
+                    result = future.result()
+                    if len(result) == 3:
+                        # Error path returns 3-tuple
+                        continue
+                    hosts, services, vulns, version, cmd_str = result
 
-            # Parse XML results for this target
-            parsed = parse_nmap_xml(xml_output, ip_to_hostnames)
+                    if not full_command and cmd_str:
+                        full_command = cmd_str
+                    if not nmap_version and version:
+                        nmap_version = version
 
-            if not nmap_version and parsed.get("nmap_version"):
-                nmap_version = parsed["nmap_version"]
+                    # Merge host results
+                    for host_key, host_data in hosts:
+                        if host_key in merged_by_host:
+                            existing_ports = set(merged_by_host[host_key]["ports"])
+                            for pd in host_data.get("port_details", []):
+                                if pd["port"] not in existing_ports:
+                                    merged_by_host[host_key]["ports"].append(pd["port"])
+                                    merged_by_host[host_key]["port_details"].append(pd)
+                                    existing_ports.add(pd["port"])
+                            merged_by_host[host_key]["ports"].sort()
+                            merged_by_host[host_key]["port_details"].sort(key=lambda x: x["port"])
+                        else:
+                            merged_by_host[host_key] = host_data
 
-            # Merge results
-            for host_key, host_data in parsed.get("by_host", {}).items():
-                if host_key in merged_by_host:
-                    # Merge port details
-                    existing_ports = set(merged_by_host[host_key]["ports"])
-                    for pd in host_data.get("port_details", []):
-                        if pd["port"] not in existing_ports:
-                            merged_by_host[host_key]["ports"].append(pd["port"])
-                            merged_by_host[host_key]["port_details"].append(pd)
-                            existing_ports.add(pd["port"])
-                    merged_by_host[host_key]["ports"].sort()
-                    merged_by_host[host_key]["port_details"].sort(key=lambda x: x["port"])
-                else:
-                    merged_by_host[host_key] = host_data
-
-            merged_services.extend(parsed.get("services_detected", []))
-            merged_vulns.extend(parsed.get("nse_vulns", []))
+                    merged_services.extend(services)
+                    merged_vulns.extend(vulns)
+                except Exception as e:
+                    print(f"[!][Nmap] Error scanning {ip}: {e}")
 
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()

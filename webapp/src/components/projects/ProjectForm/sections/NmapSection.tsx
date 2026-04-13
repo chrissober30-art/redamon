@@ -129,6 +129,18 @@ export function NmapSection({ data, updateField, onRun }: NmapSectionProps) {
                   />
                   <span className={styles.fieldHint}>Max time per host before moving on</span>
                 </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Parallelism</label>
+                  <input
+                    type="number"
+                    className="textInput"
+                    value={data.nmapParallelism ?? 2}
+                    onChange={(e) => updateField('nmapParallelism', parseInt(e.target.value) || 2)}
+                    min={1}
+                    max={10}
+                  />
+                  <span className={styles.fieldHint}>Number of IPs to scan concurrently</span>
+                </div>
               </div>
             </>
           )}
