@@ -548,4 +548,4 @@ class TestFullReconMutualExclusion:
 
 class TestConstants:
     def test_max_parallel_is_12(self):
-        assert MAX_PARALLEL_PARTIAL_RECONS == 12
+        assert MAX_PARALLEL_PARTIAL_RECONS == 12 
