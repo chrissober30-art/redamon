@@ -31,5 +31,5 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
 # Default command
-CMD ["python", "github_secret_hunt/main.py"]
+CMD ["python", "github_secret_hunt/main.py"] 
 
