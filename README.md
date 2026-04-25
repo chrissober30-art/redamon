@@ -6,7 +6,8 @@
   <b><i><big><big>Unmask the hidden before the world does.</big></big></i></b>
 </p>
 <p align="center" style="font-size: 120%;">
-  An autonomous AI framework that chains reconnaissance, exploitation, and post-exploitation into a single pipeline,<br/>then goes further by triaging every finding, implementing code fixes, and opening pull requests on your repository.<br/>From first packet to merged patch, no human intervention required.
+  An autonomous AI framework that chains reconnaissance, exploitation, and post-exploitation into a single pipeline,<br/>then goes further by
+ triaging every finding, implementing code fixes, and opening pull requests on your repository.<br/>From first packet to merged patch, no human intervention required.
 </p>
 
 <br/>
