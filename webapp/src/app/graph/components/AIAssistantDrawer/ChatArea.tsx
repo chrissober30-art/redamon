@@ -263,7 +263,6 @@ export function ChatArea({
                 missingApiKeys={missingApiKeys}
                 onAddApiKey={openApiKeyModal}
                 onToolConfirmation={handleTimelineToolConfirmation}
-                toolConfirmationDisabled={isLoading}
                 onToolStop={handleToolStop}
               />
             )

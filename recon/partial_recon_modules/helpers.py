@@ -75,3 +75,16 @@ def _is_valid_url(value: str) -> bool:
         return parsed.scheme in ("http", "https") and bool(parsed.netloc)
     except Exception:
         return False
+
+
+def _should_include_root_domain(settings: dict) -> bool:
+    """
+    Derive the "Include Root Domain" flag from project settings.
+
+    Mirrors recon/main.py:parse_target() exactly: the apex is in scope if
+    SUBDOMAIN_LIST contains "." (or any prefix that strips to empty). Used
+    by partial-recon graph builders to honor the same scope rules as the
+    full pipeline.
+    """
+    subdomain_list = settings.get("SUBDOMAIN_LIST") or []
+    return any(p == "." or p.rstrip(".") == "" for p in subdomain_list)

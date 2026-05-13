@@ -56,8 +56,8 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'FIRETEAM_ENABLED': True,                    # master switch, maps from Project.fireteamEnabled
     'FIRETEAM_MAX_CONCURRENT': 5,                # asyncio.Semaphore permits
     'FIRETEAM_MAX_MEMBERS': 5,                   # hard cap on members per fireteam
-    'FIRETEAM_MEMBER_MAX_ITERATIONS': 20,        # per-member ReAct iteration budget
-    'FIRETEAM_TIMEOUT_SEC': 3600,                  # wall-clock per fireteam (raised to accommodate 30-min tool timeouts)
+    'FIRETEAM_MEMBER_MAX_ITERATIONS': 10,        # per-member ReAct iteration budget
+    'FIRETEAM_TIMEOUT_SEC': 7200,                  # wall-clock per fireteam (raised to accommodate 30-min tool timeouts)
     'FIRETEAM_ALLOWED_PHASES': ['informational', 'exploitation', 'post_exploitation'],
     'FIRETEAM_CONFIRMATION_TIMEOUT_SEC': 600,    # how long a member waits for operator approval before auto-rejecting
     'FIRETEAM_PROPENSITY': 3,                    # 1-5 scalar: how strongly LLM is pushed to deploy fireteams (3=baseline, 1=reluctant, 5=aggressive)
@@ -74,10 +74,23 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'NGROK_TUNNEL_ENABLED': False,
     'CHISEL_TUNNEL_ENABLED': False,
 
+    # Tradecraft Lookup tool
+    # (Output truncation is delegated to the global TOOL_OUTPUT_MAX_CHARS so
+    # tradecraft results follow the same cap as every other tool.)
+    'TRADECRAFT_TOOL_ENABLED': True,
+    'TRADECRAFT_FETCH_TIMEOUT': 30,
+    'TRADECRAFT_DEFAULT_TTL_SEC': 86400,
+    'TRADECRAFT_TIER2_THRESHOLD_BYTES': 800,
+    'TRADECRAFT_SECTION_PICKER_MODEL': 'claude-haiku-4-5-20251001',
+    'TRADECRAFT_CRAWL_MAX_PAGES': 30,
+    'TRADECRAFT_CRAWL_MAX_LLM_CALLS': 20,
+    'TRADECRAFT_CRAWL_TIME_BUDGET_SEC': 180,
+    'TRADECRAFT_CRAWL_MAX_DEPTH': 3,
+
     # Agent Limits
     'MAX_ITERATIONS': 100,
     'EXECUTION_TRACE_MEMORY_STEPS': 100,
-    'TOOL_OUTPUT_MAX_CHARS': 20000,
+    'TOOL_OUTPUT_MAX_CHARS': 40000,
     # Cap on concurrent tools inside ONE plan_tools wave. Applies to both the
     # root agent and every fireteam member because both paths execute through
     # execute_plan_node. Semaphore semantics: a 20-step plan with cap=10 runs
@@ -145,9 +158,16 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'metasploit_console': ['exploitation', 'post_exploitation'],
         'msf_restart': ['exploitation', 'post_exploitation'],
         'web_search': ['informational', 'exploitation', 'post_exploitation'],
+        'cve_intel': ['informational', 'exploitation', 'post_exploitation'],
         'shodan': ['informational', 'exploitation'],
         'google_dork': ['informational'],
+        'tradecraft_lookup': ['exploitation', 'post_exploitation'],
     },
+
+    # User-managed MCP servers (UI-driven, see /settings/mcp). Stored as raw
+    # JSON list; parsed via mcp_registry.parse_user_servers() at orchestrator
+    # setup time.
+    'USER_MCP_SERVERS': [],
 
     # Kali Shell Library Installation
     'KALI_INSTALL_ENABLED': False,
@@ -186,6 +206,32 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'XSS_BLIND_CALLBACK_ENABLED': False,  # Allow interactsh-based blind XSS callbacks (sends data OOB to oast.fun)
     'XSS_CSP_BYPASS_ENABLED': True,       # Include CSP bypass guidance in the workflow prompt
 
+    # SSRF Testing
+    'SSRF_OOB_CALLBACK_ENABLED': True,        # Allow interactsh blind-SSRF callbacks (sends DNS/HTTP probes via oast.fun)
+    'SSRF_CLOUD_METADATA_ENABLED': True,      # Allow cloud-metadata pivots (AWS IMDS, GCP/Azure metadata, etc.)
+    'SSRF_GOPHER_ENABLED': True,              # Allow protocol-smuggling payloads (gopher, dict, file) and Redis/FCGI/Docker RCE chains
+    'SSRF_DNS_REBINDING_ENABLED': True,       # Allow DNS-rebinding bypasses via 1u.ms / nip.io / rbndr.us
+    'SSRF_PAYLOAD_REFERENCE_ENABLED': True,   # Inject the advanced payload reference + HackerOne precedent tables (~3 KB extra)
+    'SSRF_REQUEST_TIMEOUT': 10,               # curl --max-time / --connect-timeout for SSRF probes (seconds)
+    'SSRF_PORT_SCAN_PORTS': '22,80,443,2375,3306,5432,6379,8080,8500,9200,27017',  # Comma-separated ports to scan via SSRF
+    'SSRF_INTERNAL_RANGES': '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16',  # Comma-separated CIDR ranges considered internal
+    'SSRF_OOB_PROVIDER': 'oast.fun',          # interactsh-client server for OOB callbacks
+    'SSRF_CLOUD_PROVIDERS': 'aws,gcp,azure,digitalocean,alibaba',  # Comma-separated cloud providers in scope (filters cloud-metadata section)
+    'SSRF_CUSTOM_INTERNAL_TARGETS': '',       # Free-text: site-specific internal hostnames/IPs the agent should prioritize (one per line)
+
+    # RCE / Command Injection Testing
+    'RCE_OOB_CALLBACK_ENABLED': True,         # Allow interactsh DNS/HTTP oracle for blind-RCE detection (sends probes via oast.fun)
+    'RCE_DESERIALIZATION_ENABLED': True,      # Include the Java/PHP/Python/Ruby deserialization gadget workflow (ysoserial) in the RCE prompt
+    'RCE_AGGRESSIVE_PAYLOADS': False,         # If True, permit Step 7: file write, persistent web shells, container/k8s escape probes. Default False = read-only proofs only.
+
+    # Path Traversal / LFI / RFI Testing
+    'PATH_TRAVERSAL_OOB_CALLBACK_ENABLED': True,        # Allow interactsh OOB oracle for RFI / blind-LFI detection (sends probes via oast.fun)
+    'PATH_TRAVERSAL_PHP_WRAPPERS_ENABLED': True,        # Include PHP-specific wrapper / log-poisoning sub-section (php://filter, data://, expect://, zip://). Trim for non-PHP targets to reduce prompt bloat.
+    'PATH_TRAVERSAL_ARCHIVE_EXTRACTION_ENABLED': False, # Allow Zip Slip / TarSlip primitives that WRITE files outside the destination directory. Default False because writing to the target is state-mutating.
+    'PATH_TRAVERSAL_PAYLOAD_REFERENCE_ENABLED': True,   # Inject the encoding / bypass / wrapper payload reference (~3 KB extra). Disable for a leaner prompt.
+    'PATH_TRAVERSAL_REQUEST_TIMEOUT': 10,               # curl --max-time / --connect-timeout for traversal probes (seconds)
+    'PATH_TRAVERSAL_OOB_PROVIDER': 'oast.fun',          # interactsh-client server for RFI / OOB callbacks. Override when oast.fun is blocked.
+
     # Attack Skill Configuration
     'ATTACK_SKILL_CONFIG': {
         'builtIn': {
@@ -195,6 +241,9 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
             'denial_of_service': False,
             'sql_injection': True,
             'xss': True,
+            'ssrf': True,
+            'rce': True,
+            'path_traversal': True,
         },
         'user': {},
     },
@@ -294,6 +343,11 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['LOG_MAX_MB'] = project.get('agentLogMaxMb', DEFAULT_AGENT_SETTINGS['LOG_MAX_MB'])
     settings['LOG_BACKUP_COUNT'] = project.get('agentLogBackupCount', DEFAULT_AGENT_SETTINGS['LOG_BACKUP_COUNT'])
     settings['TOOL_PHASE_MAP'] = project.get('agentToolPhaseMap', DEFAULT_AGENT_SETTINGS['TOOL_PHASE_MAP'])
+    # User-managed MCP servers (UI-driven, see /settings/mcp). The webapp
+    # /api/projects/[id] route includes user.settings.mcpServers in its
+    # response. Stored here as a raw list of dicts; parse_user_servers()
+    # validates and converts to MCPServer instances at orchestrator setup.
+    settings['USER_MCP_SERVERS'] = project.get('userMcpServers', []) or []
     settings['BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS'] = project.get('agentBruteForceMaxWordlistAttempts', DEFAULT_AGENT_SETTINGS['BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS'])
     settings['BRUTEFORCE_SPEED'] = project.get('agentBruteforceSpeed', DEFAULT_AGENT_SETTINGS['BRUTEFORCE_SPEED'])
     settings['KALI_INSTALL_ENABLED'] = project.get('agentKaliInstallEnabled', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_ENABLED'])
@@ -324,6 +378,29 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['DOS_MAX_ATTEMPTS'] = project.get('dosMaxAttempts', DEFAULT_AGENT_SETTINGS['DOS_MAX_ATTEMPTS'])
     settings['DOS_CONCURRENT_CONNECTIONS'] = project.get('dosConcurrentConnections', DEFAULT_AGENT_SETTINGS['DOS_CONCURRENT_CONNECTIONS'])
     settings['DOS_ASSESSMENT_ONLY'] = project.get('dosAssessmentOnly', DEFAULT_AGENT_SETTINGS['DOS_ASSESSMENT_ONLY'])
+    # SSRF
+    settings['SSRF_OOB_CALLBACK_ENABLED'] = project.get('ssrfOobCallbackEnabled', DEFAULT_AGENT_SETTINGS['SSRF_OOB_CALLBACK_ENABLED'])
+    settings['SSRF_CLOUD_METADATA_ENABLED'] = project.get('ssrfCloudMetadataEnabled', DEFAULT_AGENT_SETTINGS['SSRF_CLOUD_METADATA_ENABLED'])
+    settings['SSRF_GOPHER_ENABLED'] = project.get('ssrfGopherEnabled', DEFAULT_AGENT_SETTINGS['SSRF_GOPHER_ENABLED'])
+    settings['SSRF_DNS_REBINDING_ENABLED'] = project.get('ssrfDnsRebindingEnabled', DEFAULT_AGENT_SETTINGS['SSRF_DNS_REBINDING_ENABLED'])
+    settings['SSRF_PAYLOAD_REFERENCE_ENABLED'] = project.get('ssrfPayloadReferenceEnabled', DEFAULT_AGENT_SETTINGS['SSRF_PAYLOAD_REFERENCE_ENABLED'])
+    settings['SSRF_REQUEST_TIMEOUT'] = project.get('ssrfRequestTimeout', DEFAULT_AGENT_SETTINGS['SSRF_REQUEST_TIMEOUT'])
+    settings['SSRF_PORT_SCAN_PORTS'] = project.get('ssrfPortScanPorts', DEFAULT_AGENT_SETTINGS['SSRF_PORT_SCAN_PORTS'])
+    settings['SSRF_INTERNAL_RANGES'] = project.get('ssrfInternalRanges', DEFAULT_AGENT_SETTINGS['SSRF_INTERNAL_RANGES'])
+    settings['SSRF_OOB_PROVIDER'] = project.get('ssrfOobProvider', DEFAULT_AGENT_SETTINGS['SSRF_OOB_PROVIDER'])
+    settings['SSRF_CLOUD_PROVIDERS'] = project.get('ssrfCloudProviders', DEFAULT_AGENT_SETTINGS['SSRF_CLOUD_PROVIDERS'])
+    settings['SSRF_CUSTOM_INTERNAL_TARGETS'] = project.get('ssrfCustomInternalTargets', DEFAULT_AGENT_SETTINGS['SSRF_CUSTOM_INTERNAL_TARGETS'])
+    # RCE
+    settings['RCE_OOB_CALLBACK_ENABLED'] = project.get('rceOobCallbackEnabled', DEFAULT_AGENT_SETTINGS['RCE_OOB_CALLBACK_ENABLED'])
+    settings['RCE_DESERIALIZATION_ENABLED'] = project.get('rceDeserializationEnabled', DEFAULT_AGENT_SETTINGS['RCE_DESERIALIZATION_ENABLED'])
+    settings['RCE_AGGRESSIVE_PAYLOADS'] = project.get('rceAggressivePayloads', DEFAULT_AGENT_SETTINGS['RCE_AGGRESSIVE_PAYLOADS'])
+    # Path Traversal / LFI / RFI
+    settings['PATH_TRAVERSAL_OOB_CALLBACK_ENABLED'] = project.get('pathTraversalOobCallbackEnabled', DEFAULT_AGENT_SETTINGS['PATH_TRAVERSAL_OOB_CALLBACK_ENABLED'])
+    settings['PATH_TRAVERSAL_PHP_WRAPPERS_ENABLED'] = project.get('pathTraversalPhpWrappersEnabled', DEFAULT_AGENT_SETTINGS['PATH_TRAVERSAL_PHP_WRAPPERS_ENABLED'])
+    settings['PATH_TRAVERSAL_ARCHIVE_EXTRACTION_ENABLED'] = project.get('pathTraversalArchiveExtractionEnabled', DEFAULT_AGENT_SETTINGS['PATH_TRAVERSAL_ARCHIVE_EXTRACTION_ENABLED'])
+    settings['PATH_TRAVERSAL_PAYLOAD_REFERENCE_ENABLED'] = project.get('pathTraversalPayloadReferenceEnabled', DEFAULT_AGENT_SETTINGS['PATH_TRAVERSAL_PAYLOAD_REFERENCE_ENABLED'])
+    settings['PATH_TRAVERSAL_REQUEST_TIMEOUT'] = project.get('pathTraversalRequestTimeout', DEFAULT_AGENT_SETTINGS['PATH_TRAVERSAL_REQUEST_TIMEOUT'])
+    settings['PATH_TRAVERSAL_OOB_PROVIDER'] = project.get('pathTraversalOobProvider', DEFAULT_AGENT_SETTINGS['PATH_TRAVERSAL_OOB_PROVIDER'])
     settings['ATTACK_SKILL_CONFIG'] = project.get('attackSkillConfig', DEFAULT_AGENT_SETTINGS['ATTACK_SKILL_CONFIG'])
     settings['USER_ATTACK_SKILLS'] = project.get('userAttackSkills', DEFAULT_AGENT_SETTINGS['USER_ATTACK_SKILLS'])
 
@@ -398,6 +475,19 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"Failed to fetch user settings: {e}")
             settings['USER_SETTINGS'] = {}
+
+        # Fetch user tradecraft resources (for the tradecraft_lookup tool catalog)
+        try:
+            tc_resp = requests.get(
+                f"{webapp_url.rstrip('/')}/api/users/{user_id}/tradecraft-resources?internal=true",
+                headers=INTERNAL_HEADERS,
+                timeout=10,
+            )
+            tc_resp.raise_for_status()
+            settings['TRADECRAFT_RESOURCES'] = tc_resp.json()
+        except Exception as e:
+            logger.warning(f"Failed to fetch tradecraft resources: {e}")
+            settings['TRADECRAFT_RESOURCES'] = []
 
         # If selected model is custom/, extract its specific config
         model_id = settings.get('OPENAI_MODEL', '')
@@ -541,20 +631,53 @@ def get_enabled_user_skills() -> list[dict]:
 # =============================================================================
 
 def is_tool_allowed_in_phase(tool_name: str, phase: str) -> bool:
-    """Check if a tool is allowed in the given phase."""
+    """Check if a tool is allowed in the given phase.
+
+    Resolution order:
+    1. Project's TOOL_PHASE_MAP override (per-project, per-tool, set via UI).
+    2. MCP manifest default_phases (for tools declared by user-managed MCP servers).
+    3. Default to all phases (when nothing else specifies).
+    """
     tool_phase_map = get_setting('TOOL_PHASE_MAP', {})
-    allowed_phases = tool_phase_map.get(tool_name, [])
-    return phase in allowed_phases
+    if tool_name in tool_phase_map:
+        return phase in tool_phase_map[tool_name]
+
+    # Fallback to MCP manifest default phases
+    try:
+        from mcp_registry import default_phases_for, manifest_tool_names
+        if tool_name in manifest_tool_names():
+            return phase in default_phases_for(tool_name)
+    except Exception:
+        pass
+
+    return False
 
 
 def get_allowed_tools_for_phase(phase: str) -> list:
-    """Get list of tool names allowed in the given phase."""
+    """Get list of tool names allowed in the given phase.
+
+    Includes both TOOL_PHASE_MAP entries and MCP-manifest-declared tools whose
+    effective default phases include ``phase``.
+    """
     tool_phase_map = get_setting('TOOL_PHASE_MAP', {})
-    return [
+    allowed = {
         tool_name
         for tool_name, allowed_phases in tool_phase_map.items()
         if phase in allowed_phases
-    ]
+    }
+
+    # Union with manifest-declared tools that allow this phase by default
+    try:
+        from mcp_registry import manifest_tool_phase_view
+        for tool_name, default_phases in manifest_tool_phase_view().items():
+            if tool_name in tool_phase_map:
+                continue  # project override wins
+            if phase in default_phases:
+                allowed.add(tool_name)
+    except Exception:
+        pass
+
+    return list(allowed)
 
 
 def get_hydra_flags_from_settings() -> str:

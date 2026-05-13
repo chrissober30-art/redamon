@@ -146,6 +146,9 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
     // --- DISABLE security checks ---
     securityCheckEnabled: false,
 
+    // --- VHost & SNI: explicitly disabled — preset's identity is "no active scanning" ---
+    vhostSniEnabled: false,
+
     // --- CVE Lookup: high max ---
     cveLookupEnabled: true,
     cveLookupMaxCves: 50,

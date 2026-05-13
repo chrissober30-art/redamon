@@ -266,14 +266,14 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_initial_state_has_generation_zero(self):
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         self.assertEqual(mgr.generation, 0)
         self.assertIsNone(mgr.client)
         self.assertEqual(mgr.list_tools(), [])
 
     async def test_get_tools_bumps_generation_to_one(self):
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         tools = [self._make_fake_tool("execute_ffuf"), self._make_fake_tool("execute_curl")]
         ctx, _ = self._patch_client([tools])
         with ctx:
@@ -284,7 +284,7 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_repeated_get_tools_keeps_bumping_generation(self):
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         tools_a = [self._make_fake_tool("t1")]
         tools_b = [self._make_fake_tool("t2")]
         ctx, _ = self._patch_client([tools_a, tools_b])
@@ -296,7 +296,7 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_tools_failure_leaves_generation_untouched(self):
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         ctx, _ = self._patch_client([RuntimeError("MCP server down")])
         with ctx:
             loaded = await mgr.get_tools(max_retries=1, retry_delay=0)
@@ -306,7 +306,7 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconnect_bumps_generation(self):
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         initial = [self._make_fake_tool("execute_ffuf")]
         rebuilt = [self._make_fake_tool("execute_ffuf")]
         ctx, _ = self._patch_client([initial, rebuilt])
@@ -328,7 +328,7 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
         also saw gen=1 notice gen=2 > 1 under the lock and skip.
         """
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         initial = [self._make_fake_tool("t")]
         rebuilt1 = [self._make_fake_tool("t")]
         # A second rebuild attempt would fetch the third entry; if the skip
@@ -351,7 +351,7 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_reconnects_serialized_by_lock(self):
         """Five parallel tasks that all see gen=1 → only one rebuild happens."""
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         initial = [self._make_fake_tool("t")]
         rebuilt = [self._make_fake_tool("t")]
         # Sentinel list for any extra unwanted rebuilds
@@ -372,7 +372,7 @@ class McpToolsManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconnect_failure_leaves_generation_unchanged(self):
         """If the rebuild itself can't connect, gen stays put and tools are []."""
         from tools import MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         initial = [self._make_fake_tool("t")]
         ctx, _ = self._patch_client([initial, RuntimeError("still down"),
                                      RuntimeError("still down"),
@@ -394,7 +394,7 @@ class RegisterMcpToolsTests(unittest.TestCase):
 
     def _make_executor(self):
         from tools import PhaseAwareToolExecutor, MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         return PhaseAwareToolExecutor(mgr, graph_tool=None)
 
     def _fake_tool(self, name):
@@ -447,7 +447,7 @@ class RegisterMcpToolsTests(unittest.TestCase):
         """
         from tools import PhaseAwareToolExecutor, MCPToolsManager
         graph_tool = self._fake_tool("query_graph")
-        ex = PhaseAwareToolExecutor(MCPToolsManager(), graph_tool=graph_tool)
+        ex = PhaseAwareToolExecutor(MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}}), graph_tool=graph_tool)
         ex.register_mcp_tools([self._fake_tool("execute_ffuf")])
         self.assertIn("query_graph", ex._all_tools)
         # Simulate reconnect clearing MCP tools
@@ -478,7 +478,7 @@ class ExecuteReconnectTests(unittest.IsolatedAsyncioTestCase):
             when called, or whatever `reconnect_result` overrides.
         """
         from tools import PhaseAwareToolExecutor, MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         mgr._generation = 1  # pretend we already loaded once
 
         stale = self._make_mcp_tool("execute_ffuf", stale_ainvoke)
@@ -579,7 +579,7 @@ class ExecuteReconnectTests(unittest.IsolatedAsyncioTestCase):
         we must NOT trigger an MCP rebuild — those tools don't use MCP at all.
         """
         from tools import PhaseAwareToolExecutor, MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         mgr._generation = 1
         mgr.reconnect = AsyncMock(return_value=(2, []))
         graph_tool = MagicMock()
@@ -619,7 +619,7 @@ class ExecuteReconnectTests(unittest.IsolatedAsyncioTestCase):
             return "ok"
         fresh = AsyncMock(side_effect=fresh_impl)
         from tools import PhaseAwareToolExecutor, MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         mgr._generation = 1
         stale_tool = MagicMock(); stale_tool.name = "execute_wpscan"; stale_tool.ainvoke = stale
         fresh_tool = MagicMock(); fresh_tool.name = "execute_wpscan"; fresh_tool.ainvoke = fresh
@@ -648,7 +648,7 @@ class ExecuteReconnectTests(unittest.IsolatedAsyncioTestCase):
             return "ok"
         fresh = AsyncMock(side_effect=fresh_impl)
         from tools import PhaseAwareToolExecutor, MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         mgr._generation = 1
         stale_tool = MagicMock(); stale_tool.name = "execute_gau"; stale_tool.ainvoke = stale
         fresh_tool = MagicMock(); fresh_tool.name = "execute_gau"; fresh_tool.ainvoke = fresh
@@ -695,7 +695,7 @@ class ExecuteReconnectTests(unittest.IsolatedAsyncioTestCase):
         whichever fresh tool is now registered.
         """
         from tools import PhaseAwareToolExecutor, MCPToolsManager
-        mgr = MCPToolsManager()
+        mgr = MCPToolsManager({"fake": {"url": "http://x/sse", "transport": "sse", "timeout": 60, "sse_read_timeout": 60}})
         mgr._generation = 1
         # Real reconnect-like stub: first caller bumps gen to 2, provides a
         # fresh tool; subsequent callers see gen advanced and reuse it.

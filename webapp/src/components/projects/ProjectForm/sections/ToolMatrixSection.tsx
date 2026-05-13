@@ -1,16 +1,47 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, Grid3X3, AlertTriangle, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { ChevronDown, Grid3X3, AlertTriangle, Eye, EyeOff, Loader2, Server } from 'lucide-react'
 import type { Project } from '@prisma/client'
 import { useProject } from '@/providers/ProjectProvider'
 import { Modal } from '@/components/ui/Modal/Modal'
+import { WikiInfoButton } from '@/components/ui/WikiInfoButton'
 import styles from '../ProjectForm.module.css'
+
+const ALL_PHASES = ['informational', 'exploitation', 'post_exploitation'] as const
+
+interface ManifestToolSpec {
+  name: string
+  default_phases?: string[] | null
+}
+
+interface ManifestServer {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  default_phases: string[]
+  tags?: string[]
+  tools: ManifestToolSpec[]
+}
+
+interface ManifestPayload {
+  servers?: ManifestServer[]
+  errors?: { server_id: string; code: string; message: string }[]
+  warnings?: { server_id: string; code: string; message: string }[]
+  system_server_ids?: string[]
+}
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
 /** Tool → settings field name + human label + signup URL */
 const TOOL_KEY_INFO: Record<string, { field: string; label: string; hint: string; url: string }> = {
+  tradecraft_lookup: {
+    field: '_tradecraft_resources',  // sentinel: not an API key field
+    label: 'Tradecraft Resources',
+    hint: 'Configure curated knowledge URLs in Global Settings -> Tradecraft. The agent only sees enabled resources.',
+    url: '/settings?tab=tradecraft',
+  },
   web_search: {
     field: 'tavilyApiKey',
     label: 'Tavily',
@@ -41,6 +72,12 @@ const TOOL_KEY_INFO: Record<string, { field: string; label: string; hint: string
     hint: 'Enriches execute_gau results with URLScan archived data (free tier available)',
     url: 'https://urlscan.io/user/signup',
   },
+  cve_intel: {
+    field: 'pdcpApiKey',
+    label: 'PDCP',
+    hint: 'Optional. Lifts the 10 req/min anonymous rate limit on the ProjectDiscovery CVE database (vulnx).',
+    url: 'https://cloud.projectdiscovery.io',
+  },
 }
 
 interface ToolMatrixSectionProps {
@@ -52,6 +89,25 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
   const [isOpen, setIsOpen] = useState(true)
   const { userId } = useProject()
   const [missingKeys, setMissingKeys] = useState<Set<string>>(new Set())
+  const [userMcpServers, setUserMcpServers] = useState<ManifestServer[]>([])
+
+  // Source the user MCP list from the DATABASE (the user's saved
+  // configuration), not from the agent's runtime manifest. The DB is the
+  // source of truth — the agent's registry is downstream and may lag
+  // until a chat session triggers a settings reload (e.g., right after
+  // an agent restart). Reading from the DB means the matrix always
+  // reflects what the user has saved, regardless of agent state.
+  useEffect(() => {
+    if (!userId) return
+    fetch(`/api/users/${userId}/mcp`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { servers?: ManifestServer[] } | null) => {
+        if (d?.servers && Array.isArray(d.servers)) {
+          setUserMcpServers(d.servers)
+        }
+      })
+      .catch(() => {/* graceful: matrix still works with built-ins */})
+  }, [userId])
 
   // API key modal state
   const [keyModal, setKeyModal] = useState<string | null>(null) // tool id or null
@@ -72,7 +128,17 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
         if (!settings.serpApiKey) missing.add('google_dork')
         if (!settings.wpscanApiToken) missing.add('execute_wpscan')
         if (!settings.urlscanApiKey) missing.add('execute_gau')
-        setMissingKeys(missing)
+        if (!settings.pdcpApiKey) missing.add('cve_intel')
+        // tradecraft_lookup: warn when zero enabled resources are configured
+        fetch(`/api/users/${userId}/tradecraft-resources`)
+          .then(r2 => r2.ok ? r2.json() : [])
+          .then((arr: Array<{ enabled?: boolean }>) => {
+            const enabledCount = (arr || []).filter(r => r.enabled !== false).length
+            const next = new Set(missing)
+            if (enabledCount === 0) next.add('tradecraft_lookup')
+            setMissingKeys(next)
+          })
+          .catch(() => setMissingKeys(missing))
       })
       .catch(() => {})
   }, [userId])
@@ -80,6 +146,11 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
   useEffect(() => { fetchKeyStatus() }, [fetchKeyStatus])
 
   const openKeyModal = (toolId: string) => {
+    // Special-case: tradecraft_lookup has no API key. Redirect to the Tradecraft tab.
+    if (toolId === 'tradecraft_lookup') {
+      window.location.href = '/settings?tab=tradecraft'
+      return
+    }
     setKeyModal(toolId)
     setKeyValue('')
     setKeyVisible(false)
@@ -121,6 +192,7 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
         <h2 className={styles.sectionTitle}>
           <Grid3X3 size={16} />
           Tool Phase Restrictions
+          <WikiInfoButton target="ToolMatrix" />
         </h2>
         <ChevronDown
           size={16}
@@ -143,6 +215,7 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
             {[
               { id: 'query_graph', label: 'query_graph' },
               { id: 'web_search', label: 'web_search' },
+              { id: 'cve_intel', label: 'cve_intel' },
               { id: 'shodan', label: 'shodan' },
               { id: 'google_dork', label: 'google_dork' },
               { id: 'execute_curl', label: 'execute_curl' },
@@ -164,6 +237,7 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
               { id: 'execute_hydra', label: 'execute_hydra' },
               { id: 'metasploit_console', label: 'metasploit_console' },
               { id: 'msf_restart', label: 'msf_restart' },
+              { id: 'tradecraft_lookup', label: 'tradecraft_lookup' },
             ].map(tool => {
               const phaseMap = (typeof data.agentToolPhaseMap === 'string'
                 ? JSON.parse(data.agentToolPhaseMap)
@@ -214,6 +288,89 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
               )
             })}
           </div>
+
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <h3 style={{
+              fontSize: 'var(--text-md)',
+              fontWeight: 600,
+              margin: '0 0 var(--space-2) 0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              color: 'var(--text-primary)',
+              borderTop: '1px solid var(--border-default)',
+              paddingTop: 'var(--space-3)',
+            }}>
+              <Server size={14} />
+              MCP Tool Plugins
+            </h3>
+            <p className={styles.sectionDescription} style={{ marginTop: 0 }}>
+              User-installed MCP Tool Plugins — add or edit in{' '}
+              <a href="/settings?tab=mcp" style={{ color: 'var(--accent-primary)' }}>
+                Global Settings → MCP Tool Plugins
+              </a>.
+            </p>
+          </div>
+
+          {userMcpServers.length === 0 ? (
+            <p className={styles.sectionDescription} style={{
+              fontStyle: 'italic',
+              color: 'var(--text-tertiary)',
+              padding: 'var(--space-2) 0',
+            }}>
+              No MCP Tool Plugins configured for this user yet.
+            </p>
+          ) : (
+            <div>
+              {userMcpServers.map(srv => (
+                <details key={srv.id} open style={{ marginBottom: 'var(--space-3)' }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '4px 0' }}>
+                    {srv.name || srv.id}
+                    {srv.description && <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 8, fontSize: '12px' }}>— {srv.description}</span>}
+                    {!srv.enabled && <span style={{ color: 'var(--text-tertiary)', marginLeft: 8, fontSize: '12px' }}>(disabled)</span>}
+                  </summary>
+                  <div className={styles.toolPhaseGrid}>
+                    {srv.tools.map(tool => {
+                      const phaseMap = (typeof data.agentToolPhaseMap === 'string'
+                        ? JSON.parse(data.agentToolPhaseMap)
+                        : data.agentToolPhaseMap ?? {}) as Record<string, string[]>
+                      const defaultPhases = (tool.default_phases && tool.default_phases.length > 0)
+                        ? tool.default_phases
+                        : (srv.default_phases && srv.default_phases.length > 0
+                          ? srv.default_phases
+                          : [...ALL_PHASES])
+                      const effectivePhases = phaseMap[tool.name] !== undefined
+                        ? phaseMap[tool.name]
+                        : defaultPhases
+                      const togglePhase = (phase: string) => {
+                        const newMap = { ...phaseMap }
+                        const current = newMap[tool.name] !== undefined ? newMap[tool.name] : effectivePhases
+                        newMap[tool.name] = current.includes(phase)
+                          ? current.filter((p: string) => p !== phase)
+                          : [...current, phase]
+                        updateField('agentToolPhaseMap', newMap as typeof data.agentToolPhaseMap)
+                      }
+                      return (
+                        <div key={tool.name} className={styles.toolPhaseRow}>
+                          <span className={styles.toolPhaseName}>{tool.name}</span>
+                          {ALL_PHASES.map(phase => (
+                            <label key={phase} className={styles.phaseCheck}>
+                              <input
+                                type="checkbox"
+                                checked={effectivePhases.includes(phase)}
+                                disabled={!srv.enabled}
+                                onChange={() => togglePhase(phase)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

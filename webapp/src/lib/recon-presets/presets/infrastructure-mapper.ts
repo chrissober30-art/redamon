@@ -163,6 +163,14 @@ Network pentesters and infrastructure security teams mapping an external or inte
     // --- DISABLE parameter discovery ---
     arjunEnabled: false,
 
+    // --- VHost & SNI: maps reverse-proxy / ingress topology, no vuln testing ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,                    // Reveals which IPs are reverse proxies vs direct backends
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+
     // --- DISABLE Nuclei (mapping, not vuln testing) ---
     nucleiEnabled: false,
 

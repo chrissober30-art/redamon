@@ -2,9 +2,9 @@
 
 import { useState } from 'react'
 import { AlertTriangle, ArrowLeft } from 'lucide-react'
-import { Drawer } from '@/components/ui'
+import { Drawer, ExternalLink } from '@/components/ui'
 import { GraphNode } from '../../types'
-import { getNodeColor } from '../../utils'
+import { getNodeColor, getNodeUrl } from '../../utils'
 import { renderPropertyValue } from '../../utils/renderPropertyValue'
 import { ClusterNodeList } from './ClusterNodeList'
 import styles from './NodeDrawer.module.css'
@@ -135,20 +135,32 @@ export function NodeDrawer({
             </div>
             <div className={styles.propertyRow}>
               <span className={styles.propertyKey}>Name</span>
-              <span className={styles.propertyValue}>{displayNode.name}</span>
+              <span className={styles.propertyValue}>
+                {(() => {
+                  const url = getNodeUrl(displayNode)
+                  return url
+                    ? <ExternalLink href={url}>{displayNode.name}</ExternalLink>
+                    : displayNode.name
+                })()}
+              </span>
             </div>
           </div>
 
           <div className={styles.section}>
             <h3 className={styles.sectionTitleProperties}>Properties</h3>
-            {sortedProperties.map(([key, value]) => (
-              <div key={key} className={styles.propertyRow}>
-                <span className={styles.propertyKey}>{key}</span>
-                <span className={styles.propertyValue}>
-                  {renderPropertyValue(value)}
-                </span>
-              </div>
-            ))}
+            {sortedProperties.map(([key, value]) => {
+              const nodeUrl = key === 'name' ? getNodeUrl(displayNode) : null
+              return (
+                <div key={key} className={styles.propertyRow}>
+                  <span className={styles.propertyKey}>{key}</span>
+                  <span className={styles.propertyValue}>
+                    {nodeUrl
+                      ? <ExternalLink href={nodeUrl}>{String(value)}</ExternalLink>
+                      : renderPropertyValue(value)}
+                  </span>
+                </div>
+              )
+            })}
             {sortedProperties.length === 0 && (
               <p className={styles.emptyProperties}>No additional properties</p>
             )}

@@ -39,6 +39,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'USE_BRUTEFORCE_FOR_SUBDOMAINS': False,
     'STEALTH_MODE': False,
 
+    # AI in Pipeline (master switch + model picker for all AI hooks across recon)
+    'AI_IN_PIPELINE': False,
+    'AI_PIPELINE_MODEL': 'claude-opus-4-6',
+
     # WHOIS/DNS
     'WHOIS_ENABLED': True,
     'WHOIS_MAX_RETRIES': 6,
@@ -140,7 +144,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'BANNER_GRAB_ENABLED': True,
     'BANNER_GRAB_TIMEOUT': 5,
     'BANNER_GRAB_THREADS': 20,
-    'BANNER_GRAB_MAX_LENGTH': 500,
+    'BANNER_GRAB_MAX_LENGTH': 1000,
 
     # Nuclei Vulnerability Scanner
     'NUCLEI_ENABLED': True,
@@ -154,9 +158,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'NUCLEI_CONCURRENCY': 25,
     'NUCLEI_TIMEOUT': 10,
     'NUCLEI_RETRIES': 1,
-    'NUCLEI_TAGS': [],
-    'NUCLEI_EXCLUDE_TAGS': [],
-    'NUCLEI_DAST_MODE': True,
+    'NUCLEI_TAGS': ['cve', 'xss', 'sqli', 'rce', 'lfi', 'ssrf', 'xxe', 'ssti'],
+    'NUCLEI_EXCLUDE_TAGS': ['dos', 'fuzz'],
+    'NUCLEI_DAST_MODE': False,
     'NUCLEI_AUTO_UPDATE_TEMPLATES': True,
     'NUCLEI_NEW_TEMPLATES_ONLY': False,
     'NUCLEI_HEADLESS': False,
@@ -166,6 +170,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'NUCLEI_SCAN_ALL_IPS': False,
     'NUCLEI_INTERACTSH': True,
     'NUCLEI_DOCKER_IMAGE': 'projectdiscovery/nuclei:latest',
+    'NUCLEI_AI_TAGS': False,
+    # Cascade-gated by AI_IN_PIPELINE. When on, is_false_positive() falls
+    # back to the agent's /llm/nuclei-fp-filter endpoint when the keyword
+    # WAF block list misses but the response still looks like a block.
+    'NUCLEI_AI_RESPONSE_FILTER': False,
 
     # Subdomain Takeover Scanner (Subjack + Nuclei takeover templates)
     # Runs in GROUP 6 Phase A alongside Nuclei; writes Vulnerability nodes
@@ -186,6 +195,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'TAKEOVER_CONFIDENCE_THRESHOLD': 60,
     'TAKEOVER_RATE_LIMIT': 50,
     'TAKEOVER_MANUAL_REVIEW_AUTO_PUBLISH': False,
+    'TAKEOVER_CNAME_VALIDATION_ENABLED': True,
+    # Cascade-gated by AI_IN_PIPELINE. When on, takeover findings whose
+    # response carries no third-party vendor token get an LLM second pass
+    # to disambiguate genuine "service unclaimed" pages from WAF block
+    # pages that match the same static fingerprint.
+    'TAKEOVER_AI_CLASSIFIER': False,
     # BadDNS (AGPL-3.0, isolated sidecar — disabled by default, opt-in)
     'BADDNS_ENABLED': False,
     'BADDNS_DOCKER_IMAGE': 'redamon-baddns:latest',
@@ -193,11 +208,28 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'BADDNS_NAMESERVERS': [],
     'BADDNS_RUN_TIMEOUT': 1800,
 
+    # VHost & SNI Enumeration
+    # Runs in GROUP 6 Phase A alongside Nuclei/GraphQL/Subdomain Takeover.
+    # Tests every (subdomain, IP, port) for hidden virtual hosts via L7
+    # (Host header) and L4 (TLS SNI) probes. Writes Vulnerability nodes with
+    # source="vhost_sni_enum". See recon/main_recon_modules/vhost_sni_enum.py.
+    'VHOST_SNI_ENABLED': False,
+    'VHOST_SNI_TIMEOUT': 3,
+    'VHOST_SNI_CONCURRENCY': 20,
+    'VHOST_SNI_BASELINE_SIZE_TOLERANCE': 50,
+    'VHOST_SNI_TEST_L7': True,
+    'VHOST_SNI_TEST_L4': True,
+    'VHOST_SNI_INJECT_DISCOVERED': True,
+    'VHOST_SNI_USE_DEFAULT_WORDLIST': True,
+    'VHOST_SNI_USE_GRAPH_CANDIDATES': True,
+    'VHOST_SNI_CUSTOM_WORDLIST': '',
+    'VHOST_SNI_MAX_CANDIDATES_PER_IP': 2000,
+
     # Katana Web Crawler
     'KATANA_ENABLED': True,
     'KATANA_DOCKER_IMAGE': 'projectdiscovery/katana:latest',
     'KATANA_DEPTH': 2,
-    'KATANA_MAX_URLS': 300,
+    'KATANA_MAX_URLS': 300000,
     'KATANA_RATE_LIMIT': 50,
     'KATANA_TIMEOUT': 3600,
     'KATANA_JS_CRAWL': True,
@@ -254,7 +286,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'GAU_ENABLED': False,
     'GAU_DOCKER_IMAGE': 'sxcurity/gau:latest',
     'GAU_PROVIDERS': ['wayback', 'commoncrawl', 'otx', 'urlscan'],
-    'GAU_MAX_URLS': 1000,
+    'GAU_MAX_URLS': 50000,
     'GAU_TIMEOUT': 60,
     'GAU_THREADS': 5,
     'GAU_BLACKLIST_EXTENSIONS': [
@@ -291,7 +323,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'HAKRAWLER_DEPTH': 2,
     'HAKRAWLER_THREADS': 5,
     'HAKRAWLER_TIMEOUT': 30,
-    'HAKRAWLER_MAX_URLS': 500,
+    'HAKRAWLER_MAX_URLS': 50000,
     'HAKRAWLER_INCLUDE_SUBS': True,
     'HAKRAWLER_INSECURE': True,
     'HAKRAWLER_CUSTOM_HEADERS': [],
@@ -299,7 +331,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     # jsluice JavaScript Analyzer
     'JSLUICE_ENABLED': True,
-    'JSLUICE_MAX_FILES': 100,
+    'JSLUICE_MAX_FILES': 10000,
     'JSLUICE_TIMEOUT': 300,
     'JSLUICE_EXTRACT_URLS': True,
     'JSLUICE_EXTRACT_SECRETS': True,
@@ -308,7 +340,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     # ========== JS RECON SCANNER ==========
     'JS_RECON_ENABLED': False,
-    'JS_RECON_MAX_FILES': 500,
+    'JS_RECON_MAX_FILES': 10000,
     'JS_RECON_TIMEOUT': 900,
     'JS_RECON_CONCURRENCY': 10,
     'JS_RECON_VALIDATE_KEYS': True,
@@ -339,7 +371,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'FFUF_THREADS': 40,
     'FFUF_RATE': 0,
     'FFUF_TIMEOUT': 10,
-    'FFUF_MAX_TIME': 600,
+    'FFUF_MAX_TIME': 1800,
     'FFUF_MATCH_CODES': [200, 201, 204, 301, 302, 307, 308, 401, 403, 405],
     'FFUF_FILTER_CODES': [],
     'FFUF_FILTER_SIZE': '',
@@ -350,7 +382,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'FFUF_FOLLOW_REDIRECTS': False,
     'FFUF_CUSTOM_HEADERS': [],
     'FFUF_SMART_FUZZ': True,
-    'FFUF_PARALLELISM': 4,
+    'FFUF_PARALLELISM': 20,
+    'FFUF_AI_EXTENSIONS': False,
 
     # Arjun Parameter Discovery
     'ARJUN_ENABLED': True,
@@ -358,7 +391,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'ARJUN_TIMEOUT': 15,
     'ARJUN_SCAN_TIMEOUT': 600,
     'ARJUN_METHODS': ['GET', 'POST'],
-    'ARJUN_MAX_ENDPOINTS': 50,
+    'ARJUN_MAX_ENDPOINTS': 50000,
     'ARJUN_CHUNK_SIZE': 500,
     'ARJUN_RATE_LIMIT': 0,
     'ARJUN_STABLE': False,
@@ -409,6 +442,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'SECURITY_CHECK_DIRECT_IP_HTTPS': True,
     'SECURITY_CHECK_IP_API_EXPOSED': True,
     'SECURITY_CHECK_WAF_BYPASS': True,
+    # Cascade-gated by AI_IN_PIPELINE. When on, _has_cdn_markers() and
+    # check_waf_bypass() fall back to the agent's /llm/waf-classify endpoint
+    # if the static Server/header token check returns no match.
+    'WAF_AI_CLASSIFIER': False,
     'SECURITY_CHECK_TLS_EXPIRING_SOON': True,
     'SECURITY_CHECK_TLS_EXPIRY_DAYS': 30,
     'SECURITY_CHECK_MISSING_REFERRER_POLICY': True,
@@ -448,7 +485,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     # URLScan.io Passive Enrichment
     'URLSCAN_ENABLED': True,
-    'URLSCAN_MAX_RESULTS': 5000,
+    'URLSCAN_MAX_RESULTS': 50000,
 
     # OSINT & Threat Intelligence Enrichment
     'OSINT_ENRICHMENT_ENABLED': False,
@@ -483,7 +520,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     # Uncover (ProjectDiscovery multi-engine search)
     'UNCOVER_ENABLED': False,
-    'UNCOVER_MAX_RESULTS': 500,
+    'UNCOVER_MAX_RESULTS': 50000,
     'UNCOVER_DOCKER_IMAGE': 'projectdiscovery/uncover:latest',
     'UNCOVER_QUAKE_API_KEY': '',
     'UNCOVER_HUNTER_API_KEY': '',
@@ -509,10 +546,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'SUBFINDER_DOCKER_IMAGE': 'projectdiscovery/subfinder:latest',
 
     # Amass (OWASP subdomain enumeration)
-    'AMASS_ENABLED': True,
-    'AMASS_MAX_RESULTS': 5000,
+    'AMASS_ENABLED': False,
+    'AMASS_MAX_RESULTS': 50000,
     'AMASS_TIMEOUT': 10,
-    'AMASS_ACTIVE': True,
+    'AMASS_ACTIVE': False,
     'AMASS_BRUTE': False,
     'AMASS_BRUTE_WORDLISTS': ['default'],
     'AMASS_DOCKER_IMAGE': 'caffix/amass:latest',
@@ -771,6 +808,8 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['NUCLEI_SCAN_ALL_IPS'] = project.get('nucleiScanAllIps', DEFAULT_SETTINGS['NUCLEI_SCAN_ALL_IPS'])
     settings['NUCLEI_INTERACTSH'] = project.get('nucleiInteractsh', DEFAULT_SETTINGS['NUCLEI_INTERACTSH'])
     settings['NUCLEI_DOCKER_IMAGE'] = project.get('nucleiDockerImage', DEFAULT_SETTINGS['NUCLEI_DOCKER_IMAGE'])
+    settings['NUCLEI_AI_TAGS'] = project.get('nucleiAiTags', DEFAULT_SETTINGS['NUCLEI_AI_TAGS'])
+    settings['NUCLEI_AI_RESPONSE_FILTER'] = project.get('nucleiAiResponseFilter', DEFAULT_SETTINGS['NUCLEI_AI_RESPONSE_FILTER'])
 
     # Subdomain Takeover Scanner
     settings['SUBDOMAIN_TAKEOVER_ENABLED'] = project.get('subdomainTakeoverEnabled', DEFAULT_SETTINGS['SUBDOMAIN_TAKEOVER_ENABLED'])
@@ -789,11 +828,25 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['TAKEOVER_CONFIDENCE_THRESHOLD'] = project.get('takeoverConfidenceThreshold', DEFAULT_SETTINGS['TAKEOVER_CONFIDENCE_THRESHOLD'])
     settings['TAKEOVER_RATE_LIMIT'] = project.get('takeoverRateLimit', DEFAULT_SETTINGS['TAKEOVER_RATE_LIMIT'])
     settings['TAKEOVER_MANUAL_REVIEW_AUTO_PUBLISH'] = project.get('takeoverManualReviewAutoPublish', DEFAULT_SETTINGS['TAKEOVER_MANUAL_REVIEW_AUTO_PUBLISH'])
+    settings['TAKEOVER_AI_CLASSIFIER'] = project.get('takeoverAiClassifier', DEFAULT_SETTINGS['TAKEOVER_AI_CLASSIFIER'])
     settings['BADDNS_ENABLED'] = project.get('baddnsEnabled', DEFAULT_SETTINGS['BADDNS_ENABLED'])
     settings['BADDNS_DOCKER_IMAGE'] = project.get('baddnsDockerImage', DEFAULT_SETTINGS['BADDNS_DOCKER_IMAGE'])
     settings['BADDNS_MODULES'] = project.get('baddnsModules', DEFAULT_SETTINGS['BADDNS_MODULES'])
     settings['BADDNS_NAMESERVERS'] = project.get('baddnsNameservers', DEFAULT_SETTINGS['BADDNS_NAMESERVERS'])
     settings['BADDNS_RUN_TIMEOUT'] = project.get('baddnsRunTimeout', DEFAULT_SETTINGS['BADDNS_RUN_TIMEOUT'])
+
+    # VHost & SNI Enumeration
+    settings['VHOST_SNI_ENABLED'] = project.get('vhostSniEnabled', DEFAULT_SETTINGS['VHOST_SNI_ENABLED'])
+    settings['VHOST_SNI_TIMEOUT'] = project.get('vhostSniTimeout', DEFAULT_SETTINGS['VHOST_SNI_TIMEOUT'])
+    settings['VHOST_SNI_CONCURRENCY'] = project.get('vhostSniConcurrency', DEFAULT_SETTINGS['VHOST_SNI_CONCURRENCY'])
+    settings['VHOST_SNI_BASELINE_SIZE_TOLERANCE'] = project.get('vhostSniBaselineSizeTolerance', DEFAULT_SETTINGS['VHOST_SNI_BASELINE_SIZE_TOLERANCE'])
+    settings['VHOST_SNI_TEST_L7'] = project.get('vhostSniTestL7', DEFAULT_SETTINGS['VHOST_SNI_TEST_L7'])
+    settings['VHOST_SNI_TEST_L4'] = project.get('vhostSniTestL4', DEFAULT_SETTINGS['VHOST_SNI_TEST_L4'])
+    settings['VHOST_SNI_INJECT_DISCOVERED'] = project.get('vhostSniInjectDiscovered', DEFAULT_SETTINGS['VHOST_SNI_INJECT_DISCOVERED'])
+    settings['VHOST_SNI_USE_DEFAULT_WORDLIST'] = project.get('vhostSniUseDefaultWordlist', DEFAULT_SETTINGS['VHOST_SNI_USE_DEFAULT_WORDLIST'])
+    settings['VHOST_SNI_USE_GRAPH_CANDIDATES'] = project.get('vhostSniUseGraphCandidates', DEFAULT_SETTINGS['VHOST_SNI_USE_GRAPH_CANDIDATES'])
+    settings['VHOST_SNI_CUSTOM_WORDLIST'] = project.get('vhostSniCustomWordlist', DEFAULT_SETTINGS['VHOST_SNI_CUSTOM_WORDLIST'])
+    settings['VHOST_SNI_MAX_CANDIDATES_PER_IP'] = project.get('vhostSniMaxCandidatesPerIp', DEFAULT_SETTINGS['VHOST_SNI_MAX_CANDIDATES_PER_IP'])
 
     # Katana Web Crawler
     settings['KATANA_ENABLED'] = project.get('katanaEnabled', DEFAULT_SETTINGS['KATANA_ENABLED'])
@@ -875,6 +928,11 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['FFUF_CUSTOM_HEADERS'] = project.get('ffufCustomHeaders', DEFAULT_SETTINGS['FFUF_CUSTOM_HEADERS'])
     settings['FFUF_SMART_FUZZ'] = project.get('ffufSmartFuzz', DEFAULT_SETTINGS['FFUF_SMART_FUZZ'])
     settings['FFUF_PARALLELISM'] = project.get('ffufParallelism', DEFAULT_SETTINGS['FFUF_PARALLELISM'])
+    settings['FFUF_AI_EXTENSIONS'] = project.get('ffufAiExtensions', DEFAULT_SETTINGS['FFUF_AI_EXTENSIONS'])
+
+    # AI in Pipeline (master switch + model)
+    settings['AI_IN_PIPELINE'] = project.get('aiInPipeline', DEFAULT_SETTINGS['AI_IN_PIPELINE'])
+    settings['AI_PIPELINE_MODEL'] = project.get('aiPipelineModel', DEFAULT_SETTINGS['AI_PIPELINE_MODEL'])
 
     # Arjun Parameter Discovery
     settings['ARJUN_ENABLED'] = project.get('arjunEnabled', DEFAULT_SETTINGS['ARJUN_ENABLED'])
@@ -960,6 +1018,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['SECURITY_CHECK_DIRECT_IP_HTTPS'] = project.get('securityCheckDirectIpHttps', DEFAULT_SETTINGS['SECURITY_CHECK_DIRECT_IP_HTTPS'])
     settings['SECURITY_CHECK_IP_API_EXPOSED'] = project.get('securityCheckIpApiExposed', DEFAULT_SETTINGS['SECURITY_CHECK_IP_API_EXPOSED'])
     settings['SECURITY_CHECK_WAF_BYPASS'] = project.get('securityCheckWafBypass', DEFAULT_SETTINGS['SECURITY_CHECK_WAF_BYPASS'])
+    settings['WAF_AI_CLASSIFIER'] = project.get('wafAiClassifier', DEFAULT_SETTINGS['WAF_AI_CLASSIFIER'])
     settings['SECURITY_CHECK_TLS_EXPIRING_SOON'] = project.get('securityCheckTlsExpiringSoon', DEFAULT_SETTINGS['SECURITY_CHECK_TLS_EXPIRING_SOON'])
     settings['SECURITY_CHECK_TLS_EXPIRY_DAYS'] = project.get('securityCheckTlsExpiryDays', DEFAULT_SETTINGS['SECURITY_CHECK_TLS_EXPIRY_DAYS'])
     settings['SECURITY_CHECK_MISSING_REFERRER_POLICY'] = project.get('securityCheckMissingReferrerPolicy', DEFAULT_SETTINGS['SECURITY_CHECK_MISSING_REFERRER_POLICY'])
@@ -1243,15 +1302,21 @@ def get_settings() -> dict[str, Any]:
         try:
             settings = fetch_project_settings(project_id, webapp_url)
             logger.info(f"Loaded {len(settings)} settings from API for project {project_id}")
-            return settings
-
         except Exception as e:
             logger.error(f"Failed to fetch project settings: {e}")
             raise  # Don't silently fall back - fail loudly if API is expected but unavailable
+    else:
+        # Fallback to DEFAULT_SETTINGS for CLI usage only
+        logger.info("Using DEFAULT_SETTINGS (no PROJECT_ID/WEBAPP_API_URL set - CLI mode)")
+        settings = DEFAULT_SETTINGS.copy()
 
-    # Fallback to DEFAULT_SETTINGS for CLI usage only
-    logger.info("Using DEFAULT_SETTINGS (no PROJECT_ID/WEBAPP_API_URL set - CLI mode)")
-    return DEFAULT_SETTINGS.copy()
+    # Apply project-level cascade overrides. Stealth runs first so that AI
+    # overrides see the post-stealth state (e.g., FFUF_ENABLED=False from
+    # stealth makes FFUF_AI_EXTENSIONS moot). Both functions are pure and
+    # idempotent.
+    settings = apply_stealth_overrides(settings)
+    settings = apply_ai_pipeline_overrides(settings)
+    return settings
 
 
 # Singleton settings instance
@@ -1358,6 +1423,13 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     settings['TAKEOVER_RATE_LIMIT'] = 10
     settings['BADDNS_ENABLED'] = False          # Keep isolated sidecar off in stealth
 
+    # --- VHost & SNI: disable entirely. The default 2,380-prefix wordlist plus
+    # L4 SNI brute would be both catastrophically slow over Tor AND noisy in
+    # exit-node logs. Users who really want stealth vhost discovery should
+    # build a custom preset (see red-team-operator) with graph-only candidates,
+    # L7-only, low concurrency. ---
+    settings['VHOST_SNI_ENABLED'] = False
+
     # --- Hakrawler: DISABLED (active crawler, no rate-limit control) ---
     settings['HAKRAWLER_ENABLED'] = False
 
@@ -1458,4 +1530,41 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
                 "ActiveSecurityChecks=OFF, JsRecon=reduced, GraphQL=introspection-only, "
                 "GraphQLCop=no-DoS")
 
+    return settings
+
+
+# =============================================================================
+# AI IN PIPELINE OVERRIDES
+# =============================================================================
+
+def apply_ai_pipeline_overrides(settings: dict[str, Any]) -> dict[str, Any]:
+    """
+    Apply AI-in-pipeline cascade to per-tool AI flags.
+
+    When AI_IN_PIPELINE is True, every supported per-tool AI flag is forced ON.
+    When False, every per-tool AI flag is forced OFF (defense-in-depth against
+    drift between master and per-tool fields).
+
+    Currently FFUF_AI_EXTENSIONS, NUCLEI_AI_TAGS, WAF_AI_CLASSIFIER,
+    NUCLEI_AI_RESPONSE_FILTER and TAKEOVER_AI_CLASSIFIER are governed by
+    this cascade; future per-tool AI flags should be added to both branches.
+    """
+    if not settings.get('AI_IN_PIPELINE', False):
+        settings['FFUF_AI_EXTENSIONS'] = False
+        settings['NUCLEI_AI_TAGS'] = False
+        settings['WAF_AI_CLASSIFIER'] = False
+        settings['NUCLEI_AI_RESPONSE_FILTER'] = False
+        settings['TAKEOVER_AI_CLASSIFIER'] = False
+        return settings
+
+    settings['FFUF_AI_EXTENSIONS'] = True
+    settings['NUCLEI_AI_TAGS'] = True
+    settings['WAF_AI_CLASSIFIER'] = True
+    settings['NUCLEI_AI_RESPONSE_FILTER'] = True
+    settings['TAKEOVER_AI_CLASSIFIER'] = True
+    logger.info(
+        "AI in pipeline enabled, model=%s, FFuf=AI-extensions, Nuclei=AI-tags, "
+        "WAF=AI-classifier, Nuclei-FP=AI-response-filter, Takeover=AI-classifier",
+        settings.get('AI_PIPELINE_MODEL', 'claude-opus-4-6'),
+    )
     return settings

@@ -47,27 +47,49 @@ _SQLI_SECTION = """### sql_injection — SQL Injection
 _XSS_SECTION = """### xss — Cross-Site Scripting (XSS)
 - XSS testing against web applications using dalfox, kxss, Playwright DOM analysis, and manual context-aware payloads
 - Includes: reflected XSS, stored XSS, DOM-based XSS, blind XSS via OOB callbacks, CSP bypass
-- Key distinction: injecting JavaScript that executes in a victim's browser context (vs sql_injection which targets the DB, vs ssrf-unclassified which targets the backend)
+- Key distinction: injecting JavaScript that executes in a victim's browser context (vs sql_injection which targets the DB, vs ssrf which targets the backend)
 - Keywords: XSS, cross-site scripting, reflected XSS, stored XSS, DOM XSS, blind XSS, dalfox, payload encoding, CSP bypass, innerHTML, event handler, script injection
+"""
+
+_SSRF_SECTION = """### ssrf — Server-Side Request Forgery (SSRF)
+- SSRF testing against web applications: forcing the server to make requests to internal services, cloud metadata endpoints, or arbitrary destinations the attacker cannot reach directly
+- Includes: classic / blind / semi-blind SSRF, cloud metadata pivots (AWS IMDS, GCP/Azure metadata), protocol smuggling (gopher, file, dict), DNS rebinding, URL parser confusion, redirect chains, internal port scanning via SSRF, RCE chains via Redis/FastCGI/Docker
+- Key distinction: the server fetches an attacker-controlled URL (vs sql_injection which manipulates DB queries, vs xss which executes JS in a victim browser, vs phishing which builds artifacts for a target user)
+- Keywords: SSRF, server-side request forgery, internal request, cloud metadata, IMDS, IMDSv2, gopher, redirect bypass, DNS rebinding, internal SSRF, blind SSRF, webhook abuse, URL fetcher, link preview, parser differential, CRLF injection, OAST callback
+"""
+
+_RCE_SECTION = """### rce — Remote Code Execution (RCE) / Command Injection
+- RCE testing against web applications and services: forcing the target to execute attacker-controlled code via OS command injection, server-side template injection (SSTI), insecure deserialization, dynamic eval / expression languages, media + document pipelines, or SSRF-to-RCE chains
+- Includes: command injection (commix), SSTI across Jinja2/Twig/Freemarker/Velocity/EJS/Thymeleaf (sstimap), Java deserialization gadget chains (ysoserial: URLDNS, CommonsCollections, Spring), PHP unserialize, Python pickle, Ruby Marshal, .NET ViewState, OGNL/SpEL/MVEL injection, ImageMagick/Ghostscript/ExifTool/LaTeX pipeline RCE, Log4Shell-style JNDI lookups, Spring4Shell, Struts S2-045, container/k8s escape probes, OOB DNS oracles via interactsh
+- Key distinction: code or shell commands execute on the SERVER (vs xss which runs JS in a victim browser, vs sql_injection which only injects SQL into a DB, vs ssrf which forces outbound HTTP fetches without code execution, vs cve_exploit which uses Metasploit modules against pre-known CVEs in network services, vs path_traversal which only reads files unless escalated via a wrapper-and-log-poisoning chain)
+- Keywords: RCE, remote code execution, command injection, code injection, shell injection, SSTI, server-side template injection, template injection, deserialization, gadget chain, ysoserial, commix, sstimap, eval, exec, system command, OGNL, SpEL, MVEL, log4shell, log4j, spring4shell, struts, ImageMagick, ImageTragick, Ghostscript, ExifTool, JNDI, picture upload RCE, Jinja2 SSTI, Freemarker SSTI, Twig SSTI, pickle RCE, container escape, docker.sock
+"""
+
+_PATH_TRAVERSAL_SECTION = """### path_traversal — Path Traversal / LFI / RFI
+- File-disclosure testing against web applications: coercing the target to read or include files outside the intended root via `../` traversal, encoded variants, normalisation gaps, PHP wrappers (`php://filter`, `data://`, `expect://`, `zip://`), log poisoning, remote inclusion (RFI) via `http://`/`ftp://` schemes, and archive-extraction (Zip Slip)
+- Includes: classic path traversal, Local File Inclusion (LFI), Remote File Inclusion (RFI), PHP wrapper-driven source disclosure, log poisoning to RCE, /proc and cloud-credential file reads, parser/normalisation mismatches across nginx + backend (`..;/`, `%252f` double-decode), Windows UNC and absolute-path acceptance, archive entries with `../` or symlinks that escape the extraction directory
+- Key distinction: the goal is to READ (or write via Zip Slip) a file outside the intended root (vs sql_injection which targets the database, vs xss which executes JS in a browser, vs ssrf which forces outbound HTTP fetches without filesystem access, vs rce which runs code on the server unless this skill chains LFI + log poisoning to escalate, vs cve_exploit which uses Metasploit modules against pre-known CVEs)
+- Keywords: path traversal, directory traversal, LFI, local file inclusion, RFI, remote file inclusion, file inclusion, file read, arbitrary file read, ../, %2e%2e%2f, php://filter, data://, expect://, zip://, file://, log poisoning, /etc/passwd, /etc/hosts, web.config, win.ini, wp-config, .env disclosure, SecLists fuzz file, nginx alias bypass, ..;/, double-decode, Zip Slip, archive extraction, tarslip, symlink archive
 """
 
 _UNCLASSIFIED_SECTION = """### <descriptive_term>-unclassified
 - ANY exploitation request that does NOT clearly fit the enabled attack skills above
 - The agent has no specialized workflow for these — it will use available tools generically
 - **Key distinction from phishing:** the attacker directly interacts with a SERVICE/APPLICATION, NOT generating a payload for a target user to execute
-  - "Test for SSRF on the API" → unclassified (attacker sends crafted input to a web service)
+  - "Try to abuse the bulk-export endpoint" → unclassified (attacker sends crafted input to a web service)
   - "Generate a reverse shell payload" → phishing (attacker creates a file for a target user to execute)
 - **Key distinction from sql_injection:** if the request is specifically about SQL injection, use the `sql_injection` skill instead
 - **Key distinction from xss:** if the request is specifically about XSS, cross-site scripting, or JavaScript injection in a browser, use the `xss` skill instead
+- **Key distinction from ssrf:** if the request is specifically about SSRF, server-side request forgery, cloud metadata access, or forcing the server to make outbound requests, use the `ssrf` skill instead
+- **Key distinction from rce:** if the request is specifically about command injection, SSTI, deserialization gadget chains, eval / OGNL / SpEL injection, media-pipeline RCE, or any other path leading to remote CODE/SHELL execution on the server, use the `rce` skill instead
+- **Key distinction from path_traversal:** if the request is specifically about path traversal, directory traversal, LFI, RFI, file inclusion, PHP wrappers (`php://filter`, `data://`, `expect://`), log poisoning, or Zip Slip / archive-extraction file writes, use the `path_traversal` skill instead
 - You MUST create a short, descriptive snake_case term followed by "-unclassified"
 - Format: `<term>-unclassified` where term is 1-4 lowercase words joined by underscores
-- Example values: "ssrf-unclassified", "file_upload-unclassified", "directory_traversal-unclassified", "command_injection-unclassified"
-- Keywords: directory traversal, path traversal, SSRF, file upload, command injection, LFI, RFI, deserialization, XXE, privilege escalation
+- Example values: "file_upload-unclassified", "xxe-unclassified", "race_condition-unclassified"
+- Keywords: file upload, XXE, privilege escalation, race conditions
 - Example requests:
-  - "Test for SSRF on the API" -> "ssrf-unclassified"
   - "Try to upload a web shell" -> "file_upload-unclassified"
-  - "Attempt directory traversal" -> "directory_traversal-unclassified"
-  - "Try command injection on the web form" -> "command_injection-unclassified"
+  - "Test for XXE on the SOAP endpoint" -> "xxe-unclassified"
 """
 
 # Map of built-in skill ID -> (section text, classification priority letter)
@@ -78,6 +100,9 @@ _BUILTIN_SKILL_MAP = {
     'denial_of_service': (_DOS_SECTION, 'd', 'denial_of_service'),
     'sql_injection': (_SQLI_SECTION, 'e', 'sql_injection'),
     'xss': (_XSS_SECTION, 'f', 'xss'),
+    'ssrf': (_SSRF_SECTION, 'g', 'ssrf'),
+    'rce': (_RCE_SECTION, 'h', 'rce'),
+    'path_traversal': (_PATH_TRAVERSAL_SECTION, 'i', 'path_traversal'),
 }
 
 # Classification instructions for built-in skills (no priority — best match wins)
@@ -105,6 +130,25 @@ _CLASSIFICATION_INSTRUCTIONS = {
       - Does the request mention XSS, cross-site scripting, JavaScript injection, or DOM sinks?
       - Does it target a web application input/parameter with the goal of executing JS in a victim browser?
       - Does it mention reflected/stored/DOM XSS, payload encoding, CSP bypass, blind XSS callbacks, or dalfox?""",
+    'ssrf': """   - **ssrf**:
+      - Does the request mention SSRF, server-side request forgery, internal request, or webhook abuse?
+      - Does it target a URL/host/redirect parameter with the goal of forcing the server to fetch attacker-controlled or internal destinations?
+      - Does it mention cloud metadata (IMDS, 169.254.169.254, metadata.google.internal), gopher://, DNS rebinding, or internal port scanning via URL fetcher?
+      - Does it describe parser confusion, redirect chains, or CRLF injection in URL parameters?""",
+    'rce': """   - **rce**:
+      - Does the request mention RCE, remote code execution, command injection, code injection, or shell execution on the server?
+      - Does it mention server-side template injection (SSTI), Jinja2 / Twig / Freemarker / Velocity / EJS / Thymeleaf payloads?
+      - Does it mention insecure deserialization, gadget chains, ysoserial, pickle, PHP unserialize, ViewState, or Marshal.load?
+      - Does it mention eval / exec / OGNL / SpEL / MVEL injection, or expression-language abuse?
+      - Does it mention Log4Shell / JNDI, Spring4Shell, Struts S2-045, ImageMagick / Ghostscript / ExifTool / LaTeX pipeline RCE?
+      - Does it describe a path that ends in a SHELL or CODE running on the server (not just data extraction or browser-side JS)?""",
+    'path_traversal': """   - **path_traversal**:
+      - Does the request mention path traversal, directory traversal, LFI, RFI, file inclusion, or arbitrary file read?
+      - Does it mention `../`, `%2e%2e%2f`, `..;/`, double-decode, or nginx alias bypass?
+      - Does it mention PHP wrappers (`php://filter`, `data://`, `expect://`, `zip://`) or log poisoning to escalate LFI?
+      - Does it mention reading sensitive files like `/etc/passwd`, `/etc/hosts`, `/proc/self/environ`, `wp-config.php`, `.env`, `web.config`, or cloud credential files?
+      - Does it mention archive-extraction (Zip Slip / TarSlip), symlink-in-archive escapes, or writing files outside an extraction directory?
+      - Key boundary: STOP before this skill if the goal is direct command execution -- that belongs to `rce` -- unless the request explicitly chains LFI + log poisoning to land RCE (then it stays here).""",
 }
 
 
@@ -168,7 +212,7 @@ def build_classification_prompt(objective: str) -> str:
     parts.append("## Attack Skill Types (ONLY for exploitation phase)\n")
 
     # Built-in skills (only enabled ones)
-    for skill_id in ['phishing_social_engineering', 'brute_force_credential_guess', 'cve_exploit', 'denial_of_service', 'sql_injection', 'xss']:
+    for skill_id in ['phishing_social_engineering', 'brute_force_credential_guess', 'cve_exploit', 'denial_of_service', 'sql_injection', 'xss', 'ssrf', 'rce', 'path_traversal']:
         if skill_id in enabled_builtins:
             section_text, _, _ = _BUILTIN_SKILL_MAP[skill_id]
             parts.append(section_text)
@@ -199,7 +243,7 @@ def build_classification_prompt(objective: str) -> str:
                  "'brute force SSH' → brute_force_credential_guess). Pick the one whose criteria fit most closely:\n")
 
     # Built-in skill classification criteria
-    builtin_skill_ids = ['phishing_social_engineering', 'brute_force_credential_guess', 'cve_exploit', 'denial_of_service', 'sql_injection', 'xss']
+    builtin_skill_ids = ['phishing_social_engineering', 'brute_force_credential_guess', 'cve_exploit', 'denial_of_service', 'sql_injection', 'xss', 'ssrf', 'rce', 'path_traversal']
     for skill_id in builtin_skill_ids:
         if skill_id in enabled_builtins:
             parts.append(_CLASSIFICATION_INSTRUCTIONS[skill_id])

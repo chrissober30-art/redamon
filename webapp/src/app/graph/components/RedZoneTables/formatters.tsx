@@ -2,6 +2,18 @@
 
 import type { ReactNode } from 'react'
 import { ExternalLink } from '@/components/ui'
+import {
+  capecToUrl,
+  cveToUrl,
+  cweToUrl,
+  emailToMailto,
+  githubSlugToUrl,
+  hostPortToUrl,
+  hostToUrl,
+  ipToUrl,
+  isGithubSlug,
+  resolveLinkable,
+} from '@/lib/url-utils'
 import type { Severity } from './types'
 import styles from './RedZoneTableRow.module.css'
 
@@ -74,9 +86,138 @@ export function ListCell({ items, max = 3 }: { items: string[] | null | undefine
   const extra = items.length - shown.length
   return (
     <span className={styles.listCell}>
-      {shown.map((it, i) => (
-        <span key={i} className={styles.listChip}>{it}</span>
-      ))}
+      {shown.map((it, i) => {
+        const href = resolveLinkable(it)
+        return (
+          <span key={i} className={styles.listChip}>
+            {href ? <ExternalLink href={href}>{it}</ExternalLink> : it}
+          </span>
+        )
+      })}
+      {extra > 0 && <span className={styles.listMore}>+{extra}</span>}
+    </span>
+  )
+}
+
+/**
+ * Renders an IP address as a clickable link. The optional `port` is used
+ * only to build the link target (so http:// vs https:// is chosen correctly);
+ * it is not appended to the displayed text. Pass `showPort` if the cell is
+ * meant to display the IP:port combo together.
+ */
+export function IpCell({
+  ip,
+  port,
+  showPort = false,
+}: {
+  ip: string | null | undefined
+  port?: number | null
+  showPort?: boolean
+}) {
+  if (!ip) return <span className={styles.nullCell}>-</span>
+  const href = port ? ipToUrl(ip, port) : ipToUrl(ip)
+  const label = showPort && port ? `${ip}:${port}` : ip
+  return (
+    <code className={styles.mono}>
+      <ExternalLink href={href}>{label}</ExternalLink>
+    </code>
+  )
+}
+
+export function HostCell({ host }: { host: string | null | undefined }) {
+  if (!host) return <span className={styles.nullCell}>-</span>
+  return (
+    <code className={styles.mono}>
+      <ExternalLink href={hostToUrl(host)}>{host}</ExternalLink>
+    </code>
+  )
+}
+
+export function HostPortCell({ host, port }: { host: string | null | undefined; port: number | null | undefined }) {
+  if (!host) return <span className={styles.nullCell}>-</span>
+  if (!port) {
+    return (
+      <code className={styles.mono}>
+        <ExternalLink href={hostToUrl(host)}>{host}</ExternalLink>
+      </code>
+    )
+  }
+  return (
+    <code className={styles.mono}>
+      <ExternalLink href={hostPortToUrl(host, port)}>{`${host}:${port}`}</ExternalLink>
+    </code>
+  )
+}
+
+export function EmailCell({ email }: { email: string | null | undefined }) {
+  if (!email) return <span className={styles.nullCell}>-</span>
+  return <ExternalLink href={emailToMailto(email)}>{email}</ExternalLink>
+}
+
+export function CveLink({ id }: { id: string | null | undefined }) {
+  if (!id) return <span className={styles.nullCell}>-</span>
+  return <ExternalLink href={cveToUrl(id)}>{id}</ExternalLink>
+}
+
+export function CweLink({ id }: { id: string | null | undefined }) {
+  if (!id) return <span className={styles.nullCell}>-</span>
+  return <ExternalLink href={cweToUrl(id)}>{id}</ExternalLink>
+}
+
+export function CapecLink({ id }: { id: string | null | undefined }) {
+  if (!id) return <span className={styles.nullCell}>-</span>
+  return <ExternalLink href={capecToUrl(id)}>{id}</ExternalLink>
+}
+
+export function GithubSlugCell({ slug }: { slug: string | null | undefined }) {
+  if (!slug) return <span className={styles.nullCell}>-</span>
+  if (!isGithubSlug(slug)) return <code className={styles.mono}>{slug}</code>
+  return (
+    <code className={styles.mono}>
+      <ExternalLink href={githubSlugToUrl(slug)}>{slug}</ExternalLink>
+    </code>
+  )
+}
+
+type LinkedListKind = 'auto' | 'cve' | 'cwe' | 'capec' | 'ip' | 'host' | 'email' | 'github'
+
+function urlForKind(item: string, kind: LinkedListKind): string | null {
+  switch (kind) {
+    case 'cve': return cveToUrl(item)
+    case 'cwe': return cweToUrl(item)
+    case 'capec': return capecToUrl(item)
+    case 'ip': return ipToUrl(item)
+    case 'host': return hostToUrl(item)
+    case 'email': return emailToMailto(item)
+    case 'github': return isGithubSlug(item) ? githubSlugToUrl(item) : null
+    case 'auto':
+    default:
+      return resolveLinkable(item)
+  }
+}
+
+export function LinkedListCell({
+  items,
+  max = 3,
+  kind = 'auto',
+}: {
+  items: string[] | null | undefined
+  max?: number
+  kind?: LinkedListKind
+}) {
+  if (!items || items.length === 0) return <span className={styles.nullCell}>-</span>
+  const shown = items.slice(0, max)
+  const extra = items.length - shown.length
+  return (
+    <span className={styles.listCell}>
+      {shown.map((it, i) => {
+        const href = urlForKind(it, kind)
+        return (
+          <span key={i} className={styles.listChip}>
+            {href ? <ExternalLink href={href}>{it}</ExternalLink> : it}
+          </span>
+        )
+      })}
       {extra > 0 && <span className={styles.listMore}>+{extra}</span>}
     </span>
   )

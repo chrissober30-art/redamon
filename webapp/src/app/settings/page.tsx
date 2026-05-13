@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, Upload, Download, Swords, RotateCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Info, BookOpen } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, Upload, Download, Swords, RotateCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Info, BookOpen, Server } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { LlmProviderForm } from '@/components/settings/LlmProviderForm'
+import McpServersTab from '@/components/settings/mcp/McpServersTab'
 import type { ProviderData } from '@/components/settings/LlmProviderForm'
+import { TradecraftResourceForm } from '@/components/settings/TradecraftResourceForm'
+import { TradecraftResourceList } from '@/components/settings/TradecraftResourceList'
 import { PROVIDER_TYPES } from '@/lib/llmProviderPresets'
 import { Modal } from '@/components/ui/Modal/Modal'
-import { useAlertModal, useToast } from '@/components/ui'
+import { useAlertModal, useToast, WikiInfoButton } from '@/components/ui'
 import styles from '@/components/settings/Settings.module.css'
 import { buildTemplate, templateToJson, validateAndParse, isValidationError } from '@/lib/apiKeysTemplate'
 import type { ParsedImport } from '@/lib/apiKeysTemplate'
@@ -39,6 +42,7 @@ interface UserSettings {
   onypheApiKey: string
   driftnetApiKey: string
   wpscanApiToken: string
+  pdcpApiKey: string
   ngrokAuthtoken: string
   chiselServerUrl: string
   chiselAuth: string
@@ -69,6 +73,7 @@ const EMPTY_SETTINGS: UserSettings = {
   onypheApiKey: '',
   driftnetApiKey: '',
   wpscanApiToken: '',
+  pdcpApiKey: '',
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
@@ -100,10 +105,11 @@ const TOOL_NAME_MAP: Record<string, string> = {
   onypheApiKey: 'onyphe',
   driftnetApiKey: 'driftnet',
   wpscanApiToken: 'wpscan',
+  pdcpApiKey: 'pdcp',
 }
 
-function getProviderIcon(providerType: string): string {
-  return PROVIDER_TYPES.find(p => p.id === providerType)?.icon || '⚙️'
+function getProviderIconComponent(providerType: string) {
+  return PROVIDER_TYPES.find(p => p.id === providerType)?.Icon ?? null
 }
 
 function getProviderLabel(providerType: string): string {
@@ -529,6 +535,7 @@ export default function SettingsPage() {
           onypheApiKey: data.onypheApiKey || '',
           driftnetApiKey: data.driftnetApiKey || '',
           wpscanApiToken: data.wpscanApiToken || '',
+          pdcpApiKey: data.pdcpApiKey || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -620,6 +627,7 @@ export default function SettingsPage() {
           onypheApiKey: data.onypheApiKey || '',
           driftnetApiKey: data.driftnetApiKey || '',
           wpscanApiToken: data.wpscanApiToken || '',
+          pdcpApiKey: data.pdcpApiKey || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -772,14 +780,117 @@ export default function SettingsPage() {
   }, [pendingImport])
 
   const searchParams = useSearchParams()
-  const validTabs = ['providers', 'skills', 'chat-skills', 'keys', 'system']
+  const validTabs = ['providers', 'skills', 'chat-skills', 'tradecraft', 'keys', 'mcp', 'system']
   const initialTab = searchParams.get('tab') || 'providers'
   const [activeTab, setActiveTab] = useState(validTabs.includes(initialTab) ? initialTab : 'providers')
+
+  // Tradecraft Resources state
+  type TcResource = import('@/components/settings/TradecraftResourceForm').TradecraftResource & {
+    crawlStoppedBecause?: string
+    crawlStats?: { pages_fetched?: number; llm_calls?: number; elapsed_sec?: number }
+    sitemap?: { nav?: unknown[]; tree?: unknown[]; pages?: unknown[]; links?: unknown[] }
+  }
+  const [tcResources, setTcResources] = useState<TcResource[]>([])
+  const [tcLoading, setTcLoading] = useState(false)
+  const [tcShowForm, setTcShowForm] = useState(false)
+  const [tcEditing, setTcEditing] = useState<TcResource | null>(null)
+  const [tcRefreshingId, setTcRefreshingId] = useState<string | null>(null)
+  const tcPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const fetchTcResources = useCallback(async () => {
+    if (!userId) return
+    setTcLoading(true)
+    try {
+      const r = await fetch(`/api/users/${userId}/tradecraft-resources`)
+      if (r.ok) setTcResources(await r.json())
+    } catch (e) { console.error('fetchTcResources', e) }
+    finally { setTcLoading(false) }
+  }, [userId])
+
+  useEffect(() => {
+    if (activeTab === 'tradecraft' && userId) {
+      fetchTcResources()
+    }
+  }, [activeTab, userId, fetchTcResources])
+
+  // Light polling while a resource has not yet been verified (lastVerifiedAt null)
+  useEffect(() => {
+    if (activeTab !== 'tradecraft' || !userId) {
+      if (tcPollingRef.current) { clearInterval(tcPollingRef.current); tcPollingRef.current = null }
+      return
+    }
+    const anyPending = tcResources.some(r => !r.lastVerifiedAt)
+    if (anyPending && !tcPollingRef.current) {
+      tcPollingRef.current = setInterval(fetchTcResources, 5000)
+    } else if (!anyPending && tcPollingRef.current) {
+      clearInterval(tcPollingRef.current); tcPollingRef.current = null
+    }
+    return () => {
+      if (tcPollingRef.current) { clearInterval(tcPollingRef.current); tcPollingRef.current = null }
+    }
+  }, [activeTab, userId, tcResources, fetchTcResources])
+
+  const tcHandleSave = useCallback(() => {
+    setTcShowForm(false); setTcEditing(null); fetchTcResources(); toast.success('Saved')
+  }, [fetchTcResources, toast])
+
+  const tcHandleCancel = useCallback(() => { setTcShowForm(false); setTcEditing(null) }, [])
+
+  const tcHandleDelete = useCallback(async (r: TcResource) => {
+    if (!userId || !r.id) return
+    const ok = await showConfirm(
+      `Delete "${r.name}"? This removes the catalog entry and disk cache.`,
+      'Delete tradecraft resource',
+    )
+    if (!ok) return
+    try {
+      const resp = await fetch(`/api/users/${userId}/tradecraft-resources/${r.id}`, { method: 'DELETE' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      toast.success('Deleted')
+      fetchTcResources()
+    } catch (e) { toast.error(`Delete failed: ${e instanceof Error ? e.message : String(e)}`) }
+  }, [userId, showConfirm, toast, fetchTcResources])
+
+  const tcHandleRefresh = useCallback(async (r: TcResource) => {
+    if (!userId || !r.id) return
+    setTcRefreshingId(r.id)
+    try {
+      const resp = await fetch(`/api/users/${userId}/tradecraft-resources/${r.id}/refresh`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        throw new Error(data.error || `HTTP ${resp.status}`)
+      }
+      toast.success('Refreshed')
+      fetchTcResources()
+    } catch (e) { toast.error(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`) }
+    finally { setTcRefreshingId(null) }
+  }, [userId, toast, fetchTcResources])
+
+  const tcHandleToggleEnabled = useCallback(async (r: TcResource, next: boolean) => {
+    if (!userId || !r.id) return
+    // Optimistic update
+    setTcResources(prev => prev.map(x => x.id === r.id ? { ...x, enabled: next } : x))
+    try {
+      const resp = await fetch(`/api/users/${userId}/tradecraft-resources/${r.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    } catch (e) {
+      toast.error(`Toggle failed: ${e instanceof Error ? e.message : String(e)}`)
+      fetchTcResources()
+    }
+  }, [userId, toast, fetchTcResources])
 
   if (!userId) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.pageTitle}>Global Settings <span style={{ fontSize: '0.55em', fontWeight: 400, opacity: 0.5 }}>(User-Scoped)</span></h1>
+        <h1 className={styles.pageTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
+          <span>Global Settings <span style={{ fontSize: '0.55em', fontWeight: 400, opacity: 0.5 }}>(User-Scoped)</span></span>
+          <WikiInfoButton target="settings" title="Open Global Settings wiki page" />
+        </h1>
         <div className={styles.emptyState}>Select a user to configure settings.</div>
       </div>
     )
@@ -802,8 +913,14 @@ export default function SettingsPage() {
         <button className={`${styles.tab} ${activeTab === 'chat-skills' ? styles.tabActive : ''}`} onClick={() => setActiveTab('chat-skills')}>
           <BookOpen size={14} /> Chat Skills
         </button>
+        <button className={`${styles.tab} ${activeTab === 'tradecraft' ? styles.tabActive : ''}`} onClick={() => setActiveTab('tradecraft')}>
+          <BookOpen size={14} /> Tradecraft
+        </button>
         <button className={`${styles.tab} ${activeTab === 'keys' ? styles.tabActive : ''}`} onClick={() => setActiveTab('keys')}>
           API Keys & Tunneling
+        </button>
+        <button className={`${styles.tab} ${activeTab === 'mcp' ? styles.tabActive : ''}`} onClick={() => setActiveTab('mcp')}>
+          <Server size={14} /> MCP Tool Plugins
         </button>
         <button className={`${styles.tab} ${activeTab === 'system' ? styles.tabActive : ''}`} onClick={() => setActiveTab('system')}>
           <Info size={14} /> System
@@ -813,7 +930,10 @@ export default function SettingsPage() {
       {/* Tab: LLM Providers */}
       {activeTab === 'providers' && <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>LLM Providers</h2>
+          <h2 className={styles.sectionTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <span>LLM Providers</span>
+            <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/AI-Model-Providers" title="Open AI Model Providers wiki page" />
+          </h2>
           {!showProviderForm && !editingProvider && (
             <button className="primaryButton" onClick={() => setShowProviderForm(true)}>
               <Plus size={14} /> Add Provider
@@ -829,6 +949,7 @@ export default function SettingsPage() {
           <LlmProviderForm
             userId={userId}
             provider={editingProvider}
+            existingProviderTypes={providers.map(p => p.providerType)}
             onSave={() => {
               setShowProviderForm(false)
               setEditingProvider(null)
@@ -849,9 +970,13 @@ export default function SettingsPage() {
             <div className={styles.emptyState}>No providers configured. Add one to get started.</div>
           ) : (
             <div className={styles.providerList}>
-              {providers.map((p: ProviderData) => (
+              {providers.map((p: ProviderData) => {
+                const Icon = getProviderIconComponent(p.providerType)
+                return (
                 <div key={p.id} className={styles.providerCard}>
-                  <span className={styles.providerIcon}>{getProviderIcon(p.providerType)}</span>
+                  <span className={styles.providerIcon} aria-label={getProviderLabel(p.providerType)}>
+                    {Icon ? <Icon size={28} /> : null}
+                  </span>
                   <div className={styles.providerInfo}>
                     <div className={styles.providerName}>{p.name}</div>
                     <div className={styles.providerMeta}>
@@ -868,7 +993,8 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )
         )}
@@ -877,7 +1003,10 @@ export default function SettingsPage() {
       {/* Tab: Agent Skills */}
       {activeTab === 'skills' && <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}><Swords size={16} /> Agent Skills</h2>
+          <h2 className={styles.sectionTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <Swords size={16} /> Agent Skills
+            <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Agent-Skills" title="Open Agent Skills wiki page" />
+          </h2>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
               className="secondaryButton"
@@ -941,7 +1070,10 @@ export default function SettingsPage() {
       {/* Tab: Chat Skills */}
       {activeTab === 'chat-skills' && <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}><BookOpen size={16} /> Chat Skills</h2>
+          <h2 className={styles.sectionTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <BookOpen size={16} /> Chat Skills
+            <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Chat-Skills" title="Open Chat Skills wiki page" />
+          </h2>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
               className="secondaryButton"
@@ -1018,10 +1150,52 @@ export default function SettingsPage() {
         )}
       </div>}
 
+      {/* Tab: Tradecraft Resources */}
+      {activeTab === 'tradecraft' && <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}>
+            Tradecraft Resources
+            <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Tradecraft-Lookup" title="Open Tradecraft Lookup wiki page" />
+          </h2>
+          {!tcShowForm && !tcEditing && (
+            <button className="primaryButton" onClick={() => setTcShowForm(true)}>
+              <Plus size={14} /> Add Resource
+            </button>
+          )}
+        </div>
+        <p className={styles.sectionHint}>
+          Curated knowledge sites the agent consults during exploitation
+          (HackTricks, PayloadsAllTheThings, CVE PoC repos, ...). On add, the
+          agent fetches the homepage, builds a sitemap, and writes a short
+          summary that becomes the tool&apos;s catalog entry. The agent only sees
+          enabled resources.
+        </p>
+        {(tcShowForm || tcEditing) && (
+          <TradecraftResourceForm
+            userId={userId!}
+            resource={tcEditing}
+            onSave={tcHandleSave}
+            onCancel={tcHandleCancel}
+          />
+        )}
+        <TradecraftResourceList
+          resources={tcResources}
+          loading={tcLoading}
+          refreshingId={tcRefreshingId}
+          onEdit={(r) => setTcEditing(r)}
+          onDelete={tcHandleDelete}
+          onRefresh={tcHandleRefresh}
+          onToggleEnabled={tcHandleToggleEnabled}
+        />
+      </div>}
+
       {/* Tab: API Keys & Tunneling */}
       {activeTab === 'keys' && <><div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>API Keys</h2>
+          <h2 className={styles.sectionTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <span>API Keys</span>
+            <WikiInfoButton target="settings" title="Open Global Settings wiki page" />
+          </h2>
           <div className={styles.sectionHeaderActions}>
             <button className={styles.sectionHeaderBtn} onClick={downloadKeysTemplate} title="Download a JSON template to fill in your API keys offline">
               <Download size={13} /> Download Template
@@ -1099,6 +1273,18 @@ export default function SettingsPage() {
               onChange={v => updateSetting('wpscanApiToken', v)}
               onConfigureRotation={() => openRotationModal('wpscanApiToken')}
               rotationInfo={rotationConfigs.wpscan || null}
+            />
+            <SecretField
+              label="PDCP API Key"
+              hint="Optional. Enriches the cve_intel tool by lifting the 10 req/min anonymous rate limit on ProjectDiscovery's CVE database (vulnx)."
+              signupUrl="https://cloud.projectdiscovery.io"
+              badges={['AI Agent']}
+              value={settings.pdcpApiKey}
+              visible={!!visibleFields.pdcpApiKey}
+              onToggle={() => toggleFieldVisibility('pdcpApiKey')}
+              onChange={v => updateSetting('pdcpApiKey', v)}
+              onConfigureRotation={() => openRotationModal('pdcpApiKey')}
+              rotationInfo={rotationConfigs.pdcp || null}
             />
             <SecretField
               label="NVD API Key"
@@ -1345,7 +1531,10 @@ export default function SettingsPage() {
       {/* Tunneling sub-section */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>Tunneling</h2>
+          <h2 className={styles.sectionTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <span>Tunneling</span>
+            <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Reverse-Shells" title="Open Reverse Shells wiki page" />
+          </h2>
         </div>
         <p className={styles.sectionHint}>
           Configure reverse shell tunneling. Choose ngrok (free, single port) or chisel (multi-port, requires VPS). Changes apply immediately.
@@ -1396,6 +1585,8 @@ export default function SettingsPage() {
       </div></>}
 
       {/* Tab: System */}
+      {activeTab === 'mcp' && userId && <McpServersTab userId={userId} />}
+
       {activeTab === 'system' && <SystemSection />}
 
       {/* Skill upload modal */}
@@ -1764,7 +1955,10 @@ function SystemSection() {
   return (
     <div className={styles.section}>
       <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}><Info size={16} /> System</h2>
+        <h2 className={styles.sectionTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+          <Info size={16} /> System
+          <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Troubleshooting" title="Open Troubleshooting wiki page" />
+        </h2>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

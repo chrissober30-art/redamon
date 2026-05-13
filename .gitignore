@@ -153,6 +153,8 @@ internal/
 
 # RedAmon local config (created by redamon.sh)
 .gvm-enabled
+.kbase-enabled
+.kbase-disabled
 .skipkbase
 
 # Claude Code config
@@ -164,3 +166,6 @@ bmark/
 # Knowledge base runtime data
 knowledge_base/data/
 **/.file_hashes.json
+
+# DevergoLabs
+DevergoLabs/

@@ -33,7 +33,7 @@ def _base_member_state(**overrides):
         "parent_target_info": {},
         "member_name": "Web Tester", "member_id": "member-0-abc",
         "fireteam_id": "fteam-1",
-        "skills": ["xss"], "task": "scan target",
+        "tools": ["xss"], "task": "scan target",
         "execution_trace": [],
         "target_info": {}, "chain_findings_memory": [],
         "chain_failures_memory": [],
@@ -343,7 +343,7 @@ class FindingStepIterationPreservedRegression(unittest.TestCase):
             ],
             "execution_trace": [],
         }
-        spec = {"name": "API Fuzzer", "task": "t", "skills": ["ffuf"], "max_iterations": 10}
+        spec = {"name": "API Fuzzer", "task": "t", "tools": ["ffuf"], "max_iterations": 10}
 
         result = _result_from_final_state(final_state, spec, "member-0-abc", 12.3)
         findings = result.get("findings") or []
@@ -356,6 +356,253 @@ class FindingStepIterationPreservedRegression(unittest.TestCase):
     def test_model_declares_step_iteration_field(self):
         from state import ChainFindingExtract
         self.assertIn("step_iteration", ChainFindingExtract.model_fields)
+
+
+# =============================================================================
+# BUG 5c: Wave-timeout never persisted per-member status to Postgres.
+# =============================================================================
+#
+# When FIRETEAM_TIMEOUT_SEC fires, the outer handler calls t.cancel() on every
+# outstanding task. Inside _run_one, the `except asyncio.CancelledError`
+# branch re-raises before reaching the post-try _patch_member call. The
+# TimeoutError handler then collected in-memory results (correctly populated
+# with _timeout_result) but did NOT issue per-member DB patches. Consequence:
+# fireteam_members rows stayed at status=running, completedAt=NULL forever.
+# On session restore the /fireteams API returned them as running and the UI
+# showed cancelled specialists as still-spinning indefinitely. The operator-
+# cancel branch already had the per-member patch loop; the timeout branch
+# did not.
+#
+# Related: the WebSocket on_fireteam_member_completed emit lives in _run_one
+# too, so the live UI also missed per-member timeout events. The operator-
+# cancel branch emits them; the timeout branch must too.
+
+import asyncio  # noqa: E402  (used by the tests below; local import to avoid disturbing existing imports)
+import time as _time  # noqa: E402
+
+
+def _settings_for_timeout_test():
+    """get_setting stub: returns minimal config needed for the deploy node."""
+    return lambda k, d=None: {
+        "FIRETEAM_MAX_CONCURRENT": 3,
+        "FIRETEAM_MAX_MEMBERS": 8,
+        "FIRETEAM_TIMEOUT_SEC": 1,
+        "FIRETEAM_MEMBER_MAX_ITERATIONS": 10,
+    }.get(k, d)
+
+
+def _slow_graph_factory(delay_s: float = 5.0):
+    """Yields a member_graph whose astream sleeps past the wave timeout."""
+    class _SlowGraph:
+        async def _run(self, s, config=None):
+            await asyncio.sleep(delay_s)
+            yield {
+                "fireteam_complete": {
+                    "task_complete": True, "completion_reason": "complete",
+                    "current_iteration": 1, "tokens_used": 10,
+                    "execution_trace": [], "target_info": {},
+                    "chain_findings_memory": [],
+                }
+            }
+
+        def astream(self, s, config=None):
+            return self._run(s, config)
+    return _SlowGraph()
+
+
+def _parent_state(n_members: int = 2) -> dict:
+    return {
+        "user_id": "u",
+        "project_id": "p",
+        "session_id": "s-timeout",
+        "current_phase": "informational",
+        "attack_path_type": "cve_exploit",
+        "target_info": {},
+        "current_iteration": 1,
+        "_current_fireteam_plan": {
+            "plan_rationale": "test",
+            "members": [
+                {"name": f"M{i}", "task": f"t{i}", "tools": [], "max_iterations": 10}
+                for i in range(n_members)
+            ],
+        },
+    }
+
+
+class WaveTimeoutDbPersistRegression(unittest.IsolatedAsyncioTestCase):
+    """Locks the primary fix: every member must get a _patch_member call
+    with a terminal status (status != "running") when the wave times out."""
+
+    async def test_every_member_patched_with_terminal_status(self):
+        from orchestrator_helpers.nodes.fireteam_deploy_node import fireteam_deploy_node
+
+        patch_member_mock = AsyncMock()
+        with patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._persist_deploy",
+            new=AsyncMock(return_value="id"),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_member",
+            new=patch_member_mock,
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_fireteam",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node.get_setting",
+            side_effect=_settings_for_timeout_test(),
+        ):
+            t0 = _time.monotonic()
+            await fireteam_deploy_node(
+                _parent_state(n_members=2), None,
+                member_graph=_slow_graph_factory(),
+                streaming_callbacks={},
+                neo4j_creds=None,
+            )
+            self.assertLess(_time.monotonic() - t0, 3.0, "wave did not time out")
+
+        # Collect every call's (member_id_key, body) pair.
+        calls = patch_member_mock.call_args_list
+        self.assertGreater(len(calls), 0,
+                           "no _patch_member calls — DB never updated for timed-out members")
+
+        # Keep the LAST patch per member (the timeout-handler patch wins).
+        last_per_member: dict = {}
+        for call in calls:
+            args, kwargs = call.args, call.kwargs
+            # _patch_member(session_id, fireteam_id_key, member_id, body)
+            member_id = args[2] if len(args) >= 3 else kwargs.get("member_id_key") or kwargs.get("member_id")
+            body = args[3] if len(args) >= 4 else kwargs.get("body") or kwargs
+            last_per_member[member_id] = body
+
+        # Both members must have a final patch with a terminal status.
+        self.assertEqual(len(last_per_member), 2,
+                         f"expected 2 distinct members patched, got {len(last_per_member)}")
+        for mid, body in last_per_member.items():
+            self.assertIn("status", body, f"member {mid} patch missing status field")
+            self.assertNotEqual(body["status"], "running",
+                                f"member {mid} left at status=running in DB")
+            self.assertEqual(body["status"], "timeout",
+                             f"member {mid} expected status=timeout, got {body['status']}")
+
+    async def test_patch_body_includes_iteration_and_token_fields(self):
+        """PR #112's initial fix patched only {status, completionReason,
+        completedAt}. The cleanup must include iterationsUsed, tokensUsed,
+        findingsCount, wallClockSeconds so the DB reflects actual run state."""
+        from orchestrator_helpers.nodes.fireteam_deploy_node import fireteam_deploy_node
+
+        patch_member_mock = AsyncMock()
+        with patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._persist_deploy",
+            new=AsyncMock(return_value="id"),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_member",
+            new=patch_member_mock,
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_fireteam",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node.get_setting",
+            side_effect=_settings_for_timeout_test(),
+        ):
+            await fireteam_deploy_node(
+                _parent_state(n_members=1), None,
+                member_graph=_slow_graph_factory(),
+                streaming_callbacks={},
+                neo4j_creds=None,
+            )
+
+        self.assertGreater(len(patch_member_mock.call_args_list), 0)
+        body = patch_member_mock.call_args_list[-1].args[3]
+        required = {"status", "completionReason", "iterationsUsed",
+                    "tokensUsed", "findingsCount", "wallClockSeconds"}
+        missing = required - set(body.keys())
+        self.assertFalse(missing,
+                         f"patch body missing required fields: {sorted(missing)}; got keys={sorted(body.keys())}")
+        # Also: completionReason for timeout path must be wave_timeout (not the
+        # hardcoded "fireteam_timeout" string PR #112 used, which doesn't match
+        # the value emitted everywhere else by _timeout_result).
+        self.assertEqual(body["completionReason"], "wave_timeout",
+                         "completionReason must mirror _timeout_result so UI"
+                         " state-counts and audit logs stay consistent")
+
+    async def test_no_dead_completed_at_field_in_body(self):
+        """PR #112's initial fix sent a `completedAt` ISO string the API route
+        silently dropped. Don't ship dead fields — the server sets completedAt
+        itself when status flips off running."""
+        from orchestrator_helpers.nodes.fireteam_deploy_node import fireteam_deploy_node
+
+        patch_member_mock = AsyncMock()
+        with patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._persist_deploy",
+            new=AsyncMock(return_value="id"),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_member",
+            new=patch_member_mock,
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_fireteam",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node.get_setting",
+            side_effect=_settings_for_timeout_test(),
+        ):
+            await fireteam_deploy_node(
+                _parent_state(n_members=1), None,
+                member_graph=_slow_graph_factory(),
+                streaming_callbacks={},
+                neo4j_creds=None,
+            )
+        for call in patch_member_mock.call_args_list:
+            body = call.args[3]
+            self.assertNotIn("completedAt", body,
+                             "completedAt is set server-side; client must not send it")
+
+
+class WaveTimeoutWebsocketEmitRegression(unittest.IsolatedAsyncioTestCase):
+    """Related edge case: on wave timeout, the live UI must receive
+    on_fireteam_member_completed for every cancelled member. The operator-
+    cancel branch emits these; the timeout branch should too, otherwise
+    member cards stay 'running' visually until the user refreshes."""
+
+    async def test_per_member_completed_event_emitted_on_timeout(self):
+        from orchestrator_helpers.nodes.fireteam_deploy_node import fireteam_deploy_node
+
+        cb = MagicMock()
+        cb.on_fireteam_deployed = AsyncMock()
+        cb.on_fireteam_member_started = AsyncMock()
+        cb.on_fireteam_member_completed = AsyncMock()
+        cb.on_fireteam_completed = AsyncMock()
+
+        with patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._persist_deploy",
+            new=AsyncMock(return_value="id"),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_member",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_fireteam",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node.get_setting",
+            side_effect=_settings_for_timeout_test(),
+        ):
+            await fireteam_deploy_node(
+                _parent_state(n_members=2), None,
+                member_graph=_slow_graph_factory(),
+                streaming_callbacks={"s-timeout": cb},
+                neo4j_creds=None,
+            )
+
+        member_ids_emitted = {
+            call.kwargs.get("member_id") for call in cb.on_fireteam_member_completed.call_args_list
+        }
+        self.assertEqual(
+            len(member_ids_emitted), 2,
+            f"expected 2 per-member completed events on timeout, "
+            f"got {len(member_ids_emitted)}: {member_ids_emitted}"
+        )
+        # And each emitted event's status must be 'timeout'.
+        for call in cb.on_fireteam_member_completed.call_args_list:
+            self.assertEqual(call.kwargs.get("status"), "timeout",
+                             f"per-member emit must carry status=timeout; got {call.kwargs}")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal/Modal'
 import { extractPresetSettings } from '@/lib/project-preset-utils'
-import { useToast } from '@/components/ui'
+import { useToast, WikiInfoButton } from '@/components/ui'
 import styles from './ProjectForm.module.css'
 
 interface SavePresetModalProps {
@@ -66,6 +66,7 @@ export function SavePresetModal({ isOpen, onClose, formData, userId }: SavePrese
       title="Save as Preset"
       closeOnOverlayClick={false}
       closeOnEscape={false}
+      headerActions={<WikiInfoButton target="ReconPreset" title="Open Recon Presets wiki page" />}
       footer={
         <>
           <button

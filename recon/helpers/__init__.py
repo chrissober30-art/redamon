@@ -12,6 +12,12 @@ This package contains helper functions organized by category:
 - security_checks: Custom security checks (direct IP access, TLS, headers, etc.)
 """
 
+# Standard logging
+from .log_helpers import (
+    print_effective_settings,
+    is_sensitive_key,
+)
+
 # Docker utilities
 from .docker_helpers import (
     is_docker_installed,
@@ -38,6 +44,7 @@ from .nuclei_helpers import (
     build_nuclei_command,
     parse_nuclei_finding,
     is_false_positive,
+    set_fp_ai_ctx,
 )
 
 # Katana web crawler
@@ -76,6 +83,7 @@ from .takeover_helpers import (
     finding_id,
     provider_from_cname,
     provider_from_signal,
+    resolve_cname_target,
     AUTO_EXPLOITABLE_PROVIDERS,
     PROVIDER_FROM_SIGNAL,
     BADDNS_MODULES,
@@ -118,6 +126,7 @@ __all__ = [
     "build_nuclei_command",
     "parse_nuclei_finding",
     "is_false_positive",
+    "set_fp_ai_ctx",
     # Katana
     "run_katana_crawler",
     # CVE
@@ -144,6 +153,7 @@ __all__ = [
     "finding_id",
     "provider_from_cname",
     "provider_from_signal",
+    "resolve_cname_target",
     "AUTO_EXPLOITABLE_PROVIDERS",
     "PROVIDER_FROM_SIGNAL",
     "BADDNS_MODULES",

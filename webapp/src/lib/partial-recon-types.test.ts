@@ -83,6 +83,10 @@ describe('PARTIAL_RECON_SUPPORTED_TOOLS', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('SubdomainTakeover')).toBe(true)
   })
 
+  test('contains VhostSni', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('VhostSni')).toBe(true)
+  })
+
   test('does not contain unsupported tools', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('GVM')).toBe(false)
   })
@@ -168,6 +172,11 @@ describe('PARTIAL_RECON_PHASE_MAP', () => {
   test('has SubdomainTakeover phases', () => {
     expect(PARTIAL_RECON_PHASE_MAP['SubdomainTakeover']).toHaveLength(1)
     expect(PARTIAL_RECON_PHASE_MAP['SubdomainTakeover'][0]).toBe('Subdomain Takeover Detection')
+  })
+
+  test('has VhostSni phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['VhostSni']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['VhostSni'][0]).toBe('VHost & SNI Enumeration')
   })
 
   test('has GraphqlScan phases (Phase 1 §9.5)', () => {

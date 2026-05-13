@@ -183,6 +183,19 @@ def run_fofa_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict
     if not settings.get("FOFA_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "FOFA",
+        settings,
+        keys=[
+            ("FOFA_ENABLED", "Toggle"),
+            ("FOFA_MAX_RESULTS", "Limits"),
+            ("FOFA_WORKERS", "Performance"),
+            ("FOFA_API_KEY", "API credentials"),
+            ("FOFA_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     key_rotator = settings.get("FOFA_KEY_ROTATOR")
     api_key = _fofa_effective_key(settings, key_rotator)
     if not api_key:

@@ -20,6 +20,7 @@ Tools:
     - execute_amass: Execute OWASP Amass subdomain enumeration with any CLI arguments
     - execute_jsluice: Execute jsluice JavaScript static analyzer for hidden endpoints and secrets
     - execute_katana: Execute Katana web crawler for endpoint/URL discovery
+    - cve_intel: Query ProjectDiscovery vulnx for CVE intelligence (NVD + KEV + EPSS + PoC + Nuclei templates)
 """
 
 from fastmcp import FastMCP
@@ -1177,6 +1178,102 @@ def execute_ffuf(args: str) -> str:
         return "[ERROR] FFuf timed out after 600 seconds. Consider narrowing scope with -mc/-fc/-fs filters or a smaller wordlist."
     except FileNotFoundError:
         return "[ERROR] ffuf not found. Ensure it is installed in the Kali sandbox."
+    except Exception as e:
+        return f"[ERROR] {str(e)}"
+
+
+@mcp.tool()
+def cve_intel(args: str, api_key: str = "") -> str:
+    """
+    Query ProjectDiscovery vulnx for structured CVE intelligence.
+
+    vulnx is the successor to cvemap. It aggregates NVD, CISA KEV, EPSS scoring,
+    HackerOne CVE Discovery, public GitHub PoCs, Nuclei template availability,
+    and CPE mappings into a single queryable dataset (refreshed every ~6 hours).
+
+    Use this tool to answer questions like:
+      - "Get full intel on CVE-2024-21887"
+      - "List CRITICAL CVEs in confluence with EPSS > 0.5 and a Nuclei template"
+      - "Show KEV-listed CVEs for Apache published in the last 30 days"
+
+    NO traffic is sent to the pentest target -- queries hit the PDCP cloud only.
+    The optional PDCP API key is silently injected by the agent executor when
+    the user has configured it in Global Settings; the LLM never sees the key.
+
+    Args:
+        args: Command-line arguments for vulnx (without the 'vulnx' command itself).
+              The first token MUST be a vulnx subcommand: search, id, filters,
+              analyze, healthcheck, or version. Always include --json for
+              structured output the agent can parse.
+
+    Returns:
+        vulnx output (JSON when --json is passed; plain table otherwise)
+
+    Examples:
+        Single CVE lookup (full enrichment):
+        - "id CVE-2024-21887 --json"
+
+        Search by product + severity + KEV status (CISA actively-exploited):
+        - "search 'product:confluence AND severity:critical AND is_kev:true' --json --limit 10"
+
+        High-EPSS CVEs with a Nuclei template (immediately verifiable):
+        - "search 'epss_score:>0.7 AND is_template:true' --json --limit 20"
+
+        CVEs published in the last 30 days affecting Apache:
+        - "search 'vendor:apache AND age_in_days:<30' --json --limit 25"
+
+        Filter by CVSS range:
+        - "search 'cvss_score:>=9 AND severity:critical' --json --limit 15"
+
+        Lookup CVEs that have public PoCs and HackerOne reports (high signal):
+        - "search 'is_poc:true AND is_hackerone:true' --json --limit 20"
+
+        Field selection (lean output):
+        - "search 'product:wordpress' --fields cve_id,severity,epss_score,is_kev,is_template --json --limit 30"
+
+        List the 69 searchable filter fields:
+        - "filters"
+
+        Aggregate counts by vendor (top vulnerable vendors):
+        - "analyze --field affected_products.vendor --json"
+
+        Connectivity / API-key sanity check:
+        - "healthcheck"
+
+    Searchable fields (subset, run "filters" for the full 69):
+        cve_id, severity, cvss_score, epss_score, age_in_days, vuln_type, tags,
+        is_kev, is_poc, is_template, is_remote, is_hackerone,
+        affected_products.vendor, affected_products.product, cve_created_at
+    """
+    try:
+        cmd_args = shlex.split(args)
+        env = os.environ.copy()
+        if api_key:
+            env["PDCP_API_KEY"] = api_key
+        result = subprocess.run(
+            ["vulnx"] + cmd_args,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        output = ANSI_ESCAPE.sub('', result.stdout)
+        if result.stderr:
+            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
+            stderr_lines = [
+                line for line in clean_stderr.split('\n')
+                if line
+                and not line.startswith('[INF]')
+                and 'Current vulnx version' not in line
+                and 'using default config' not in line
+            ]
+            if stderr_lines:
+                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
+        return output if output.strip() else "[INFO] No CVEs matched the query"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] vulnx timed out after 60 seconds. Tighten the query (add --limit, narrow filters)."
+    except FileNotFoundError:
+        return "[ERROR] vulnx not found. Ensure it is installed in the Kali sandbox (go install github.com/projectdiscovery/vulnx/v2/cmd/vulnx@latest)."
     except Exception as e:
         return f"[ERROR] {str(e)}"
 

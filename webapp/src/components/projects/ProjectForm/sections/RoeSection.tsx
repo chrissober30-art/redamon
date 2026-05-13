@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { ChevronDown, Shield, Upload, Loader2, Plus, Minus, CheckCircle } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal/Modal'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
@@ -229,6 +229,7 @@ export function RoeSection({ data, updateField, updateMultipleFields, mode, onFi
         <h2 className={styles.sectionTitle}>
           <Shield size={16} />
           Rules of Engagement
+          <WikiInfoButton target="Roe" />
         </h2>
         <ChevronDown
           size={16}

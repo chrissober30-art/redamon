@@ -104,6 +104,18 @@ function makeReportData(overrides: Partial<ReportData> = {}): ReportData {
       pulses: [],
       malware: [],
     },
+    vhostSni: {
+      totalFindings: 0,
+      ipsTested: 0,
+      candidatesTested: 0,
+      anomaliesL7: 0,
+      anomaliesL4: 0,
+      reverseProxiesDetected: 0,
+      bySeverity: [],
+      byLayer: [],
+      byType: [],
+      findings: [],
+    },
     attackChains: {
       chains: [],
       exploitSuccesses: [],

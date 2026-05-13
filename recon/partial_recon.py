@@ -34,8 +34,22 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+from recon.partial_recon_modules.helpers import (
+    _classify_ip,
+    _resolve_hostname,
+    _is_ip_or_cidr,
+    _is_valid_hostname,
+    _is_valid_url,
+)
+from recon.partial_recon_modules.graph_builders import (
+    _build_recon_data_from_graph,
+    _build_port_scan_data_from_graph,
+    _build_http_probe_data_from_graph,
+    _build_vuln_scan_data_from_graph,
+)
 from recon.partial_recon_modules.user_inputs import (
     _cleanup_orphan_user_inputs,
+    _create_user_subdomains_in_graph,
 )
 from recon.partial_recon_modules.subdomain_discovery import run_subdomain_discovery
 from recon.partial_recon_modules.port_scanning import (
@@ -62,6 +76,7 @@ from recon.partial_recon_modules.vulnerability_scanning import (
     run_nuclei,
     run_security_checks_partial,
     run_subdomain_takeover_partial,
+    run_vhost_sni_partial,
 )
 from recon.partial_recon_modules.osint_enrichment import (
     run_shodan,
@@ -127,6 +142,8 @@ def main():
         run_nuclei(config)
     elif tool_id == "SubdomainTakeover":
         run_subdomain_takeover_partial(config)
+    elif tool_id == "VhostSni":
+        run_vhost_sni_partial(config)
     elif tool_id == "SecurityChecks":
         run_security_checks_partial(config)
     elif tool_id == "Shodan":

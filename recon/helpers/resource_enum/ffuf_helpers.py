@@ -13,6 +13,8 @@ import json
 import os
 import shutil
 import subprocess
+
+from recon.helpers.subprocess_helpers import run_with_heartbeat
 import tempfile
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -86,10 +88,12 @@ def _fuzz_single_target(
     cmd.extend(["-s"])  # Silent mode (no banner/progress)
 
     try:
-        result = subprocess.run(
+        # Heartbeat every 30s while FFuf fuzzes -- otherwise the drawer goes
+        # silent during long wordlist runs (FFuf -s suppresses its own progress).
+        result = run_with_heartbeat(
             cmd,
-            capture_output=True,
-            text=True,
+            label="FFuf",
+            interval=30,
             timeout=max_time + 60,
         )
 

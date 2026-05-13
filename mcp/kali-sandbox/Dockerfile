@@ -19,8 +19,11 @@ RUN echo "deb http://kali.download/kali kali-rolling main contrib non-free non-f
 # Allow HTTPS→HTTP redirects (Kali CDN sometimes redirects to http mirrors)
 RUN echo 'Acquire::https::Redirect::Allowed "true";' > /etc/apt/apt.conf.d/99allow-redirect
 
-# Update and install penetration testing tools
-RUN apt-get install -y --fix-missing \
+# Update and install penetration testing tools.
+# `apt-get update` is repeated here (same layer as install) because Kali rolling
+# rotates package versions frequently; a stale list cached from an earlier layer
+# leads to 404s on .deb fetches even minutes later.
+RUN apt-get update && apt-get install -y --fix-missing \
     # Core tools
     curl \
     wget \
@@ -65,6 +68,9 @@ RUN apt-get install -y --fix-missing \
     testssl.sh \
     # Command injection exploitation
     commix \
+    # Java runtime for the ysoserial JAR (installed below from upstream releases;
+    # the Kali `ysoserial` apt package is no longer reliably published)
+    default-jre-headless \
     # DNS enumeration (zone transfers, SRV, DNSSEC walk)
     dnsrecon \
     # Custom wordlist generation from target websites
@@ -90,6 +96,16 @@ RUN apt-get install -y --fix-missing \
 # Retry helper for transient network failures (git clone, curl, go install, etc.)
 RUN printf '#!/bin/sh\nmax=5; n=0; until "$@"; do n=$((n+1)); [ $n -ge $max ] && exit 1; echo "Retry $n/$max ..."; sleep $((n*5)); done\n' \
     > /usr/local/bin/retry && chmod +x /usr/local/bin/retry
+
+# ysoserial: Java deserialization gadget chains (used by the RCE built-in skill)
+# Source: https://github.com/frohoff/ysoserial (MIT). Downloaded directly from
+# the upstream release because the Kali apt package is no longer reliably published.
+RUN mkdir -p /usr/share/ysoserial \
+    && retry curl -fsSL -o /usr/share/ysoserial/ysoserial.jar \
+       https://github.com/frohoff/ysoserial/releases/download/v0.0.6/ysoserial-all.jar \
+    && printf '#!/bin/sh\nexec java -jar /usr/share/ysoserial/ysoserial.jar "$@"\n' \
+       > /usr/local/bin/ysoserial \
+    && chmod +x /usr/local/bin/ysoserial
 
 # Install Go (required for naabu and nuclei)
 # Handle ARM64 (Apple Silicon) vs AMD64 automatically
@@ -119,7 +135,7 @@ RUN retry go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest \
 # Source: https://github.com/projectdiscovery/httpx (MIT) - HTTP toolkit
 # Source: https://github.com/hahwul/dalfox (MIT) - XSS vulnerability scanner
 # Source: https://github.com/projectdiscovery/dnsx (MIT) - Fast DNS toolkit
-# Source: https://github.com/Emoe/kxss (MIT) - Per-character XSS reflection probe
+# Source: https://github.com/Emoe/kxss (Apache-2.0) - Per-character XSS reflection probe
 RUN retry go install -v github.com/ffuf/ffuf/v2@latest \
     && retry go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest \
     && retry go install -v github.com/hahwul/dalfox/v2@latest \
@@ -144,6 +160,21 @@ RUN retry go install -v github.com/owasp-amass/amass/v4/...@master
 # Source: https://github.com/lc/gau (MIT)
 RUN retry go install -v github.com/lc/gau/v2/cmd/gau@latest
 
+# Install vulnx -- ProjectDiscovery CVE intelligence CLI (successor to cvemap).
+# Aggregates NVD, CISA KEV, EPSS, HackerOne, GitHub PoCs, and Nuclei template
+# availability into a single queryable dataset. Source:
+# https://github.com/projectdiscovery/vulnx (MIT). Used by the cve_intel tool.
+# Optional PDCP key (configured per-user from /settings, never via env vars or
+# build args) is injected at call time via the cve_intel MCP wrapper.
+RUN retry go install -v github.com/projectdiscovery/vulnx/v2/cmd/vulnx@latest
+
+# Install subzy: subdomain takeover fingerprint scanner.
+# Maintained fingerprint corpus (90+ providers) sharper than httpx -td banks for
+# unclaimed-resource detection. Source: https://github.com/PentestPad/subzy (GPL-2.0;
+# invoked as separate-process CLI, mere aggregation).
+# Used by the Subdomain Takeover community skill.
+RUN retry go install -v github.com/PentestPad/subzy@latest
+
 # Update nuclei templates
 RUN nuclei -update-templates || true
 
@@ -154,6 +185,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Install Python MCP dependencies
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Neo4j driver for the redagraph CLI (tenant-scoped graph queries from the shell)
+RUN pip install --no-cache-dir neo4j
 
 # Install API security testing tools (Python-based)
 # jwt_tool - JWT exploitation toolkit (alg:none, key confusion, cracking)
@@ -198,6 +232,70 @@ RUN mkdir -p /usr/share/seclists/Discovery/Web-Content && \
 # Source: https://github.com/devanshbatham/ParamSpider (MIT)
 RUN retry pip install --no-cache-dir git+https://github.com/devanshbatham/ParamSpider.git
 
+# semgrep — source-aware static analysis (rule packs from semgrep registry).
+# Used by the source-aware-sast Chat Skill when the operator provides a repo
+# (git clone target) for a black-box-bridged code review. Pinned via pip in the
+# shared venv; no apt package because the upstream Kali build lags semgrep releases.
+# Source: https://github.com/semgrep/semgrep (LGPL-2.1)
+RUN retry pip install --no-cache-dir semgrep
+
+# Node.js + npm (for the prototype-pollution Chat Skill: gadget testing via execute_code Node workers).
+# Apt list was wiped by the earlier core-tools layer, so update first.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python libs powering the SOAP, SAML, and WebSocket Chat Skills via execute_code.
+# - websockets: ws/wss client for CSWSH and per-message-auth probes.
+# - zeep: SOAP client for WS-Security / XSW probing.
+# - python3-saml: SAML XSW / Comment Injection / Golden SAML construction.
+RUN pip install --no-cache-dir websockets zeep python3-saml
+
+# Cloud SDKs powering the AWS / Azure / GCP Chat Skills via execute_code.
+# Heavy CLIs (awscli, az, gcloud) are skipped in favor of the Python SDKs which
+# are both lighter and more script-friendly inside the agent's execute_code path.
+# - boto3 + botocore: AWS API access, IAM enumeration, IMDS interaction.
+# - msal + azure-identity + azure-mgmt-resource: Entra ID / Azure resource probes.
+# - google-auth + google-api-python-client + google-cloud-storage: GCP service
+#   accounts, IAM, Storage probes.
+RUN pip install --no-cache-dir \
+    boto3 \
+    msal azure-identity azure-mgmt-resource \
+    google-auth google-api-python-client google-cloud-storage
+
+# Post-exploitation enumerators (Linux side, served via /opt/tools/linux/).
+# Used by the Linux Privilege Escalation Chat Skill and the Docker Escape skill
+# (deepce). Pre-staged in the image so the agent can serve them to a foothold
+# host or run them inside the sandbox during local-priv-esc reconnaissance.
+# - linpeas.sh: PEASS-ng Linux privesc auditor (carlospolop)
+# - LinEnum.sh:  rebootuser/LinEnum Linux enumeration helper
+# - pspy64:      DominicBreuker/pspy real-time process snooper (no root needed)
+# - deepce.sh:   stealthcopter/deepce Docker container escape primitive scanner
+RUN mkdir -p /opt/tools/linux \
+    && retry curl -fsSL -o /opt/tools/linux/linpeas.sh \
+       https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh \
+    && retry curl -fsSL -o /opt/tools/linux/LinEnum.sh \
+       https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh \
+    && retry curl -fsSL -o /opt/tools/linux/pspy64 \
+       https://github.com/DominicBreuker/pspy/releases/latest/download/pspy64 \
+    && retry curl -fsSL -o /opt/tools/linux/deepce.sh \
+       https://raw.githubusercontent.com/stealthcopter/deepce/main/deepce.sh \
+    && chmod +x /opt/tools/linux/*
+
+# Post-exploitation enumerators (Windows side, served via /opt/tools/windows/).
+# Used by the Windows Privilege Escalation Chat Skill. The agent stages these
+# from the sandbox to a compromised Windows host (HTTP, SMB, or upload primitive).
+# - winPEASx64.exe: PEASS-ng Windows privesc auditor (carlospolop)
+# - PowerUp.ps1:    PowerSploit / Empire PowerUp (now under PowerShellMafia mirror)
+# - PrivescCheck.ps1: itm4n/PrivescCheck audit script
+RUN mkdir -p /opt/tools/windows \
+    && retry curl -fsSL -o /opt/tools/windows/winPEASx64.exe \
+       https://github.com/peass-ng/PEASS-ng/releases/latest/download/winPEASx64.exe \
+    && retry curl -fsSL -o /opt/tools/windows/PowerUp.ps1 \
+       https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Privesc/PowerUp.ps1 \
+    && retry curl -fsSL -o /opt/tools/windows/PrivescCheck.ps1 \
+       https://github.com/itm4n/PrivescCheck/releases/latest/download/PrivescCheck.ps1
+
 # AD/post-exploitation Python tools
 # hashID: hash type identification (MD5, NTLM, bcrypt, etc) — unmaintained since 2015 but functional
 # bloodhound: Active Directory relationship collector (attack path analysis)
@@ -209,7 +307,8 @@ RUN pip install --no-cache-dir hashID bloodhound certipy-ad ldapdomaindump \
     bloodyAD networkx orjson
 
 # gMSADumper: read gMSA passwords when BloodHound flags ReadGMSAPassword edge.
-# Not on PyPI — install from git. Source: https://github.com/micahvandeusen/gMSADumper (MIT)
+# Not on PyPI — install from git. Source: https://github.com/micahvandeusen/gMSADumper
+# (GPL-3.0; invoked as separate-process CLI, mere aggregation)
 RUN retry git clone --depth 1 https://github.com/micahvandeusen/gMSADumper.git /opt/gMSADumper \
     && pip install --no-cache-dir ldap3 pyasn1 \
     && chmod +x /opt/gMSADumper/gMSADumper.py \
@@ -269,11 +368,39 @@ RUN apt-get update \
         -o /usr/share/seclists/Usernames/xato-net-10-million-usernames.txt
 
 # SSTImap — Server-Side Template Injection detection & exploitation
-# Source: https://github.com/vladko312/SSTImap (MIT)
+# Source: https://github.com/vladko312/SSTImap (GPL-3.0; invoked as separate-process CLI, mere aggregation)
 RUN retry git clone --depth 1 https://github.com/vladko312/SSTImap.git /opt/sstimap \
     && pip install --no-cache-dir -r /opt/sstimap/requirements.txt \
     && chmod +x /opt/sstimap/sstimap.py \
     && ln -s /opt/sstimap/sstimap.py /usr/local/bin/sstimap
+
+# tplmap: SSTI scanner that complements SSTImap by covering Smarty and Velocity
+# engines that the SSTImap plugin set does not currently fingerprint.
+# Source: https://github.com/epinna/tplmap (GPL-3.0). Lightly maintained but the
+# core engine runs on Python 3. Pinned deps are old, so install into an isolated
+# venv to avoid clashes with /opt/venv. Failures during the pinned-requirements
+# install are non-fatal: the wrapper still launches the tool with relaxed deps,
+# and the SSTI community skill documents an SSTImap-only fallback.
+RUN retry git clone --depth 1 https://github.com/epinna/tplmap.git /opt/tplmap \
+    && python3 -m venv /opt/tplmap/venv \
+    && /opt/tplmap/venv/bin/pip install --no-cache-dir requests pysocks \
+       || echo "WARNING: tplmap base deps install hit issues; tplmap may be degraded" \
+    && (/opt/tplmap/venv/bin/pip install --no-cache-dir -r /opt/tplmap/requirements.txt \
+        || echo "WARNING: tplmap pinned requirements failed; falling back to base deps") \
+    && chmod +x /opt/tplmap/tplmap.py \
+    && printf '#!/bin/sh\nexec /opt/tplmap/venv/bin/python /opt/tplmap/tplmap.py "$@"\n' \
+       > /usr/local/bin/tplmap \
+    && chmod +x /usr/local/bin/tplmap
+
+# phpggc: PHP gadget-chain generator for unserialize/PHAR exploitation
+# Source: https://github.com/ambionics/phpggc (Apache-2.0). Used by the
+# Insecure Deserialization community skill (PHP track). Requires php-cli.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends php-cli \
+    && rm -rf /var/lib/apt/lists/* \
+    && retry git clone --depth 1 https://github.com/ambionics/phpggc.git /opt/phpggc \
+    && chmod +x /opt/phpggc/phpggc \
+    && ln -s /opt/phpggc/phpggc /usr/local/bin/phpggc
 
 # Ensure ProjectDiscovery Go httpx wins over Python httpx CLI wrapper in PATH
 RUN ln -sf /root/go/bin/httpx /opt/venv/bin/httpx
@@ -283,6 +410,15 @@ RUN mkdir -p /opt/mcp_servers /opt/output
 
 # Copy MCP servers
 COPY servers/ /opt/mcp_servers/
+
+# Expose redagraph CLI on PATH (script lives in the volume-mounted servers dir,
+# so iteration does not require a rebuild — only the symlink does).
+RUN chmod +x /opt/mcp_servers/redagraph.py \
+    && ln -sf /opt/mcp_servers/redagraph.py /usr/local/bin/redagraph
+
+# RedAmon MOTD hint shown after the Kali login banner.
+COPY kali-sandbox/redamon-motd.sh /etc/profile.d/zz-redamon-motd.sh
+RUN chmod 0644 /etc/profile.d/zz-redamon-motd.sh
 
 # Copy and set entrypoint script
 COPY kali-sandbox/entrypoint.sh /opt/entrypoint.sh

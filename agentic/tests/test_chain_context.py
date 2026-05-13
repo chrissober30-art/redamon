@@ -714,11 +714,11 @@ class TestEnrichedFindings(unittest.TestCase):
         self.assertIn("Evidence: Parameter id is injectable", result)
 
     def test_evidence_truncated(self):
-        findings = [_finding("SQLi found", evidence="X" * 200, step=1)]
+        # Cap raised to 10000 so JWTs/hashes/.env contents survive intact.
+        findings = [_finding("SQLi found", evidence="X" * 12000, step=1)]
         result = format_chain_context(findings, [], [], [_tool(1, "x")])
         evidence_line = [l for l in result.split("\n") if "Evidence:" in l][0]
-        # Should be truncated to 150 + prefix
-        self.assertLessEqual(len(evidence_line.strip()) - len("Evidence: "), 150)
+        self.assertLessEqual(len(evidence_line.strip()) - len("Evidence: "), 10000)
 
     def test_empty_evidence_not_shown(self):
         findings = [_finding("Test", evidence="", step=1)]
@@ -820,17 +820,17 @@ class TestSummaryTier(unittest.TestCase):
         # Iteration 10 should be in summary (within the 50 window)
         self.assertIn("analysis_unique_10_end", result)
 
-    def test_summary_analysis_truncated_to_100(self):
-        """Summary tier truncates analysis to 100 chars."""
-        long_analysis = "A" * 200
+    def test_summary_analysis_truncated_to_10000(self):
+        """Summary tier truncates analysis to 10000 chars (raised from 100
+        so older steps still surface their captured artifacts)."""
+        long_analysis = "A" * 12000
         trace = [_tool(1, "execute_curl", analysis=long_analysis)]
         for i in range(2, 25):
             trace.append(_tool(i, "execute_curl", analysis=f"a_{i}"))
         result = format_chain_context([], [], [], trace, recent_iterations=20)
         summary_lines = [l for l in result.split("\n") if "1 [info]:" in l]
         self.assertEqual(len(summary_lines), 1)
-        # The line should contain at most 100 A's
-        self.assertLessEqual(summary_lines[0].count("A"), 100)
+        self.assertLessEqual(summary_lines[0].count("A"), 10000)
 
     def test_summary_phase_abbreviations(self):
         """Summary tier uses abbreviated phase names."""

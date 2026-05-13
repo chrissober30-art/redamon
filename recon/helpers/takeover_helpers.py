@@ -14,6 +14,7 @@ Scoring rules: see score_finding().
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 from typing import Iterable, List, Optional
 
 
@@ -142,6 +143,72 @@ def provider_from_cname(cname: Optional[str]) -> Optional[str]:
             if len(signal) > best_match[0]:
                 best_match = (len(signal), provider)
     return best_match[1]
+
+
+# =============================================================================
+# Live-CNAME validation (false-positive suppression for non-dangling targets)
+# =============================================================================
+# A CNAME that resolves to live A/AAAA records is unlikely to be a real takeover
+# for non-auto-exploitable providers: the SaaS edge is up and serving the legit
+# customer. Used by the scorer to suppress findings like subjack flagging
+# `cname.instatus.com` (live Instatus edge) as a Gemfury fingerprint collision.
+#
+# Auto-exploitable providers (github-pages, heroku, etc.) wildcard-resolve at
+# the SaaS edge even when the underlying project is dangling, so this signal
+# only fires for providers outside AUTO_EXPLOITABLE_PROVIDERS.
+@lru_cache(maxsize=512)
+def resolve_cname_target(cname: str, timeout: float = 3.0) -> dict:
+    """
+    Probe a CNAME target's current resolution state.
+
+    Returns:
+        {"resolves": bool, "ips": tuple[str, ...], "nxdomain": bool}
+        - resolves: True iff at least one A/AAAA record was returned
+        - nxdomain: True iff the authoritative answer was NXDOMAIN
+        - ips: the resolved addresses (may be empty)
+
+    On any other DNS error (timeout, no nameservers, transient failure) we
+    return resolves=False and nxdomain=False, signaling "unknown" -- the
+    scorer treats unknown as neutral so we never penalize a finding due to a
+    flaky probe.
+
+    Cached by hostname for the lifetime of the process so repeat lookups in a
+    single scan don't multiply DNS traffic.
+    """
+    cname_clean = (cname or "").strip().rstrip(".").lower()
+    if not cname_clean:
+        return {"resolves": False, "ips": (), "nxdomain": False}
+
+    try:
+        import dns.resolver
+        import dns.exception
+    except ImportError:
+        return {"resolves": False, "ips": (), "nxdomain": False}
+
+    resolver = dns.resolver.Resolver()
+    resolver.lifetime = timeout
+    resolver.timeout = timeout
+
+    ips: list[str] = []
+    nxdomain_seen = False
+    for rdtype in ("A", "AAAA"):
+        try:
+            answer = resolver.resolve(cname_clean, rdtype)
+            for r in answer:
+                ips.append(str(r))
+        except dns.resolver.NXDOMAIN:
+            nxdomain_seen = True
+            break
+        except (dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.exception.Timeout):
+            continue
+        except Exception:
+            continue
+
+    return {
+        "resolves": bool(ips),
+        "ips": tuple(ips),
+        "nxdomain": nxdomain_seen and not ips,
+    }
 
 
 def provider_from_signal(signal: Optional[str]) -> Optional[str]:
@@ -595,6 +662,15 @@ def score_finding(
         +10  method = cname (most reliable)
         -15  method = stale_a or mx (probabilistic, needs human)
         -10  provider = unknown
+        -25  provider_mismatch (tool fingerprint disagrees with CNAME-derived
+             provider — strong signal of subjack body-content collision)
+        -30  cname_alive AND provider not in AUTO_EXPLOITABLE_PROVIDERS
+             (the SaaS edge is up and serving the legit customer; auto-
+             exploitable providers wildcard-resolve so this rule excludes
+             them)
+        -40  ai_waf_likely (the AI classifier identified the response as a
+             WAF block page disguised as a third-party SaaS unclaimed page —
+             strong signal of a fingerprint collision)
 
     verdict:
         confirmed      if score >= threshold + 10
@@ -612,6 +688,8 @@ def score_finding(
     sources = finding.get("sources") or []
     provider = (finding.get("takeover_provider") or "").lower()
     method = (finding.get("takeover_method") or "cname").lower()
+    cname_alive = bool(finding.get("cname_alive"))
+    provider_mismatch = bool(finding.get("provider_mismatch"))
 
     if len(sources) >= 2:
         score += 30
@@ -627,6 +705,12 @@ def score_finding(
         score -= 15
     if provider == "unknown":
         score -= 10
+    if provider_mismatch:
+        score -= 25
+    if cname_alive and provider not in AUTO_EXPLOITABLE_PROVIDERS:
+        score -= 30
+    if finding.get("ai_waf_likely"):
+        score -= 40
 
     score = max(0, min(100, score))
 

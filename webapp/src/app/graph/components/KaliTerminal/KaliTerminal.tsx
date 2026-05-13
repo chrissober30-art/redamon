@@ -24,7 +24,12 @@ function getWsUrl(): string {
   return 'ws://localhost:8090/ws/kali-terminal'
 }
 
-export const KaliTerminal = memo(function KaliTerminal() {
+export interface KaliTerminalProps {
+  userId?: string | null
+  projectId?: string | null
+}
+
+export const KaliTerminal = memo(function KaliTerminal({ userId, projectId }: KaliTerminalProps = {}) {
   const termRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
@@ -37,6 +42,9 @@ export const KaliTerminal = memo(function KaliTerminal() {
   const mountedRef = useRef(true)
   const initializedRef = useRef(false)
   const reconnectAttemptRef = useRef(0)
+  const tenantRef = useRef<{ userId?: string | null; projectId?: string | null }>({ userId, projectId })
+  tenantRef.current = { userId, projectId }
+  const firstTenantRunRef = useRef(true)
 
   const connect = useCallback(async () => {
     if (!termRef.current || !mountedRef.current) return
@@ -147,6 +155,14 @@ export const KaliTerminal = memo(function KaliTerminal() {
       setStatus('connected')
       reconnectAttemptRef.current = 0
       terminal.writeln('\x1b[1;32m\u2713 Connected\x1b[0m\n')
+
+      // Send tenant context FIRST so the sandbox can inject env vars before
+      // forking the shell. The terminal server consumes only the first frame
+      // as a potential init message.
+      const { userId: uid, projectId: pid } = tenantRef.current
+      if (uid && pid) {
+        ws.send(JSON.stringify({ type: 'init', user_id: uid, project_id: pid }))
+      }
 
       // Send terminal size
       if (fitAddon) {
@@ -263,6 +279,22 @@ export const KaliTerminal = memo(function KaliTerminal() {
       mountedRef.current = false
     }
   }, [connect])
+
+  // Reconnect when the active project/user changes so the sandbox shell
+  // restarts with fresh REDAMON_USER_ID / REDAMON_PROJECT_ID env vars.
+  // The first run is suppressed: the mount-effect above already calls connect()
+  // — letting this fire on initial mount would race into disconnect+reconnect,
+  // doubling banners and dropping MOTD output from the killed first shell.
+  useEffect(() => {
+    if (firstTenantRunRef.current) {
+      firstTenantRunRef.current = false
+      return
+    }
+    reconnectAttemptRef.current = 0
+    disconnect()
+    const t = setTimeout(() => connect(), 200)
+    return () => clearTimeout(t)
+  }, [userId, projectId, connect, disconnect])
 
   // Handle resize
   useEffect(() => {

@@ -1,9 +1,9 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
 import {
   Mono,
   Truncated,
@@ -51,31 +51,34 @@ export const GraphqlLedgerTable = memo(function GraphqlLedgerTable({ projectId }
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
-    exportRedZoneXlsx(
-      filtered,
-      'GraphQL',
-      [
-        { key: 'endpointUrl', header: 'Endpoint' },
-        { key: 'subdomain', header: 'Subdomain' },
-        { key: 'introspection', header: 'Introspection' },
-        { key: 'graphiqlExposed', header: 'GraphiQL' },
-        { key: 'fieldSuggestions', header: 'FieldSuggestions' },
-        { key: 'getAllowed', header: 'GET allowed' },
-        { key: 'batching', header: 'Batching' },
-        { key: 'tracing', header: 'Tracing' },
-        { key: 'queriesCount', header: 'Queries' },
-        { key: 'mutationsCount', header: 'Mutations' },
-        { key: 'subscriptionsCount', header: 'Subscriptions' },
-        { key: 'vulnTypes', header: 'Vulns' },
-        { key: 'vulnSeverities', header: 'VulnSeverities' },
-        { key: 'sensitiveFieldsSample', header: 'Sensitive Fields' },
-        { key: 'schemaHash', header: 'Schema Hash' },
-        { key: 'copScannedAt', header: 'Last graphql-cop scan' },
-      ],
-      'redzone-graphql',
-    )
-  }, [filtered])
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() =>
+    rows.length > 0
+      ? {
+          rows: filtered,
+          sheetName: 'GraphQL',
+          fileSlug: 'redzone-graphql',
+          columns: [
+            { key: 'endpointUrl', header: 'Endpoint' },
+            { key: 'subdomain', header: 'Subdomain' },
+            { key: 'introspection', header: 'Introspection' },
+            { key: 'graphiqlExposed', header: 'GraphiQL' },
+            { key: 'fieldSuggestions', header: 'FieldSuggestions' },
+            { key: 'getAllowed', header: 'GET allowed' },
+            { key: 'batching', header: 'Batching' },
+            { key: 'tracing', header: 'Tracing' },
+            { key: 'queriesCount', header: 'Queries' },
+            { key: 'mutationsCount', header: 'Mutations' },
+            { key: 'subscriptionsCount', header: 'Subscriptions' },
+            { key: 'vulnTypes', header: 'Vulns' },
+            { key: 'vulnSeverities', header: 'VulnSeverities' },
+            { key: 'sensitiveFieldsSample', header: 'Sensitive Fields' },
+            { key: 'schemaHash', header: 'Schema Hash' },
+            { key: 'copScannedAt', header: 'Last graphql-cop scan' },
+          ],
+        }
+      : undefined,
+    [filtered, rows.length],
+  )
 
   const introCount = rows.filter(r => r.introspection).length
   const meta = rows.length ? `${introCount} with introspection enabled` : undefined
@@ -87,7 +90,7 @@ export const GraphqlLedgerTable = memo(function GraphqlLedgerTable({ projectId }
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search endpoint, subdomain, vuln type..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}

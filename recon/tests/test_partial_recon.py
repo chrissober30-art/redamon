@@ -19,8 +19,11 @@ sys.path.insert(0, _recon_dir)
 # Pre-mock heavy dependencies that aren't available in the test environment
 sys.modules['neo4j'] = MagicMock()
 
-# Import only load_config and helpers at module level (doesn't trigger lazy imports)
-from partial_recon import load_config, _classify_ip, _is_ip_or_cidr, _is_valid_hostname
+# Import only load_config and helpers at module level (doesn't trigger lazy imports).
+# After the partial_recon refactor, helpers moved into partial_recon_modules but the
+# original test imported them from `partial_recon` directly — re-route the import.
+from partial_recon import load_config
+from recon.partial_recon_modules.helpers import _classify_ip, _is_ip_or_cidr, _is_valid_hostname
 
 # After the refactoring into partial_recon_modules/, monkey-patching pr._resolve_hostname
 # no longer affects submodule calls. Import the submodules so tests can patch at the right level.
@@ -121,7 +124,8 @@ class TestRunSubdomainDiscovery(unittest.TestCase):
         """Helper that sets up all mocks and runs run_subdomain_discovery."""
         # Mock get_settings
         mock_settings = MagicMock()
-        mock_settings.return_value = {"USE_TOR_FOR_RECON": False, "USE_BRUTEFORCE_FOR_SUBDOMAINS": False}
+        mock_settings.return_value = {"USE_TOR_FOR_RECON": False, "USE_BRUTEFORCE_FOR_SUBDOMAINS": False,
+    "SUBDOMAIN_LIST": ["."],}
 
         # Mock domain_recon functions
         mock_discover = MagicMock(return_value=discover_result or _mock_discover_result())
@@ -274,7 +278,8 @@ class TestRunNaabu(unittest.TestCase):
         """Helper that sets up all mocks and runs run_naabu."""
         # Mock get_settings
         mock_settings = MagicMock()
-        mock_settings.return_value = {"NAABU_ENABLED": True, "NAABU_TOP_PORTS": "1000"}
+        mock_settings.return_value = {"NAABU_ENABLED": True, "NAABU_TOP_PORTS": "1000",
+    "SUBDOMAIN_LIST": ["."],}
 
         # Mock run_port_scan: modifies recon_data in place and returns it
         mock_port_scan = MagicMock(side_effect=lambda recon_data, output_file=None, settings=None: _mock_port_scan_result(recon_data))
@@ -575,7 +580,11 @@ class TestBuildReconDataFromGraph(unittest.TestCase):
             import importlib
             import partial_recon as pr
             importlib.reload(pr)
-            return pr._build_recon_data_from_graph("example.com", "u1", "p1")
+            # Tests in this class exercise apex Domain IP behavior, so the
+            # builder must be invoked with include_root_domain=True.
+            return pr._build_recon_data_from_graph(
+                "example.com", "u1", "p1", include_root_domain=True,
+            )
         finally:
             if saved is None:
                 sys.modules.pop('graph_db', None)
@@ -653,7 +662,8 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
     def _run_with_mocks(self, config, domain_ips=None, subdomain_ips=None):
         """Minimal mock setup focused on CIDR handling."""
         mock_settings = MagicMock()
-        mock_settings.return_value = {"NAABU_ENABLED": True}
+        mock_settings.return_value = {"NAABU_ENABLED": True,
+    "SUBDOMAIN_LIST": ["."],}
 
         mock_port_scan = MagicMock(side_effect=lambda recon_data, output_file=None, settings=None: _mock_port_scan_result(recon_data))
 
@@ -856,7 +866,8 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def _run_with_mocks(self, config, domain_ips=None, subdomain_ips=None, resolve_results=None):
         """Mock setup with DNS resolution support for hostnames."""
         mock_settings = MagicMock()
-        mock_settings.return_value = {"NAABU_ENABLED": True}
+        mock_settings.return_value = {"NAABU_ENABLED": True,
+    "SUBDOMAIN_LIST": ["."],}
 
         mock_port_scan = MagicMock(side_effect=lambda recon_data, output_file=None, settings=None: _mock_port_scan_result(recon_data))
 
@@ -1034,7 +1045,8 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
     def _run_with_mocks(self, config, domain_ips=None, subdomain_ips=None, resolve_results=None):
         """Mock setup for structured user_targets tests."""
         mock_settings = MagicMock()
-        mock_settings.return_value = {"NAABU_ENABLED": True}
+        mock_settings.return_value = {"NAABU_ENABLED": True,
+    "SUBDOMAIN_LIST": ["."],}
 
         mock_port_scan = MagicMock(side_effect=lambda recon_data, output_file=None, settings=None: _mock_port_scan_result(recon_data))
 
@@ -1250,7 +1262,8 @@ class TestRunMasscan(unittest.TestCase):
         """Helper that sets up all mocks and runs run_masscan."""
         # Mock get_settings
         mock_settings = MagicMock()
-        mock_settings.return_value = {"MASSCAN_ENABLED": False, "MASSCAN_TOP_PORTS": "1000", "MASSCAN_RATE": 1000}
+        mock_settings.return_value = {"MASSCAN_ENABLED": False, "MASSCAN_TOP_PORTS": "1000", "MASSCAN_RATE": 1000,
+    "SUBDOMAIN_LIST": ["."],}
 
         # Mock run_masscan_scan: modifies recon_data in place and returns it
         mock_masscan_scan = MagicMock(side_effect=lambda recon_data, output_file=None, settings=None: _mock_masscan_scan_result(recon_data))
@@ -1431,7 +1444,8 @@ class TestRunNmap(unittest.TestCase):
         """Helper that sets up all mocks and runs run_nmap."""
         # Mock get_settings
         mock_settings = MagicMock()
-        mock_settings.return_value = {"NMAP_ENABLED": True, "NMAP_VERSION_DETECTION": True}
+        mock_settings.return_value = {"NMAP_ENABLED": True, "NMAP_VERSION_DETECTION": True,
+    "SUBDOMAIN_LIST": ["."],}
 
         # Mock run_nmap_scan: adds nmap_scan key
         mock_nmap_scan = MagicMock(side_effect=_mock_nmap_scan_result)
@@ -1641,7 +1655,8 @@ class TestRunNmapStructuredTargets(unittest.TestCase):
     def _run_with_mocks(self, config, domain_ips=None, subdomain_ips=None):
         """Helper that sets up all mocks and runs run_nmap with structured targets."""
         mock_settings = MagicMock()
-        mock_settings.return_value = {"NMAP_ENABLED": True, "NMAP_VERSION_DETECTION": True}
+        mock_settings.return_value = {"NMAP_ENABLED": True, "NMAP_VERSION_DETECTION": True,
+    "SUBDOMAIN_LIST": ["."],}
 
         mock_nmap_scan = MagicMock(side_effect=_mock_nmap_scan_result)
         mock_merge = MagicMock()
@@ -2349,7 +2364,7 @@ class TestRunKatana(unittest.TestCase):
             "KATANA_JS_CRAWL": True, "KATANA_PARAMS_ONLY": False,
             "KATANA_CUSTOM_HEADERS": [], "KATANA_EXCLUDE_PATTERNS": [],
             "TOR_ENABLED": False,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         mock_katana_crawler = MagicMock(return_value=(
             ["https://example.com/api/users", "https://example.com/about"],
@@ -2581,7 +2596,7 @@ class TestRunHakrawler(unittest.TestCase):
             "HAKRAWLER_INSECURE": True,
             "HAKRAWLER_CUSTOM_HEADERS": [],
             "TOR_ENABLED": False,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         mock_hakrawler_crawler = MagicMock(return_value=(
             ["https://example.com/api/users", "https://example.com/about"],
@@ -2865,7 +2880,7 @@ class TestRunJsluice(unittest.TestCase):
             "JSLUICE_TIMEOUT": 300, "JSLUICE_EXTRACT_URLS": True,
             "JSLUICE_EXTRACT_SECRETS": True, "JSLUICE_CONCURRENCY": 5,
             "TOR_ENABLED": False,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         mock_jsluice_analysis = MagicMock(return_value={
             "urls": ["https://example.com/api/v1/users", "https://example.com/api/v1/config"],
@@ -3110,7 +3125,7 @@ class TestRunJsRecon(unittest.TestCase):
             "JS_RECON_ENABLED": True, "JS_RECON_MAX_FILES": 500,
             "JS_RECON_TIMEOUT": 900, "JS_RECON_CONCURRENCY": 10,
             "JS_RECON_VALIDATE_KEYS": True,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         # Mock run_js_recon: mutates combined_result by adding 'js_recon' key
         def mock_js_recon_fn(combined_result, settings=None):
@@ -3204,8 +3219,15 @@ class TestRunJsRecon(unittest.TestCase):
             saved[name] = sys.modules.get(name)
             sys.modules[name] = mod
 
-        os.environ.setdefault("USER_ID", "user1")
-        os.environ.setdefault("PROJECT_ID", "proj1")
+        # Force-set env (don't use setdefault): the recon Docker image's
+        # Dockerfile bakes in PROJECT_ID=default_project, which would block
+        # setdefault from applying the test value.
+        saved_env = {
+            "USER_ID": os.environ.get("USER_ID"),
+            "PROJECT_ID": os.environ.get("PROJECT_ID"),
+        }
+        os.environ["USER_ID"] = "user1"
+        os.environ["PROJECT_ID"] = "proj1"
 
         try:
             import importlib
@@ -3218,6 +3240,11 @@ class TestRunJsRecon(unittest.TestCase):
                     sys.modules.pop(name, None)
                 else:
                     sys.modules[name] = mod
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
         return {
             "settings": mock_settings,
@@ -3342,7 +3369,7 @@ class TestRunShodan(unittest.TestCase):
             "SHODAN_PASSIVE_CVES": True,
             "SHODAN_API_KEY": "test-key",
             "SHODAN_KEY_ROTATOR": None,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         # Mock run_shodan_enrichment: mutates combined_result by adding 'shodan' key
         def mock_enrichment_fn(combined_result, settings):
@@ -3505,7 +3532,7 @@ class TestRunShodan(unittest.TestCase):
             "SHODAN_REVERSE_DNS": True, "SHODAN_DOMAIN_DNS": False,
             "SHODAN_PASSIVE_CVES": True, "SHODAN_API_KEY": "",
             "SHODAN_KEY_ROTATOR": None,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         # Enrichment returns combined_result WITHOUT shodan key
         def mock_enrichment_empty(combined_result, settings):
@@ -3865,7 +3892,7 @@ class TestRunSecurityChecks(unittest.TestCase):
             "SECURITY_CHECK_NO_RATE_LIMITING": True,
             "SECURITY_CHECK_TIMEOUT": 10,
             "SECURITY_CHECK_MAX_WORKERS": 10,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         _findings = security_findings if security_findings is not None else [
             {
@@ -3878,7 +3905,8 @@ class TestRunSecurityChecks(unittest.TestCase):
         ]
 
         def mock_security_checks_fn(recon_data, enabled_checks, timeout=10,
-                                    tls_expiry_days=30, max_workers=10):
+                                    tls_expiry_days=30, max_workers=10,
+                                    **kwargs):
             return {"security_checks": {"findings": _findings}}
 
         mock_run_security_checks = MagicMock(side_effect=mock_security_checks_fn)
@@ -4070,7 +4098,7 @@ class TestRunUrlscan(unittest.TestCase):
             "URLSCAN_API_KEY": "",
             "URLSCAN_MAX_RESULTS": 5000,
             "URLSCAN_KEY_ROTATOR": None,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         _urlscan_data = urlscan_data if urlscan_data is not None else {
             "results_count": 3,
@@ -4223,7 +4251,8 @@ class TestRunUrlscan(unittest.TestCase):
 
         mock_settings = MagicMock()
         mock_settings.return_value = {"URLSCAN_ENABLED": False, "URLSCAN_API_KEY": "",
-                                      "URLSCAN_MAX_RESULTS": 5000, "URLSCAN_KEY_ROTATOR": None}
+                                      "URLSCAN_MAX_RESULTS": 5000, "URLSCAN_KEY_ROTATOR": None,
+                                      "SUBDOMAIN_LIST": ["."],}
         mock_run_discovery = MagicMock(return_value={
             "results_count": 1, "subdomains_discovered": [], "ips_discovered": [],
             "urls_with_paths": [], "entries": [], "external_domains": [],
@@ -4275,7 +4304,7 @@ class TestRunUncover(unittest.TestCase):
             "UNCOVER_MAX_RESULTS": 500,
             "UNCOVER_DOCKER_IMAGE": "projectdiscovery/uncover:latest",
             "SHODAN_API_KEY": "test-shodan-key",
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         _uncover_data = uncover_data if uncover_data is not None else {
             "hosts": ["sub1.example.com", "sub2.example.com"],
@@ -4391,7 +4420,7 @@ class TestRunUncover(unittest.TestCase):
             "OSINT_ENRICHMENT_ENABLED": False,
             "UNCOVER_MAX_RESULTS": 500,
             "SHODAN_API_KEY": "",
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         mock_run_expansion = MagicMock(return_value={
             "hosts": ["sub1.example.com"], "ips": ["1.2.3.4"],
@@ -4490,7 +4519,7 @@ class TestRunNuclei(unittest.TestCase):
             'USE_TOR_FOR_RECON': False, 'KATANA_DEPTH': 2,
             'CVE_LOOKUP_ENABLED': False, 'SECURITY_CHECK_ENABLED': False,
             'MITRE_ENABLED': False,
-        }
+            "SUBDOMAIN_LIST": ["."],}
 
         mock_vuln_scan = MagicMock(side_effect=lambda rd, **kw: {
             **rd,
@@ -4522,7 +4551,9 @@ class TestRunNuclei(unittest.TestCase):
                 records = []
                 for bu_data in _graph_baseurls:
                     record = MagicMock()
-                    record.__getitem__ = lambda self, key, d=bu_data: d[key]
+                    # Use .get(): graph queries return all RETURN columns even
+                    # when not in the source dict (e.g. is_cdn/cdn/asn).
+                    record.__getitem__ = lambda self, key, d=bu_data: d.get(key)
                     records.append(record)
                 result.__iter__ = lambda self, r=records: iter(r)
                 result.single.return_value = None
@@ -4712,6 +4743,66 @@ class TestRunNuclei(unittest.TestCase):
         recon_data = call_args[0][0]
         self.assertIn('subdomains', recon_data)
         self.assertIsInstance(recon_data['subdomains'], list)
+
+
+class TestRunVhostSni(unittest.TestCase):
+    """
+    Smoke tests for the VHost & SNI partial-recon dispatch path.
+
+    Deeper unit + orchestration coverage lives in the dedicated file
+    `test_vhost_sni_partial.py` (14 tests). This class lives in
+    `test_partial_recon.py` as required by PROMPT.ADD_PARTIAL_RECON.md so
+    every supported tool has its dispatch path tested in the canonical file.
+    """
+
+    def setUp(self):
+        os.environ["USER_ID"] = "test-user"
+        os.environ["PROJECT_ID"] = "test-project"
+
+    def test_run_vhost_sni_partial_is_importable(self):
+        """The partial-recon entrypoint must import cleanly."""
+        from recon.partial_recon_modules.vulnerability_scanning import run_vhost_sni_partial
+        self.assertTrue(callable(run_vhost_sni_partial))
+
+    def test_main_dispatches_vhost_sni_tool_id(self):
+        """main() must route tool_id='VhostSni' to run_vhost_sni_partial."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump({"tool_id": "VhostSni", "domain": "example.com"}, f)
+            f.flush()
+            os.environ["PARTIAL_RECON_CONFIG"] = f.name
+            try:
+                import importlib
+                import partial_recon as pr
+                importlib.reload(pr)
+                with patch.object(pr, "run_vhost_sni_partial") as mock_runner, \
+                     patch.object(pr, "_cleanup_orphan_user_inputs"):
+                    pr.main()
+                mock_runner.assert_called_once()
+                config_arg = mock_runner.call_args[0][0]
+                self.assertEqual(config_arg["tool_id"], "VhostSni")
+            finally:
+                del os.environ["PARTIAL_RECON_CONFIG"]
+                os.unlink(f.name)
+
+    def test_lowercase_tool_id_does_not_match(self):
+        """Defensive: a typo'd tool_id must not silently route to VhostSni."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump({"tool_id": "vhostsni", "domain": "example.com"}, f)
+            f.flush()
+            os.environ["PARTIAL_RECON_CONFIG"] = f.name
+            try:
+                import importlib
+                import partial_recon as pr
+                importlib.reload(pr)
+                with patch.object(pr, "run_vhost_sni_partial") as mock_runner, \
+                     patch.object(pr, "_cleanup_orphan_user_inputs"):
+                    with self.assertRaises(SystemExit) as cm:
+                        pr.main()
+                    self.assertEqual(cm.exception.code, 1)
+                mock_runner.assert_not_called()
+            finally:
+                del os.environ["PARTIAL_RECON_CONFIG"]
+                os.unlink(f.name)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ const ALLOWED_KEY_FIELDS = [
   'shodanApiKey',
   'serpApiKey',
   'wpscanApiToken',
+  'pdcpApiKey',
   'nvdApiKey',
   'vulnersApiKey',
   'urlscanApiKey',
@@ -44,6 +45,7 @@ const ALLOWED_ROTATION_TOOLS = [
   'tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan',
   'fofa', 'otx', 'netlas', 'virustotal', 'zoomeye', 'criminalip',
   'quake', 'hunter', 'publicwww', 'hunterhow', 'onyphe', 'driftnet', 'wpscan',
+  'pdcp',
 ] as const
 
 const ALLOWED_KEY_SET = new Set<string>(ALLOWED_KEY_FIELDS)

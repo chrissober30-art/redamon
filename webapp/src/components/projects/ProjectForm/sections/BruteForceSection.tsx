@@ -1,6 +1,7 @@
 'use client'
 
 import type { Project } from '@prisma/client'
+import { WikiInfoButton } from '@/components/ui/WikiInfoButton'
 import styles from '../ProjectForm.module.css'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
@@ -28,7 +29,10 @@ export function HydraSection({ data, updateField }: HydraSectionProps) {
   }
 
   return (
-    <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
+    <div style={{ padding: 'var(--space-3) var(--space-4)', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 8, right: 16 }}>
+        <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Project-Settings-Reference#hydra-credential-testing" title="Open Hydra wiki section" />
+      </div>
       <p className={styles.sectionDescription}>
         Configure THC Hydra credential testing settings. Hydra supports 50+ protocols
         including SSH, FTP, RDP, SMB, HTTP forms, databases, and more.

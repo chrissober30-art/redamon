@@ -6,6 +6,7 @@ import { AuthProvider } from '@/providers/AuthProvider'
 import { ProjectProvider } from '@/providers/ProjectProvider'
 import { ToastProvider, AlertProvider } from '@/components/ui'
 import { AppLayout } from '@/components/layout'
+import { ThemeDbBridge } from '@/components/ThemeDbBridge'
 
 export const metadata: Metadata = {
   title: 'RedAmon',
@@ -50,6 +51,7 @@ export default function RootLayout({
         <QueryProvider>
           <Suspense fallback={null}>
             <AuthProvider>
+              <ThemeDbBridge />
               <ProjectProvider>
                 <ToastProvider>
                   <AlertProvider>

@@ -132,10 +132,17 @@ async def emit_streaming_events(state: dict, callback) -> None:
         #    overwritten by the confirmation handler's findIndex(tool_name + running).
         if "_completed_step" in state and state["_completed_step"]:
             cstep = state["_completed_step"]
-            cstep_id = _make_event_id("tc", cstep, "tool_name", "output_analysis")
+            # Prefer step_id (uuid4) as the dedup key — unique per step, so two
+            # consecutive failures of the same tool with identical (empty)
+            # output_analysis no longer collide on `tc|<tool>|<analysis>` and
+            # silently drop the second emission. Fall back to content-based id
+            # when step_id is missing (legacy state shapes).
+            step_id_dedup = cstep.get("step_id")
+            if step_id_dedup:
+                cstep_id = f"tc|{step_id_dedup}"
+            else:
+                cstep_id = _make_event_id("tc", cstep, "tool_name", "output_analysis")
             tool_name = cstep.get("tool_name")
-            # Diagnostic: log the exact gate evaluation so we can spot why
-            # tool_complete isn't firing for fireteam member standalone tools.
             logger.info(
                 "[diag] tool_complete gate: tool_name=%r success=%r analysis_len=%d id=%r already_emitted=%s cb=%s",
                 tool_name, cstep.get("success"),
@@ -143,11 +150,22 @@ async def emit_streaming_events(state: dict, callback) -> None:
                 cstep_id in callback._emitted_tool_complete_ids,
                 type(callback).__name__,
             )
-            if tool_name and tool_name != "tool_rejection" and cstep.get("success") is not None and cstep.get("output_analysis") and cstep_id not in callback._emitted_tool_complete_ids:
+            # Emit on_tool_complete as soon as the step has a terminal
+            # success/failure verdict — do NOT require output_analysis to be
+            # non-empty. A tool that legitimately returns no output (status 000,
+            # "no live hosts found", empty stdout) is still DONE, and the UI
+            # card must flip from RUNNING to a terminal status. The previous
+            # gate left such cards stuck running forever, which compounded
+            # under operator approval into multiple ghost RUNNING cards.
+            if tool_name and tool_name != "tool_rejection" and cstep.get("success") is not None and cstep_id not in callback._emitted_tool_complete_ids:
+                # Use `or ""` so a literal None on output_analysis doesn't
+                # raise TypeError on the slice (only the missing-key fallback
+                # was guarded before; some upstream paths set the field to
+                # None rather than empty string).
                 await callback.on_tool_complete(
                     cstep.get("tool_name", "unknown"),
                     cstep["success"],
-                    cstep.get("output_analysis", "")[:10000],
+                    (cstep.get("output_analysis") or "")[:10000],
                     actionable_findings=cstep.get("actionable_findings", []),
                     recommended_next_steps=cstep.get("recommended_next_steps", []),
                     # Thread the wall-clock duration stamped by
@@ -165,7 +183,7 @@ async def emit_streaming_events(state: dict, callback) -> None:
                     "thought": cstep.get("thought", ""),
                     "tool_name": cstep.get("tool_name"),
                     "success": cstep.get("success", False),
-                    "output_summary": cstep.get("output_analysis", "")[:10000],
+                    "output_summary": (cstep.get("output_analysis") or "")[:10000],
                     "actionable_findings": cstep.get("actionable_findings", []),
                     "recommended_next_steps": cstep.get("recommended_next_steps", []),
                 })
@@ -202,8 +220,22 @@ async def emit_streaming_events(state: dict, callback) -> None:
                     logger.error(f"Error emitting thinking event: {e}")
 
         # 3. Emit tool_start and output chunks for CURRENT step (new tool)
-        #    Skip if tool confirmation is pending — tool hasn't actually started yet
-        if "_current_step" in state and state["_current_step"] and not state.get("awaiting_tool_confirmation"):
+        #    Skip if tool confirmation is pending — tool hasn't actually started yet.
+        #    Two distinct flags must be checked:
+        #      - `awaiting_tool_confirmation`: root-agent flag (used by the main
+        #        orchestrator's await_tool_confirmation node)
+        #      - `_pending_confirmation`: fireteam-MEMBER flag (each member sets
+        #        this when escalating a dangerous tool to the parent)
+        #    Without the `_pending_confirmation` guard, a fireteam member that
+        #    escalates a dangerous tool emits a TOOL_START event before the
+        #    operator has approved it. The UI then renders a RUNNING tool card
+        #    that NEVER receives a matching TOOL_COMPLETE — because on approval
+        #    process_fireteam_confirmation_node redeploys the tool inside a NEW
+        #    single-member fireteam whose events carry a different member_id.
+        #    The original member's RUNNING card is then stuck forever.
+        if ("_current_step" in state and state["_current_step"]
+                and not state.get("awaiting_tool_confirmation")
+                and not state.get("_pending_confirmation")):
             step = state["_current_step"]
             start_id = _make_event_id("ts", step, "tool_name", "tool_args")
             output_id = _make_event_id("to", step, "tool_name", "tool_output")

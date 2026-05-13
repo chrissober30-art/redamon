@@ -336,9 +336,11 @@ flowchart LR
         RE[Resource Enum<br/>Katana ∥ Hakrawler ∥ GAU ∥ ParamSpider ∥ Kiterunner<br/>then jsluice → FFuf → Arjun]
     end
 
-    subgraph G6["GROUP 6 Phase A — parallel"]
+    subgraph G6["GROUP 6 Phase A — parallel (4-way fan-out)"]
         VS[Vuln Scan — Nuclei]
         GQL[GraphQL Security<br/>Introspection + graphql-cop]
+        TKO[Subdomain Takeover<br/>Subjack + Nuclei + BadDNS]
+        VHOST[VHost & SNI Enum<br/>L7 Host header + L4 SNI probing]
     end
 
     subgraph G6B["GROUP 6 Phase B — sequential"]
@@ -484,14 +486,16 @@ flowchart TB
         FwSink --> Out4b
     end
 
-    subgraph Phase5["GROUP 6 Phase A — Fan-Out: Nuclei ∥ GraphQL Security (parallel)"]
+    subgraph Phase5["GROUP 6 Phase A — Fan-Out: Nuclei ∥ GraphQL ∥ Takeover ∥ VHost/SNI (parallel)"]
         direction TB
         Out4b --> FanOut6
 
-        subgraph FanOut6["ThreadPoolExecutor — 2 parallel tasks (_isolated wrappers, deep-copy snapshots)"]
+        subgraph FanOut6["ThreadPoolExecutor — 4 parallel tasks (_isolated wrappers, deep-copy snapshots)"]
             direction LR
             Nuclei[Nuclei Scanner]
             GraphQL[GraphQL Security Scanner]
+            Takeover[Subdomain Takeover Scanner]
+            VhostSni[VHost & SNI Enum]
         end
 
         subgraph NucleiFeatures["Nuclei Scan Types"]
@@ -507,6 +511,18 @@ flowchart TB
             Cop[graphql-cop<br/>12 misconfig checks]
         end
 
+        subgraph TakeoverFeatures["Takeover Tools"]
+            Subjack[Subjack<br/>DNS-first fingerprints]
+            NucTkO[Nuclei takeover templates<br/>http/takeovers + dns]
+            BadDNS[BadDNS sidecar<br/>CNAME/NS/MX/TXT/SPF/wildcard]
+        end
+
+        subgraph VhostSniFeatures["VHost & SNI Probing"]
+            L7[L7 probe<br/>Host header override]
+            L4[L4 probe<br/>TLS SNI via --resolve]
+            Anomaly[Anomaly oracle<br/>vs baseline status/size]
+        end
+
         Nuclei --> CVE
         Nuclei --> DAST
         Nuclei --> Misconfig
@@ -516,6 +532,14 @@ flowchart TB
         GraphQL --> Intros
         GraphQL --> Cop
 
+        Takeover --> Subjack
+        Takeover --> NucTkO
+        Takeover --> BadDNS
+
+        VhostSni --> L7
+        VhostSni --> L4
+        VhostSni --> Anomaly
+
         CVE --> FanIn6
         DAST --> FanIn6
         Misconfig --> FanIn6
@@ -523,10 +547,16 @@ flowchart TB
         Discover --> FanIn6
         Intros --> FanIn6
         Cop --> FanIn6
+        Subjack --> FanIn6
+        NucTkO --> FanIn6
+        BadDNS --> FanIn6
+        L7 --> FanIn6
+        L4 --> FanIn6
+        Anomaly --> FanIn6
     end
 
     subgraph Phase5b["GROUP 6 Phase B — MITRE Enrichment (sequential, depends on Nuclei CVEs)"]
-        FanIn6[Fan-In: Merge Nuclei + GraphQL findings] --> MITRE[MITRE Enrichment<br/>CWE + CAPEC]
+        FanIn6[Fan-In: Merge Nuclei + GraphQL + Takeover + VHost/SNI findings] --> MITRE[MITRE Enrichment<br/>CWE + CAPEC]
         MITRE --> Out5[(Vulnerabilities + Attack Patterns)]
     end
 
@@ -606,7 +636,7 @@ The recon pipeline uses a **fan-out / fan-in** pattern with Python's `concurrent
 | **GROUP 4** | HTTP Probe (httpx) | Sequential (internally parallel) | Needs ports from GROUP 3 |
 | **GROUP 5** | Resource Enum (Katana + GAU + Kiterunner) | 3 tools internally parallel | Needs live URLs from GROUP 4 |
 | **GROUP 5b** | JS Recon Scanner (100 regex patterns, key validation, source maps, dependency confusion, endpoint extraction, DOM sinks) | 5 analyzers parallel per file | Needs JS files from GROUP 5; runs if `JS_RECON_ENABLED` |
-| **GROUP 6 Phase A** | Vuln Scan (Nuclei) ∥ GraphQL Security Testing | 2 parallel tasks (ThreadPoolExecutor, `_isolated` wrappers) | Needs endpoints from GROUP 5/5b |
+| **GROUP 6 Phase A** | Vuln Scan (Nuclei) ∥ GraphQL Security Testing ∥ Subdomain Takeover ∥ VHost & SNI Enumeration | 4 parallel tasks (ThreadPoolExecutor, `_isolated` wrappers) | Needs endpoints from GROUP 5/5b |
 | **GROUP 6 Phase B** | MITRE Enrichment (CWE + CAPEC) | Sequential | Needs CVEs from Phase A (Nuclei) |
 
 ### Background Graph DB Updates
@@ -628,7 +658,7 @@ Each parallelized tool function is thread-safe:
 
 ## 🎯 Partial Recon
 
-Partial Recon lets you run any single tool from the pipeline independently, without triggering a full scan. From the Workflow View or section headers, click the play button on any tool to open a modal that shows existing graph data (subdomains, IPs, ports, BaseURLs, endpoints), accepts custom targets, and launches the tool in isolation. Results are merged into the existing Neo4j graph via `MERGE` -- no duplicates. All 21 pipeline tools are supported (including `graphql_scan` — custom URLs are validated against project scope and injected via `GRAPHQL_ENDPOINTS`). The tool runs with the project's saved settings (timeouts, wordlists, API keys, proxy, Tor). Custom inputs are validated in real time (scope checks, IP/CIDR format, port ranges). See `recon/partial_recon.py` for the implementation.
+Partial Recon lets you run any single tool from the pipeline independently, without triggering a full scan. From the Workflow View or section headers, click the play button on any tool to open a modal that shows existing graph data (subdomains, IPs, ports, BaseURLs, endpoints), accepts custom targets, and launches the tool in isolation. Results are merged into the existing Neo4j graph via `MERGE` -- no duplicates. All 23 pipeline tools are supported (including `graphql_scan` -- custom URLs are validated against project scope and injected via `GRAPHQL_ENDPOINTS` -- and `vhost_sni` -- custom subdomains and IPs are validated and injected before probing). The tool runs with the project's saved settings (timeouts, wordlists, API keys, proxy, Tor). Custom inputs are validated in real time (scope checks, IP/CIDR format, port ranges). See `recon/partial_recon.py` for the implementation.
 
 > **[Wiki: Recon Pipeline Workflow -- Partial Recon](https://github.com/samugit83/redamon/wiki/Recon-Pipeline-Workflow#partial-recon)**
 
@@ -968,7 +998,7 @@ flowchart TB
 
 ### Module 5b: `graphql_scan`
 
-Dedicated GraphQL security scanner — runs as **GROUP 6 Phase A in parallel with Nuclei** because both scanners consume `BaseURL` / `Endpoint` / `Technology` and emit `Vulnerability` nodes but have zero data dependency on each other. Each phase-A tool is wrapped in an `_isolated` variant that deep-copies `combined_result` so the two threads never race on the shared dict.
+Dedicated GraphQL security scanner -- runs as **GROUP 6 Phase A in parallel with Nuclei, Subdomain Takeover, and VHost & SNI Enumeration** because all four scanners consume `BaseURL` / `Endpoint` / `Technology` / `Subdomain` / `IP` and emit `Vulnerability` nodes but have zero data dependency on each other. Each phase-A tool is wrapped in an `_isolated` variant that deep-copies `combined_result` so the four threads never race on the shared dict.
 
 Toggle: `GRAPHQL_SECURITY_ENABLED` (default: `false`, opt-in).
 
@@ -1079,6 +1109,119 @@ recon/graphql_scan/
 ```
 
 📖 **Detailed documentation:** [readmes/GRAPH.SCHEMA.md — GraphQL-specific Endpoint & Vulnerability properties](GRAPH.SCHEMA.md) | **[Wiki: GraphQL Security Testing](https://github.com/samugit83/redamon/wiki/GraphQL-Security-Testing)**
+
+---
+
+### Module 5d: `vhost_sni_enum`
+
+Hidden-virtual-host discovery scanner -- runs as the **fourth GROUP 6 Phase A sibling** alongside Nuclei, GraphQL Scan, and Subdomain Takeover. Probes every target IP twice per candidate hostname: an **L7** test that overrides the HTTP `Host` header and an **L4** test that pins TLS SNI via curl `--resolve`. Each probe is compared against a per-port baseline raw-IP request; a status-code change OR a body-size delta beyond `VHOST_SNI_BASELINE_SIZE_TOLERANCE` (default 50 bytes) flags an anomaly. L4 catches modern reverse proxies (NGINX ingress, Traefik, Cloudflare, k8s) that route at the TLS handshake before reading any HTTP header; L7 catches classic Apache / Nginx vhost routing.
+
+Toggle: `VHOST_SNI_ENABLED` (default: `false`, opt-in). Zero new binaries -- relies on `curl` already in the recon image.
+
+```mermaid
+flowchart TB
+    subgraph Input
+        IPs[IPs from port_scan + DNS]
+        DefaultWL[Default wordlist<br/>2,471 entries]
+        CustomWL[Custom wordlist setting]
+        GraphCands[Graph-derived candidates<br/>DNS subdomains, httpx hosts,<br/>TLS SANs, CNAME, PTR, co-resident]
+    end
+
+    subgraph CandidateSet["Candidate Set Build"]
+        Merge[Merge + dedupe + hostname validation<br/>regex with \Z to block newline injection]
+        Cap[Deterministic sort + slice<br/>VHOST_SNI_MAX_CANDIDATES_PER_IP]
+    end
+
+    subgraph Baseline["Per-Port Baseline"]
+        BaseReq[curl raw-IP request<br/>no Host override, no SNI swap]
+    end
+
+    subgraph Probing["Per-Candidate Probing (ThreadPoolExecutor)"]
+        L7Probe[L7 probe<br/>-H 'Host: candidate']
+        L4Probe[L4 probe<br/>--resolve candidate:port:ip<br/>https only]
+    end
+
+    subgraph Anomaly["Anomaly Oracle"]
+        StatusDiff[Status code differs?]
+        SizeDiff[Body size differs<br/>beyond tolerance?]
+    end
+
+    subgraph Severity["Severity Ladder"]
+        High[high: L7 vs L4 disagree<br/>routing inconsistency / proxy bypass]
+        Med[medium: matches INTERNAL_KEYWORDS<br/>~80 entries: admin, jenkins, vault, ...]
+        Low[low: confirmed hidden vhost<br/>different status]
+        Info[info: size-delta only]
+    end
+
+    subgraph Output
+        Vulns[Vulnerability nodes<br/>hidden_vhost / hidden_sni_route / host_header_bypass]
+        SubEnrich[Subdomain enrichment<br/>vhost_tested, vhost_hidden, sni_routed, ...]
+        IPEnrich[IP enrichment<br/>is_reverse_proxy, hidden_vhost_count, ...]
+        Feedback[Discovery feedback loop<br/>inject discovered vhost into http_probe.by_url]
+    end
+
+    DefaultWL --> Merge
+    CustomWL --> Merge
+    GraphCands --> Merge
+    Merge --> Cap
+
+    IPs --> BaseReq
+    Cap --> L7Probe
+    Cap --> L4Probe
+    BaseReq --> StatusDiff
+    BaseReq --> SizeDiff
+    L7Probe --> StatusDiff
+    L7Probe --> SizeDiff
+    L4Probe --> StatusDiff
+    L4Probe --> SizeDiff
+
+    StatusDiff --> High
+    StatusDiff --> Med
+    StatusDiff --> Low
+    SizeDiff --> Info
+
+    High --> Vulns
+    Med --> Vulns
+    Low --> Vulns
+    Info --> Vulns
+
+    Vulns --> SubEnrich
+    Vulns --> IPEnrich
+    Vulns --> Feedback
+```
+
+**Capabilities:**
+
+| Layer | What It Does |
+|-------|--------------|
+| **IP target collection** | Merges (no fallback) every available IP source: `port_scan.by_host` (authoritative ports + per-port scheme overrides), then `dns.subdomains[*].ips.ipv4` and `dns.domain.ips.ipv4` get default 80/443 added. Per-IP port list deduped on `(port, scheme)`. |
+| **Candidate set build** | Six sources merged: default wordlist (2,471 entries shipped in-image), custom wordlist setting, DNS subdomains resolving to the IP, httpx-known hosts on the IP, TLS SAN list per-URL, and CNAME/PTR/co-resident external domains. UTF-8 BOM auto-handled for Windows-edited overrides. Hostname validation uses `\Z` to block newline-injected hostnames from corrupting `--resolve` syntax. |
+| **Per-port baseline** | One raw-IP curl request per port. Status `0` (curl couldn't connect) is dropped as no-data instead of being recorded as a real probe. |
+| **L7 probing** | `-H "Host: <candidate>"` against `https://<ip>:<port>/`. Catches classic Apache / Nginx vhost routing. |
+| **L4 probing** | `--resolve <candidate>:<port>:<ip>` so the TLS handshake carries the candidate as SNI. Catches modern reverse proxies (NGINX ingress, Traefik, Cloudflare, k8s) that route at the TLS layer. Skipped when scheme is `http` (no SNI to set). |
+| **Anomaly detection** | Per-(candidate, layer) probe compared to baseline. Anomaly if status differs OR body size deviates beyond `VHOST_SNI_BASELINE_SIZE_TOLERANCE` (default 50 bytes). |
+| **Severity ladder** | `high` when L7 and L4 disagree on the same hostname (proxy bypass primitive); `medium` when discovered vhost matches `INTERNAL_KEYWORDS` (~80 entries: `admin`, `jenkins`, `vault`, `keycloak`, `argocd`, `kibana`, `grafana`, ...); `low` for any anomaly with a different status code; `info` for size-delta-only anomalies. Compound names like `admin-portal` matched via longest-keyword-wins with lexicographic tie-break. |
+| **Discovery feedback loop** | When `VHOST_SNI_INJECT_DISCOVERED=true` (default), discovered hidden vhosts are folded into `combined_result["http_probe"]["by_url"]` as fresh BaseURLs with `discovery_source="vhost_sni_enum"`, so downstream graph methods and follow-up partial-recon runs see them as real targets. |
+| **Concurrency + safety** | All candidates per IP fanned out via internal `ThreadPoolExecutor(max_workers=VHOST_SNI_CONCURRENCY)` (default 20). Each curl invocation has a `--connect-timeout` + `--max-time = 3 * timeout`, plus a subprocess `timeout * 3 + 2` belt-and-braces guard. Per-IP candidate cap (default 2,000) is deterministic across reruns. |
+
+**Stealth overrides:** `VHOST_SNI_ENABLED=false` outright. Bare-IP curl probes plus per-candidate retries are too noisy for stealth profiles.
+
+**Three vulnerability shapes:**
+- `host_header_bypass` (layer = `both`, attached to BOTH the Subdomain AND the IP node since the IP itself is the bypass surface)
+- `hidden_sni_route` (layer = `L4`, attached to the Subdomain)
+- `hidden_vhost` (layer = `L7`, attached to the Subdomain)
+
+Each finding carries a deterministic id `vhost_sni_<host>_<ip>_<port>_<layer>` so rescans MERGE on the same Vulnerability node in Neo4j (no duplicates).
+
+**Source layout:**
+
+```
+recon/main_recon_modules/vhost_sni_enum.py   # The full module (run_vhost_sni_enrichment, run_vhost_sni_enrichment_isolated, _build_candidate_set, _collect_ip_targets, _is_anomaly, _classify_severity, _inject_into_http_probe, _is_valid_hostname)
+recon/wordlists/vhost-common.txt             # 2,471-entry default wordlist (shipped in-image)
+graph_db/mixins/recon/vhost_sni_mixin.py     # Neo4jClient.update_graph_from_vhost_sni()
+```
+
+📖 **Detailed documentation:** [readmes/GRAPH.SCHEMA.md -- VHost/SNI Vulnerability properties + Subdomain/IP enrichment](GRAPH.SCHEMA.md) | **[Wiki: VHost & SNI Enumeration](https://github.com/samugit83/redamon/wiki/VHost-and-SNI-Enumeration)**
 
 ---
 

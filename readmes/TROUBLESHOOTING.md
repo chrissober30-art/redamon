@@ -38,3 +38,8 @@ RedAmon is fully Dockerized and runs on **any OS** that supports Docker and Dock
 | Slow bind-mount performance | macOS filesystem sharing overhead | Upgrade to Docker Desktop 4.x+ and enable **VirtioFS** in Settings → General |
 | Port 5000 conflict | macOS AirPlay Receiver uses port 5000 | Disable AirPlay Receiver in System Settings → General → AirDrop & Handoff, or remap the port in `.env` |
 | `docker compose` not found | Docker CLI plugins not in PATH | Run `brew install docker-compose` or reinstall Docker Desktop |
+| Containers OOM-killed during install | Docker Desktop default Memory below RedAmon minimum | Docker Desktop → Settings → Resources → Memory: set to 4 GB (8 GB with `--gvm`), then `./redamon.sh install` |
+| `Cannot connect to the Docker daemon` | Docker Desktop not started | `open /Applications/Docker.app` and wait until the whale icon stops animating before running `./redamon.sh` |
+| `Mounts denied` / `path not shared` | Repo cloned outside Docker Desktop's File Sharing allowlist | Clone the repo under `~/` (default-allowed), or add the custom path in Settings → Resources → File Sharing |
+| SYN scans (naabu, masscan) miss hosts on the local LAN | `network_mode: host` joins Docker Desktop's LinuxKit VM, not the Mac's network | Expected on Docker Desktop. Internet targets work normally; for LAN scans, run RedAmon on a Linux host |
+| Login fails after install with no error in logs | Non-interactive shell (CI, agents, some multiplexers) injected a `\u0001` SOH byte into the admin email/password prompt | Run `./redamon.sh reset-password` to recreate credentials cleanly |

@@ -1,0 +1,493 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+}
+
+.toolbarLeft,
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.searchWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-2);
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.searchInput {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-2) * 2 + 12px);
+  width: 220px;
+}
+
+.searchInput:focus {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -1px;
+}
+
+.rowCount {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.exportBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.exportBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.exportBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Dropdown menus */
+.menuContainer {
+  position: relative;
+}
+
+.menuButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.menuButton:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.menuButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.menuButtonLabel {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuButtonCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 var(--space-1);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.typeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  max-height: 360px;
+  overflow: auto;
+  background: var(--bg-elevated, var(--bg-secondary));
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.dropdownItem:hover {
+  background: var(--bg-hover);
+}
+
+.dropdownItemActive {
+  background: var(--bg-hover);
+  font-weight: var(--font-semibold);
+}
+
+.dropdownItemLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdownItemCount {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.dropdownActions {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-1) var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-1);
+}
+
+.dropdownActionBtn {
+  flex: 1;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  padding: var(--space-1);
+  cursor: pointer;
+}
+
+.dropdownActionBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dropdownList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dropdownCheckRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.dropdownCheckRow:hover {
+  background: var(--bg-hover);
+}
+
+.dropdownCheckRow input {
+  cursor: pointer;
+}
+
+/* State screens */
+.stateContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  inset: 0;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 24px;
+}
+
+.stateText {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.stateSubtext {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+  color: var(--accent-primary);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.errorIcon {
+  color: var(--status-error);
+}
+
+.emptyIcon {
+  color: var(--text-tertiary);
+}
+
+/* Table */
+.tableWrapper {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.table {
+  min-width: 700px;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-tertiary);
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.thContent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+}
+
+.sortIcon {
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+}
+
+.tr {
+  transition: background 0.1s ease;
+}
+
+.tr:hover {
+  background: var(--bg-hover);
+}
+
+.tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.tr:nth-child(even):hover {
+  background: var(--bg-hover);
+}
+
+.trExpanded {
+  background: var(--bg-secondary) !important;
+}
+
+.trExpandedDetail {
+  background: none !important;
+}
+
+.td {
+  padding: var(--space-1-5) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+.tdExpanded {
+  padding: 0;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.expandBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.expandBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nameCell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.propCell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.connBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px var(--space-1-5);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+}
+
+.connEmpty {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-default);
+  flex-shrink: 0;
+}
+
+.paginationInfo {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.paginationRows {
+  margin-left: var(--space-1);
+  color: var(--text-tertiary);
+}
+
+.paginationControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pageBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.pageBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pageSizeSelect {
+  display: flex;
+  align-items: center;
+}
+
+.select {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.select:focus {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -1px;
+}

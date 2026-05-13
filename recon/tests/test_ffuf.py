@@ -407,7 +407,7 @@ def test_ffuf_default_settings_exist():
         'FFUF_TIMEOUT', 'FFUF_MAX_TIME', 'FFUF_MATCH_CODES', 'FFUF_FILTER_CODES',
         'FFUF_FILTER_SIZE', 'FFUF_EXTENSIONS', 'FFUF_RECURSION',
         'FFUF_RECURSION_DEPTH', 'FFUF_AUTO_CALIBRATE', 'FFUF_FOLLOW_REDIRECTS',
-        'FFUF_CUSTOM_HEADERS', 'FFUF_SMART_FUZZ',
+        'FFUF_CUSTOM_HEADERS', 'FFUF_SMART_FUZZ', 'FFUF_AI_EXTENSIONS',
     ]
     for key in expected_keys:
         assert key in DEFAULT_SETTINGS, f"Missing key: {key}"
@@ -416,9 +416,44 @@ def test_ffuf_default_settings_exist():
     assert DEFAULT_SETTINGS['FFUF_THREADS'] == 40
     assert DEFAULT_SETTINGS['FFUF_AUTO_CALIBRATE'] is True
     assert DEFAULT_SETTINGS['FFUF_SMART_FUZZ'] is True
+    assert DEFAULT_SETTINGS['FFUF_AI_EXTENSIONS'] is False
     assert isinstance(DEFAULT_SETTINGS['FFUF_MATCH_CODES'], list)
     assert 200 in DEFAULT_SETTINGS['FFUF_MATCH_CODES']
+    # AI in pipeline globals
+    assert DEFAULT_SETTINGS['AI_IN_PIPELINE'] is False
+    assert DEFAULT_SETTINGS['AI_PIPELINE_MODEL'] == 'claude-opus-4-6'
     print("PASS: test_ffuf_default_settings_exist")
+
+
+def test_apply_ai_pipeline_overrides_cascade_on():
+    """When AI_IN_PIPELINE=True, FFUF_AI_EXTENSIONS is forced True."""
+    from recon.project_settings import DEFAULT_SETTINGS, apply_ai_pipeline_overrides
+    import copy
+
+    settings = copy.deepcopy(DEFAULT_SETTINGS)
+    settings['AI_IN_PIPELINE'] = True
+    settings['FFUF_AI_EXTENSIONS'] = False  # stale per-tool flag
+
+    result = apply_ai_pipeline_overrides(settings)
+
+    assert result['FFUF_AI_EXTENSIONS'] is True
+    print("PASS: test_apply_ai_pipeline_overrides_cascade_on")
+
+
+def test_apply_ai_pipeline_overrides_cascade_off():
+    """When AI_IN_PIPELINE=False, FFUF_AI_EXTENSIONS is forced False even if
+    a stale per-tool flag in the DB had it on."""
+    from recon.project_settings import DEFAULT_SETTINGS, apply_ai_pipeline_overrides
+    import copy
+
+    settings = copy.deepcopy(DEFAULT_SETTINGS)
+    settings['AI_IN_PIPELINE'] = False
+    settings['FFUF_AI_EXTENSIONS'] = True  # stale -- master is OFF
+
+    result = apply_ai_pipeline_overrides(settings)
+
+    assert result['FFUF_AI_EXTENSIONS'] is False
+    print("PASS: test_apply_ai_pipeline_overrides_cascade_off")
 
 
 def test_stealth_overrides_disable_ffuf():
@@ -480,6 +515,9 @@ def test_settings_camelcase_mapping():
         "ffufFollowRedirects": True,
         "ffufCustomHeaders": ["X-Custom: test"],
         "ffufSmartFuzz": False,
+        "ffufAiExtensions": True,
+        "aiInPipeline": True,
+        "aiPipelineModel": "claude-haiku-4-5-20251001",
     }
 
     mock_resp = mock.MagicMock()
@@ -506,6 +544,9 @@ def test_settings_camelcase_mapping():
     assert settings['FFUF_FOLLOW_REDIRECTS'] is True
     assert settings['FFUF_CUSTOM_HEADERS'] == ["X-Custom: test"]
     assert settings['FFUF_SMART_FUZZ'] is False
+    assert settings['FFUF_AI_EXTENSIONS'] is True
+    assert settings['AI_IN_PIPELINE'] is True
+    assert settings['AI_PIPELINE_MODEL'] == 'claude-haiku-4-5-20251001'
     print("PASS: test_settings_camelcase_mapping")
 
 

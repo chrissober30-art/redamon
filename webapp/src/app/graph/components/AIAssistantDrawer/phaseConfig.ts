@@ -24,6 +24,9 @@ export function formatModelDisplay(model: string): string {
     const simplified = model.slice('bedrock/'.length).replace(/^[^.]+\./, '').replace(/-\d{8}-v\d+:\d+$/, '')
     return `${simplified} (Bedrock)`
   }
+  if (model.startsWith('deepseek/')) {
+    return `${model.slice('deepseek/'.length)} (DeepSeek)`
+  }
   return model
 }
 
@@ -84,6 +87,24 @@ export const KNOWN_ATTACK_PATH_CONFIG: Record<string, { label: string; shortLabe
     shortLabel: 'XSS',
     color: 'var(--accent-success, #10b981)',
     bgColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  ssrf: {
+    label: 'Server-Side Request Forgery',
+    shortLabel: 'SSRF',
+    color: 'var(--accent-orange, #f97316)',
+    bgColor: 'rgba(249, 115, 22, 0.15)',
+  },
+  rce: {
+    label: 'Remote Code Execution',
+    shortLabel: 'RCE',
+    color: 'var(--accent-rose, #f43f5e)',
+    bgColor: 'rgba(244, 63, 94, 0.15)',
+  },
+  path_traversal: {
+    label: 'Path Traversal / LFI / RFI',
+    shortLabel: 'PATH',
+    color: 'var(--accent-teal, #14b8a6)',
+    bgColor: 'rgba(20, 184, 166, 0.15)',
   },
 }
 

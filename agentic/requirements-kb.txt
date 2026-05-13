@@ -1,4 +1,5 @@
-# Knowledge Base heavy dependencies (skipped with --skipkbase)
+# Knowledge Base heavy dependencies (installed only when ./redamon.sh install --kbase
+# is used; default install builds the agent image without these).
 # torch (~2-3 GB) is a transitive dep of sentence-transformers
 faiss-cpu>=1.7.0
 sentence-transformers>=2.2.0

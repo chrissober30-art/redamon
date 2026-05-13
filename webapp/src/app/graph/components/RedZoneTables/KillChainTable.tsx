@@ -1,15 +1,19 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
+import { ExternalLink } from '@/components/ui'
+import { capecToUrl, cveToUrl, cweToUrl } from '@/lib/url-utils'
 import {
   SeverityBadge,
   Mono,
   Truncated,
   CvssCell,
   KevChip,
+  HostCell,
+  IpCell,
   filterRowsByText,
 } from './formatters'
 import { normalizeSeverity } from './types'
@@ -49,32 +53,35 @@ export const KillChainTable = memo(function KillChainTable({ projectId }: Props)
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
-    exportRedZoneXlsx(
-      filtered,
-      'Kill-Chain',
-      [
-        { key: 'subdomain', header: 'Subdomain' },
-        { key: 'ipAddress', header: 'IP' },
-        { key: 'port', header: 'Port' },
-        { key: 'protocol', header: 'Proto' },
-        { key: 'serviceName', header: 'Service' },
-        { key: 'serviceProduct', header: 'Product' },
-        { key: 'serviceVersion', header: 'SvcVer' },
-        { key: 'techName', header: 'Technology' },
-        { key: 'techVersion', header: 'TechVer' },
-        { key: 'cveId', header: 'CVE' },
-        { key: 'cvss', header: 'CVSS' },
-        { key: 'cveSeverity', header: 'Severity' },
-        { key: 'cisaKev', header: 'CISA KEV' },
-        { key: 'cweId', header: 'CWE' },
-        { key: 'cweName', header: 'CWE Name' },
-        { key: 'capecId', header: 'CAPEC' },
-        { key: 'capecName', header: 'CAPEC Name' },
-      ],
-      'redzone-kill-chain',
-    )
-  }, [filtered])
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() =>
+    rows.length > 0
+      ? {
+          rows: filtered,
+          sheetName: 'Kill-Chain',
+          fileSlug: 'redzone-kill-chain',
+          columns: [
+            { key: 'subdomain', header: 'Subdomain' },
+            { key: 'ipAddress', header: 'IP' },
+            { key: 'port', header: 'Port' },
+            { key: 'protocol', header: 'Proto' },
+            { key: 'serviceName', header: 'Service' },
+            { key: 'serviceProduct', header: 'Product' },
+            { key: 'serviceVersion', header: 'SvcVer' },
+            { key: 'techName', header: 'Technology' },
+            { key: 'techVersion', header: 'TechVer' },
+            { key: 'cveId', header: 'CVE' },
+            { key: 'cvss', header: 'CVSS' },
+            { key: 'cveSeverity', header: 'Severity' },
+            { key: 'cisaKev', header: 'CISA KEV' },
+            { key: 'cweId', header: 'CWE' },
+            { key: 'cweName', header: 'CWE Name' },
+            { key: 'capecId', header: 'CAPEC' },
+            { key: 'capecName', header: 'CAPEC Name' },
+          ],
+        }
+      : undefined,
+    [filtered, rows.length],
+  )
 
   const kevCount = (data?.meta?.kevCount as number | undefined) ?? 0
   const meta = rows.length ? `${kevCount} KEV match${kevCount === 1 ? '' : 'es'}` : undefined
@@ -86,7 +93,7 @@ export const KillChainTable = memo(function KillChainTable({ projectId }: Props)
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search subdomain, CVE, tech, CWE..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}
@@ -113,8 +120,8 @@ export const KillChainTable = memo(function KillChainTable({ projectId }: Props)
         <tbody>
           {sliced.map((r, i) => (
             <tr key={`${r.subdomain}-${r.port}-${r.cveId}-${i}`}>
-              <td><Truncated text={r.subdomain} max={180} /></td>
-              <td><Mono>{r.ipAddress || '-'}</Mono></td>
+              <td>{r.subdomain ? <HostCell host={r.subdomain} /> : <Truncated text={r.subdomain} max={180} />}</td>
+              <td>{r.ipAddress ? <IpCell ip={r.ipAddress} port={r.port ?? undefined} /> : <Mono>-</Mono>}</td>
               <td>
                 {r.port != null ? <Mono>{r.port}/{r.protocol || 'tcp'}</Mono> : '-'}
               </td>
@@ -130,12 +137,26 @@ export const KillChainTable = memo(function KillChainTable({ projectId }: Props)
                   max={160}
                 />
               </td>
-              <td><Mono>{r.cveId || '-'}</Mono></td>
+              <td><Mono>{r.cveId ? <ExternalLink href={cveToUrl(r.cveId)}>{r.cveId}</ExternalLink> : '-'}</Mono></td>
               <td><CvssCell score={r.cvss} /></td>
               <td><SeverityBadge severity={normalizeSeverity(r.cveSeverity)} /></td>
               <td><KevChip value={r.cisaKev} /></td>
-              <td><Truncated text={r.cweId ? `${r.cweId}${r.cweName ? ' ' + r.cweName : ''}` : null} max={180} /></td>
-              <td><Truncated text={r.capecId ? `${r.capecId}${r.capecName ? ' ' + r.capecName : ''}` : null} max={180} /></td>
+              <td>
+                {r.cweId ? (
+                  <span className={rowStyles.truncate} style={{ maxWidth: 180 }} title={r.cweName || r.cweId}>
+                    <ExternalLink href={cweToUrl(r.cweId)}>{r.cweId}</ExternalLink>
+                    {r.cweName ? ` ${r.cweName}` : ''}
+                  </span>
+                ) : <span className={rowStyles.nullCell}>-</span>}
+              </td>
+              <td>
+                {r.capecId ? (
+                  <span className={rowStyles.truncate} style={{ maxWidth: 180 }} title={r.capecName || r.capecId}>
+                    <ExternalLink href={capecToUrl(r.capecId)}>{r.capecId}</ExternalLink>
+                    {r.capecName ? ` ${r.capecName}` : ''}
+                  </span>
+                ) : <span className={rowStyles.nullCell}>-</span>}
+              </td>
             </tr>
           ))}
         </tbody>

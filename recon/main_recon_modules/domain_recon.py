@@ -709,7 +709,40 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
     if bruteforce:
         print(f"[⚡] BRUTEFORCE MODE")
     print(f"{'=' * 50}\n")
-    
+
+    if settings:
+        from recon.helpers import print_effective_settings
+        print_effective_settings(
+            "Discovery",
+            settings,
+            keys=[
+                ("CRTSH_ENABLED", "crt.sh"),
+                ("CRTSH_MAX_RESULTS", "crt.sh"),
+                ("HACKERTARGET_ENABLED", "HackerTarget"),
+                ("HACKERTARGET_MAX_RESULTS", "HackerTarget"),
+                ("KNOCKPY_RECON_ENABLED", "Knockpy"),
+                ("KNOCKPY_RECON_MAX_RESULTS", "Knockpy"),
+                ("SUBFINDER_ENABLED", "Subfinder"),
+                ("SUBFINDER_DOCKER_IMAGE", "Subfinder"),
+                ("SUBFINDER_MAX_RESULTS", "Subfinder"),
+                ("AMASS_ENABLED", "Amass"),
+                ("AMASS_ACTIVE", "Amass"),
+                ("AMASS_BRUTE", "Amass"),
+                ("AMASS_TIMEOUT", "Amass"),
+                ("AMASS_BRUTE_WORDLISTS", "Amass"),
+                ("AMASS_DOCKER_IMAGE", "Amass"),
+                ("AMASS_MAX_RESULTS", "Amass"),
+                ("PUREDNS_ENABLED", "Puredns wildcard filter"),
+                ("PUREDNS_DOCKER_IMAGE", "Puredns wildcard filter"),
+                ("PUREDNS_THREADS", "Puredns wildcard filter"),
+                ("PUREDNS_RATE_LIMIT", "Puredns wildcard filter"),
+                ("PUREDNS_WILDCARD_BATCH", "Puredns wildcard filter"),
+                ("PUREDNS_SKIP_VALIDATION", "Puredns wildcard filter"),
+                ("DNS_MAX_WORKERS", "DNS resolution"),
+                ("DNS_RECORD_PARALLELISM", "DNS resolution"),
+            ],
+        )
+
     # Setup
     pc_prefix = get_proxychains_prefix(anonymous)
 

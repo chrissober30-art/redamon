@@ -6,6 +6,7 @@ export const API_KEY_INFO: Record<string, { field: string; label: string; hint: 
   google_dork: { field: 'serpApiKey', label: 'SerpAPI', hint: 'Enables google_dork tool for Google dorking OSINT (site:, inurl:, filetype:)', url: 'https://serpapi.com/manage-api-key' },
   execute_wpscan: { field: 'wpscanApiToken', label: 'WPScan', hint: 'Enriches execute_wpscan results with vulnerability data from the WPScan database (free: 25 req/day)', url: 'https://wpscan.com/register' },
   execute_gau: { field: 'urlscanApiKey', label: 'URLScan', hint: 'Enriches execute_gau results with URLScan archived data (free tier available)', url: 'https://urlscan.io/user/signup' },
+  cve_intel: { field: 'pdcpApiKey', label: 'PDCP', hint: 'Optional. Lifts the 10 req/min anonymous rate limit on the ProjectDiscovery CVE database (vulnx).', url: 'https://cloud.projectdiscovery.io' },
 }
 
 export function useApiKeyModal(userId: string) {
@@ -27,6 +28,7 @@ export function useApiKeyModal(userId: string) {
         if (!settings.serpApiKey) missing.add('google_dork')
         if (!settings.wpscanApiToken) missing.add('execute_wpscan')
         if (!settings.urlscanApiKey) missing.add('execute_gau')
+        if (!settings.pdcpApiKey) missing.add('cve_intel')
         setMissingApiKeys(missing)
       })
       .catch(() => {})

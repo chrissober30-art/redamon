@@ -13,8 +13,15 @@ import socket
 import ssl
 import requests
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 import concurrent.futures
+
+from recon.helpers.cdn_ranges import (
+    collect_asn_cdn_ips,
+    collect_prefix_cdn_ips,
+    collect_reliable_edge_ips,
+    response_is_cdn_edge,
+)
 
 # Suppress SSL warnings for security testing
 import urllib3
@@ -103,7 +110,165 @@ def _analyze_redirect_chain(ip: str, scheme: str, timeout: int = 10) -> Dict:
     return result
 
 
-def check_direct_ip_http(ip: str, timeout: int = 10) -> Optional[Dict]:
+# Headers that, when present on a hostname response but absent on the
+# direct-IP response, indicate a real WAF/CDN front layer being bypassed.
+_WAF_CDN_HEADER_NAMES = (
+    "cf-ray", "cf-cache-status", "x-amz-cf-id", "x-served-by",
+    "x-akamai-staging", "x-akamai-transformed", "x-cache", "x-cdn",
+    "x-fastly-request-id", "x-azure-ref", "x-azure-fdid",
+)
+_WAF_CDN_SERVER_TOKENS = (
+    "cloudflare", "cloudfront", "akamai", "fastly", "varnish",
+    "imperva", "sucuri", "stackpath",
+)
+
+
+# Per-scan AI classifier context. Initialized once at the top of
+# run_security_checks() and consumed by _has_cdn_markers() and
+# check_waf_bypass(). A module-level dict keeps the call signatures of
+# every check function unchanged while still letting the WAF-AI cascade
+# fall back deterministically when AI is off.
+_AI_CTX: Dict[str, Any] = {
+    "enabled": False,
+    "model": "",
+    "user_id": "",
+    "project_id": "",
+    "cache": None,  # populated when enabled
+}
+
+# Confidence thresholds used by the cascade. >=70 on the hostname response
+# means "AI is confident this is a WAF". <30 on the IP response means "AI
+# is confident the origin has no WAF" (so a real bypass is plausible).
+_AI_WAF_PRESENT_THRESHOLD = 70
+_AI_WAF_ABSENT_THRESHOLD = 30
+
+
+def _set_ai_ctx(enabled: bool, model: str, user_id: str, project_id: str) -> None:
+    """Initialize the per-scan AI classifier context. Called from
+    run_security_checks() based on the WAF_AI_CLASSIFIER setting."""
+    _AI_CTX["enabled"] = bool(enabled and model)
+    _AI_CTX["model"] = model or ""
+    _AI_CTX["user_id"] = user_id or ""
+    _AI_CTX["project_id"] = project_id or ""
+    _AI_CTX["cache"] = {} if _AI_CTX["enabled"] else None
+
+
+def _classify_waf_ai(response, response_time_ms: int = 0) -> Optional[Dict]:
+    """Lazy wrapper around the AI classifier. Returns None if AI is not
+    enabled, the response is None, or the classifier returns its safe
+    fallback (so callers can keep the static behavior)."""
+    if not _AI_CTX["enabled"] or response is None:
+        return None
+    try:
+        from recon.helpers.ai_planner.waf_classifier import classify_waf, SAFE_FALLBACK
+    except Exception as exc:
+        print(f"[!][WAF-AI] Cannot import waf_classifier: {exc}")
+        return None
+    result = classify_waf(
+        response,
+        model=_AI_CTX["model"],
+        cache=_AI_CTX["cache"],
+        user_id=_AI_CTX["user_id"],
+        project_id=_AI_CTX["project_id"],
+        response_time_ms=response_time_ms,
+    )
+    if result.get("source") == "ai_unavailable":
+        return None
+    return result
+
+
+def _has_cdn_markers(response) -> bool:
+    """True if *response* carries any header / Server token that indicates
+    it came through a CDN or WAF front layer.
+
+    When the WAF AI classifier is enabled (per-scan via _set_ai_ctx), a
+    static-negative response gets a second pass through the LLM. Confidence
+    >= _AI_WAF_PRESENT_THRESHOLD flips the verdict to True so the
+    bare-origin comparison in _is_bare_origin_match correctly recognises a
+    rebranded/header-stripped WAF."""
+    if response is None:
+        return False
+    headers_lower = {k.lower(): v for k, v in (response.headers or {}).items()}
+    if any(h in headers_lower for h in _WAF_CDN_HEADER_NAMES):
+        return True
+    server = headers_lower.get("server", "").lower()
+    if any(tok in server for tok in _WAF_CDN_SERVER_TOKENS):
+        return True
+
+    ai_result = _classify_waf_ai(response)
+    if ai_result and ai_result.get("waf_detected") and ai_result.get("confidence", 0) >= _AI_WAF_PRESENT_THRESHOLD:
+        return True
+    return False
+
+
+def _is_bare_origin_match(ip: str, hostnames: List[str], scheme: str, timeout: int) -> bool:
+    """
+    Probe both the IP directly and each candidate hostname, then decide
+    whether the IP is simply the bare origin (architecture, not a vuln).
+
+    Returns True iff at least one hostname response matches the IP response
+    closely enough to conclude there is no protection layer in between
+    (same status, same Server header, similar content size, neither carries
+    CDN/WAF markers). Reasoning: if hitting the hostname goes through nothing
+    that hitting the IP does not also go through, there is nothing being
+    bypassed — the IP just IS the public endpoint (e.g. bare AWS ALB).
+
+    Returns False if any hostname response carries CDN/WAF markers absent
+    from the IP response (real bypass — caller should still emit), if all
+    hostname probes fail (cannot decide), or if responses diverge enough
+    that bare-origin equivalence cannot be claimed.
+    """
+    try:
+        ip_resp = requests.get(
+            f"{scheme}://{ip}",
+            timeout=timeout,
+            allow_redirects=False,
+            verify=False,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"},
+        )
+    except requests.exceptions.RequestException:
+        return False
+
+    ip_server = (ip_resp.headers.get("Server") or "").strip().lower()
+    ip_status = ip_resp.status_code
+    ip_len = len(ip_resp.content or b"")
+    ip_has_cdn = _has_cdn_markers(ip_resp)
+
+    for hostname in hostnames:
+        try:
+            host_resp = requests.get(
+                f"{scheme}://{hostname}",
+                timeout=timeout,
+                allow_redirects=False,
+                verify=False,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"},
+            )
+        except requests.exceptions.RequestException:
+            continue
+
+        host_has_cdn = _has_cdn_markers(host_resp)
+        # Real bypass: hostname goes through CDN/WAF but IP does not.
+        # Don't suppress — caller must emit.
+        if host_has_cdn and not ip_has_cdn:
+            return False
+
+        host_server = (host_resp.headers.get("Server") or "").strip().lower()
+        host_status = host_resp.status_code
+        host_len = len(host_resp.content or b"")
+
+        same_status = ip_status == host_status
+        same_server = ip_server == host_server
+        size_delta = abs(ip_len - host_len)
+        similar_size = size_delta < 500 or size_delta < max(host_len, ip_len, 1) * 0.1
+        no_cdn_either = not ip_has_cdn and not host_has_cdn
+
+        if same_status and same_server and similar_size and no_cdn_either:
+            return True
+
+    return False
+
+
+def check_direct_ip_http(ip: str, hostnames: Optional[List[str]] = None, timeout: int = 10) -> Optional[Dict]:
     """
     Check if HTTP is accessible directly via IP without TLS.
     This can indicate WAF bypass opportunities or exposed services.
@@ -129,6 +294,17 @@ def check_direct_ip_http(ip: str, timeout: int = 10) -> Optional[Dict]:
         )
 
         if response.status_code < 500:
+            cdn_match = response_is_cdn_edge(response)
+            if cdn_match:
+                return None
+
+            # Bare-origin / architecture suppression (case 7).
+            # If hostname response matches IP response closely with no CDN
+            # markers either side, the IP IS the public endpoint and there
+            # is no protection layer being bypassed -> not a vuln.
+            if hostnames and _is_bare_origin_match(ip, hostnames, "http", timeout):
+                return None
+
             # Analyze redirect behavior
             redirect_info = _analyze_redirect_chain(ip, "http", timeout)
             
@@ -184,17 +360,19 @@ def check_direct_ip_http(ip: str, timeout: int = 10) -> Optional[Dict]:
     return None
 
 
-def check_direct_ip_https(ip: str, timeout: int = 10) -> Optional[Dict]:
+def check_direct_ip_https(ip: str, hostnames: Optional[List[str]] = None, timeout: int = 10) -> Optional[Dict]:
     """
     Check if HTTPS is accessible directly via IP.
     Less severe than HTTP but still indicates direct IP exposure.
-    
+
     Intelligently handles redirects:
     - If IP redirects to a hostname: Info severity (mitigated)
     - If IP serves content or redirects to same IP: Low severity
 
     Args:
         ip: IP address to check
+        hostnames: Hostnames that resolve to this IP (used for the
+                   bare-origin / architecture suppression test).
         timeout: Request timeout in seconds
 
     Returns:
@@ -211,6 +389,15 @@ def check_direct_ip_https(ip: str, timeout: int = 10) -> Optional[Dict]:
         )
 
         if response.status_code < 500:
+            cdn_match = response_is_cdn_edge(response)
+            if cdn_match:
+                return None
+
+            # Bare-origin / architecture suppression (case 7) — see
+            # check_direct_ip_http for the full rationale.
+            if hostnames and _is_bare_origin_match(ip, hostnames, "https", timeout):
+                return None
+
             # Analyze redirect behavior
             redirect_info = _analyze_redirect_chain(ip, "https", timeout)
             
@@ -305,6 +492,9 @@ def check_ip_api_exposed(ip: str, timeout: int = 10) -> Optional[Dict]:
             content_type = response.headers.get("Content-Type", "")
             is_json = "application/json" in content_type or "text/json" in content_type
 
+            if response_is_cdn_edge(response):
+                continue
+
             # 200 OK with JSON or 401/403 (auth required) indicates API presence
             if response.status_code in [200, 401, 403] and (is_json or response.status_code in [401, 403]):
                 return {
@@ -375,14 +565,41 @@ def check_waf_bypass(
         waf_indicators = ["cloudflare", "akamai", "cloudfront", "fastly", "imperva", "sucuri"]
         subdomain_has_waf = any(waf in subdomain_server for waf in waf_indicators)
         ip_has_waf = any(waf in ip_server for waf in waf_indicators)
+        detection_method = "static_headers"
+        ai_subdomain: Optional[Dict] = None
+        ai_ip: Optional[Dict] = None
+
+        # AI cascade: when the static Server-token check missed a WAF on the
+        # hostname, ask the classifier. A high-confidence "WAF on hostname"
+        # paired with a low-confidence "no WAF on IP" is a real bypass.
+        if not subdomain_has_waf:
+            ai_subdomain = _classify_waf_ai(subdomain_response)
+            if ai_subdomain and ai_subdomain.get("waf_detected") and ai_subdomain.get("confidence", 0) >= _AI_WAF_PRESENT_THRESHOLD:
+                subdomain_has_waf = True
+                detection_method = "ai_classifier"
+                if not ai_ip:
+                    ai_ip = _classify_waf_ai(ip_response)
+                if ai_ip and (ai_ip.get("waf_detected") and ai_ip.get("confidence", 0) >= _AI_WAF_PRESENT_THRESHOLD):
+                    # AI sees a WAF on the IP too, so treat the origin as also
+                    # protected -- not a bypass.
+                    ip_has_waf = True
 
         # WAF bypass: subdomain has WAF but IP doesn't, and IP returns valid response
         if subdomain_has_waf and not ip_has_waf and ip_response.status_code < 500:
-            return {
+            waf_label = (
+                ai_subdomain.get("waf_type") if (detection_method == "ai_classifier" and ai_subdomain)
+                else (subdomain_server or "unknown")
+            )
+            evidence = (
+                f"AI classifier flagged subdomain as {waf_label} (confidence={ai_subdomain.get('confidence')}); IP response did not match WAF fingerprint"
+                if detection_method == "ai_classifier" and ai_subdomain
+                else f"WAF detected on subdomain ({subdomain_server}) but not on IP"
+            )
+            finding = {
                 "type": "waf_bypass",
                 "severity": "high",
                 "name": "WAF Bypass via Direct IP Access",
-                "description": f"The subdomain {subdomain} is protected by WAF ({subdomain_server}), "
+                "description": f"The subdomain {subdomain} is protected by WAF ({waf_label}), "
                               f"but the origin server at {ip} is directly accessible. "
                               "This allows bypassing WAF protections.",
                 "url": ip_url,
@@ -390,8 +607,14 @@ def check_waf_bypass(
                 "subdomain": subdomain,
                 "subdomain_server": subdomain_server,
                 "ip_server": ip_server,
-                "evidence": f"WAF detected on subdomain ({subdomain_server}) but not on IP",
+                "evidence": evidence,
+                "detection_method": detection_method,
             }
+            if detection_method == "ai_classifier" and ai_subdomain:
+                finding["waf_type"] = ai_subdomain.get("waf_type")
+                finding["waf_confidence"] = ai_subdomain.get("confidence")
+                finding["ai_reasoning"] = ai_subdomain.get("reasoning")
+            return finding
 
         # Also check if IP returns content without Host header (direct origin exposure)
         if not subdomain_has_waf and ip_response.status_code == 200:
@@ -419,7 +642,8 @@ def run_direct_ip_checks(
     subdomains_to_ips: Dict[str, List[str]],
     enabled_checks: Dict[str, bool],
     timeout: int = 10,
-    max_workers: int = 10
+    max_workers: int = 10,
+    cdn_ips: Optional[Set[str]] = None,
 ) -> List[Dict]:
     """
     Run all enabled direct IP access security checks.
@@ -430,22 +654,40 @@ def run_direct_ip_checks(
         enabled_checks: Dict of check_name -> enabled (bool)
         timeout: Request timeout in seconds
         max_workers: Maximum concurrent workers
+        cdn_ips: IPs already classified as CDN/edge, excluded from probing
+                 (cases 1, 2, 3 prefilter)
 
     Returns:
         List of vulnerability findings
     """
     findings = []
+    cdn_ips = cdn_ips or set()
+
+    if cdn_ips:
+        before = len(ips)
+        ips = [ip for ip in ips if ip not in cdn_ips]
+        skipped = before - len(ips)
+        if skipped:
+            print(f"[*][SecurityCheck] Skipping {skipped} CDN/edge IP(s) from Direct IP checks")
+
+    # Build IP -> [hostnames] mapping for the bare-origin comparison test
+    # inside check_direct_ip_*.
+    ip_to_hostnames: Dict[str, List[str]] = {}
+    for host, host_ips in (subdomains_to_ips or {}).items():
+        for ip in host_ips or []:
+            ip_to_hostnames.setdefault(ip, []).append(host)
 
     def check_single_ip(ip: str) -> List[Dict]:
         ip_findings = []
+        hostnames = ip_to_hostnames.get(ip) or None
 
         if enabled_checks.get("direct_ip_http", True):
-            result = check_direct_ip_http(ip, timeout)
+            result = check_direct_ip_http(ip, hostnames=hostnames, timeout=timeout)
             if result:
                 ip_findings.append(result)
 
         if enabled_checks.get("direct_ip_https", True):
-            result = check_direct_ip_https(ip, timeout)
+            result = check_direct_ip_https(ip, hostnames=hostnames, timeout=timeout)
             if result:
                 ip_findings.append(result)
 
@@ -470,6 +712,8 @@ def run_direct_ip_checks(
     if enabled_checks.get("waf_bypass", True):
         for subdomain, subdomain_ips in subdomains_to_ips.items():
             for ip in subdomain_ips:
+                if ip in cdn_ips:
+                    continue
                 result = check_waf_bypass(subdomain, ip, timeout)
                 if result:
                     findings.append(result)
@@ -2015,7 +2259,11 @@ def run_security_checks(
     enabled_checks: Dict[str, bool],
     timeout: int = 10,
     tls_expiry_days: int = 30,
-    max_workers: int = 10
+    max_workers: int = 10,
+    ai_classifier_enabled: bool = False,
+    ai_model: str = '',
+    ai_user_id: str = '',
+    ai_project_id: str = '',
 ) -> Dict[str, Any]:
     """
     Run all enabled security checks on recon data.
@@ -2026,10 +2274,19 @@ def run_security_checks(
         timeout: Request/connection timeout
         tls_expiry_days: Days before TLS expiry to warn
         max_workers: Maximum concurrent workers
+        ai_classifier_enabled: Enable LLM-based WAF classification cascade.
+            When True, _has_cdn_markers and check_waf_bypass fall back to the
+            agent's /llm/waf-classify endpoint on a static-negative match.
+        ai_model: LLM model id forwarded to the agent (e.g. 'claude-opus-4-6').
+        ai_user_id, ai_project_id: Forwarded for per-user provider key resolution.
 
     Returns:
         Dictionary with security check findings
     """
+    _set_ai_ctx(ai_classifier_enabled, ai_model, ai_user_id, ai_project_id)
+    if _AI_CTX["enabled"]:
+        print(f"[*][WAF-AI] Classifier cascade enabled, model={_AI_CTX['model']}")
+
     print("\n" + "=" * 70)
     print("[*][SecurityCheck] Custom Security Checks")
     print("=" * 70)
@@ -2107,13 +2364,31 @@ def run_security_checks(
 
     # Run direct IP access checks
     if enabled_ip > 0 and ips:
+        # Build the CDN/edge IP set used to prefilter findings.
+        # Case 1+2: IPs flagged is_cdn by Naabu/httpx with a RELIABLE edge
+        #           CDN name (cloudflare/cloudfront/akamai/...). Generic
+        #           cloud labels like "aws"/"azure" are excluded on purpose
+        #           because they mislabel bare ALB/EC2 origins that DO
+        #           serve the application directly.
+        # Case 3 layer 1: IPs inside published Cloudflare prefixes.
+        # Case 3 layer 2: IPs whose ASN matches a known CDN ASN.
+        cdn_ips: Set[str] = set()
+        try:
+            cdn_ips |= collect_reliable_edge_ips(recon_data)
+            cdn_ips |= collect_asn_cdn_ips(recon_data)
+            cdn_ips |= collect_prefix_cdn_ips(ips)
+        except Exception as exc:
+            print(f"[!][SecurityCheck] CDN prefilter failed, probing all IPs: {exc}")
+            cdn_ips = set()
+
         print(f"[*][SecurityCheck] Running Direct IP Access checks on {len(ips)} IPs...")
         ip_findings = run_direct_ip_checks(
             ips=list(ips),
             subdomains_to_ips=subdomains_to_ips,
             enabled_checks=enabled_checks,
             timeout=timeout,
-            max_workers=max_workers
+            max_workers=max_workers,
+            cdn_ips=cdn_ips,
         )
         all_findings.extend(ip_findings)
         print(f"[+][SecurityCheck] Found {len(ip_findings)} issues")

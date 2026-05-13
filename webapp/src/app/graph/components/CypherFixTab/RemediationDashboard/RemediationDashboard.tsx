@@ -1,7 +1,9 @@
 'use client'
 
-import { useMemo } from 'react'
+import { Fragment, useMemo } from 'react'
 import { RefreshCw, Scan, Trash2, XCircle, ChevronRight } from 'lucide-react'
+import { ExternalLink } from '@/components/ui'
+import { cveToUrl } from '@/lib/url-utils'
 import { SeverityBadge } from './SeverityBadge'
 import { StatusBadge } from './StatusBadge'
 import { RemediationTypeIcon } from './RemediationTypeIcon'
@@ -154,8 +156,13 @@ export function RemediationDashboard({
                   </td>
                   <td className={styles.tdCve}>
                     {rem.cveIds.length > 0 ? (
-                      <span className={styles.cveList}>
-                        {rem.cveIds.slice(0, 2).join(', ')}
+                      <span className={styles.cveList} onClick={e => e.stopPropagation()}>
+                        {rem.cveIds.slice(0, 2).map((cve, j) => (
+                          <Fragment key={cve}>
+                            {j > 0 && ', '}
+                            <ExternalLink href={cveToUrl(cve)}>{cve}</ExternalLink>
+                          </Fragment>
+                        ))}
                         {rem.cveIds.length > 2 && ` +${rem.cveIds.length - 2}`}
                       </span>
                     ) : (

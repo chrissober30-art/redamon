@@ -442,6 +442,7 @@ ${renderTrufflehog(data)}
 ${renderSecrets(data)}
 ${renderJsRecon(data)}
 ${renderGraphqlScan(data)}
+${renderVhostSni(data)}
 ${renderOtx(data)}
 ${renderAttackChains(data)}
 ${renderFireteams(data)}
@@ -503,6 +504,9 @@ function renderTOC(data: ReportData): string {
   }
   if (data.graphqlScan.endpointsTested > 0 || data.graphqlScan.totalFindings > 0) {
     dynamicSections.push({ id: 'graphql-scan', label: 'GraphQL Security' })
+  }
+  if (data.vhostSni.totalFindings > 0 || data.vhostSni.ipsTested > 0) {
+    dynamicSections.push({ id: 'vhost-sni', label: 'VHost & SNI Enumeration' })
   }
   if (data.otx.totalPulses > 0 || data.otx.totalMalware > 0) {
     dynamicSections.push({ id: 'otx', label: 'OTX Threat Intelligence' })
@@ -1267,6 +1271,78 @@ function renderGraphqlScan(data: ReportData): string {
     <tbody>${findingRows}</tbody>
   </table>
   ${gql.findings.length >= 50 ? '<p class="muted">Showing first 50 findings.</p>' : ''}` : ''}
+</div>`
+}
+
+function renderVhostSni(data: ReportData): string {
+  const vs = data.vhostSni
+  if (vs.totalFindings === 0 && vs.ipsTested === 0) return ''
+
+  const sevRows = vs.bySeverity.map(s => `
+    <tr><td>${sevBadge(s.severity)}</td><td>${s.count}</td></tr>`).join('')
+
+  const layerRows = vs.byLayer.map(l => `
+    <tr><td>${esc(l.layer)}</td><td>${l.count}</td></tr>`).join('')
+
+  const typeRows = vs.byType.map(t => `
+    <tr><td>${esc(t.findingType.replace(/_/g, ' '))}</td><td>${t.count}</td></tr>`).join('')
+
+  const findingRows = vs.findings.map(f => {
+    const internalBadge = f.internalPatternMatch
+      ? `<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(220,38,38,0.15);color:#dc2626;margin-left:4px">${esc(f.internalPatternMatch)}</span>`
+      : ''
+    const baseline = (f.baselineStatus != null && f.baselineSize != null)
+      ? `${f.baselineStatus} / ${f.baselineSize}b`
+      : '-'
+    const observed = (f.observedStatus != null && f.observedSize != null)
+      ? `${f.observedStatus} / ${f.observedSize}b`
+      : '-'
+    const target = `${esc(f.ip || '')}${f.port ? ':' + f.port : ''}`
+    return `
+    <tr>
+      <td style="font-family:monospace;font-size:11px">${esc(f.hostname)}${internalBadge}</td>
+      <td>${sevBadge(f.severity)}</td>
+      <td>${esc(f.layer)}</td>
+      <td>${esc(f.type.replace(/_/g, ' '))}</td>
+      <td style="font-family:monospace;font-size:11px">${target}</td>
+      <td style="font-family:monospace;font-size:10px;color:#6b7280">${baseline}</td>
+      <td style="font-family:monospace;font-size:10px;color:#dc2626">${observed}</td>
+    </tr>`
+  }).join('')
+
+  return `
+<div class="page-break"></div>
+<div class="section" id="vhost-sni">
+  <h2 class="section-title">VHost &amp; SNI Enumeration</h2>
+  <p style="margin-bottom:12px">Probed <strong>${vs.ipsTested}</strong> IP(s) for hidden virtual hosts. Found <strong>${vs.totalFindings}</strong> anomalies (${vs.anomaliesL7} via HTTP Host header, ${vs.anomaliesL4} via TLS SNI). <strong>${vs.reverseProxiesDetected}</strong> IP(s) flagged as reverse proxies / ingress controllers.</p>
+  ${vs.totalFindings > 0 ? `
+  <div class="two-col">
+    <div>
+      <h3>By Severity</h3>
+      <table class="data-table">
+        <thead><tr><th>Severity</th><th>Count</th></tr></thead>
+        <tbody>${sevRows}</tbody>
+      </table>
+    </div>
+    <div>
+      <h3>By Layer</h3>
+      <table class="data-table">
+        <thead><tr><th>Layer</th><th>Count</th></tr></thead>
+        <tbody>${layerRows}</tbody>
+      </table>
+    </div>
+  </div>
+  <h3>By Finding Type</h3>
+  <table class="data-table">
+    <thead><tr><th>Type</th><th>Count</th></tr></thead>
+    <tbody>${typeRows}</tbody>
+  </table>
+  <h3>Findings Detail</h3>
+  <table class="data-table">
+    <thead><tr><th>Hidden Hostname</th><th>Severity</th><th>Layer</th><th>Type</th><th>IP:Port</th><th>Baseline</th><th>Observed</th></tr></thead>
+    <tbody>${findingRows}</tbody>
+  </table>
+  ${vs.findings.length >= 50 ? '<p class="muted">Showing first 50 findings.</p>' : ''}` : '<p class="muted">No anomalies — all candidates returned the same response as the bare IP baseline.</p>'}
 </div>`
 }
 

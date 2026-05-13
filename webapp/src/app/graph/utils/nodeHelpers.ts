@@ -1,4 +1,5 @@
 import { GraphNode, GlowLevel } from '../types'
+import { isHttpUrl } from '@/lib/url-utils'
 import {
   NODE_COLORS,
   SEVERITY_COLORS_VULN,
@@ -9,6 +10,43 @@ import {
   GOAL_FINDING_COLORS,
   CLUSTER_SIZE,
 } from '../config'
+
+const HOSTNAME_NODE_TYPES = new Set([
+  'Domain',
+  'Subdomain',
+  'Host',
+  'Hostname',
+])
+
+const IP_NODE_TYPES = new Set(['IP', 'IPAddress', 'IpAddress'])
+
+/**
+ * Build a browser-openable URL from a node type + name pair, or null if it
+ * isn't web-addressable. https for hostnames, http for IPs, pass-through if
+ * the name already includes a scheme.
+ */
+export const getUrlForTypeName = (type: string, name: string | null | undefined): string | null => {
+  const trimmed = (name || '').trim()
+  if (!trimmed) return null
+  if (isHttpUrl(trimmed)) return trimmed
+  if (HOSTNAME_NODE_TYPES.has(type)) return `https://${trimmed}`
+  if (IP_NODE_TYPES.has(type)) return `http://${trimmed}`
+  return null
+}
+
+/**
+ * Build a browser-openable URL for a node, or null if it's not web-addressable.
+ * Prefers an explicit `url`/`endpoint`/`href` property, then derives one from
+ * the node type + name.
+ */
+export const getNodeUrl = (node: GraphNode): string | null => {
+  const props = node.properties || {}
+  const candidates = [props.url, props.endpoint, props.href]
+  for (const c of candidates) {
+    if (isHttpUrl(c)) return c
+  }
+  return getUrlForTypeName(node.type, node.name)
+}
 
 /**
  * Get the severity level from a node's properties

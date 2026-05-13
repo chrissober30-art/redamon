@@ -253,6 +253,16 @@ Pentesters running a final comprehensive sweep on a target they have full author
     arjunChunkSize: 1000,
     arjunPassive: false,
 
+    // --- VHost & SNI: everything maxed ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+    vhostSniConcurrency: 40,
+    vhostSniMaxCandidatesPerIp: 5000,
+
     // --- Nuclei: everything maxed ---
     nucleiEnabled: true,
     nucleiSeverity: ['critical', 'high', 'medium', 'low'],

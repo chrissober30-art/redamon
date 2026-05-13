@@ -1,9 +1,9 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
 import {
   Mono,
   Truncated,
@@ -39,24 +39,27 @@ export const BlastRadiusTable = memo(function BlastRadiusTable({ projectId }: Pr
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
-    exportRedZoneXlsx(
-      filtered,
-      'Blast-Radius',
-      [
-        { key: 'techName', header: 'Technology' },
-        { key: 'techVersion', header: 'Version' },
-        { key: 'cveCount', header: 'CVE Count' },
-        { key: 'maxCvss', header: 'Max CVSS' },
-        { key: 'kevCount', header: 'KEV Count' },
-        { key: 'baseUrlCount', header: 'BaseURLs' },
-        { key: 'ipCount', header: 'IPs' },
-        { key: 'severities', header: 'Severities' },
-        { key: 'topCveIds', header: 'Top CVE IDs' },
-      ],
-      'redzone-blast-radius',
-    )
-  }, [filtered])
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() =>
+    rows.length > 0
+      ? {
+          rows: filtered,
+          sheetName: 'Blast-Radius',
+          fileSlug: 'redzone-blast-radius',
+          columns: [
+            { key: 'techName', header: 'Technology' },
+            { key: 'techVersion', header: 'Version' },
+            { key: 'cveCount', header: 'CVE Count' },
+            { key: 'maxCvss', header: 'Max CVSS' },
+            { key: 'kevCount', header: 'KEV Count' },
+            { key: 'baseUrlCount', header: 'BaseURLs' },
+            { key: 'ipCount', header: 'IPs' },
+            { key: 'severities', header: 'Severities' },
+            { key: 'topCveIds', header: 'Top CVE IDs' },
+          ],
+        }
+      : undefined,
+    [filtered, rows.length],
+  )
 
   return (
     <RedZoneTableShell
@@ -65,7 +68,7 @@ export const BlastRadiusTable = memo(function BlastRadiusTable({ projectId }: Pr
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search tech name, CVE, version..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}

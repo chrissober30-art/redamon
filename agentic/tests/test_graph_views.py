@@ -158,6 +158,48 @@ class TestTenantFilterInjection(unittest.TestCase):
         self.assertIn("number: 443", result)
 
 
+class TestCypherResponseHandling(unittest.TestCase):
+    """Test Cypher extraction and read-only validation."""
+
+    def test_extracts_cypher_after_think_block(self):
+        raw = """<think>
+I should list IP nodes.
+</think>
+
+MATCH (i:IP) RETURN i.address LIMIT 100"""
+        result = Neo4jToolManager._extract_cypher_from_response(raw)
+        self.assertEqual(result, "MATCH (i:IP) RETURN i.address LIMIT 100")
+
+    def test_extracts_cypher_from_fenced_block(self):
+        raw = """Here is the query:
+```cypher
+MATCH (d:Domain) RETURN d LIMIT 25
+```"""
+        result = Neo4jToolManager._extract_cypher_from_response(raw)
+        self.assertEqual(result, "MATCH (d:Domain) RETURN d LIMIT 25")
+
+    def test_allows_read_only_call(self):
+        cypher = "CALL db.labels() YIELD label RETURN label LIMIT 50"
+        self.assertIsNone(Neo4jToolManager._find_disallowed_write_operation(cypher))
+
+    def test_blocks_write_clause(self):
+        cypher = "MATCH (i:IP) SET i.reviewed = true RETURN i"
+        self.assertEqual(Neo4jToolManager._find_disallowed_write_operation(cypher), "SET")
+
+    def test_blocks_write_procedure(self):
+        cypher = "CALL apoc.create.node(['IP'], {address: '127.0.0.1'}) YIELD node RETURN node"
+        self.assertEqual(Neo4jToolManager._find_disallowed_write_operation(cypher), "apoc.create")
+
+    def test_extracts_single_query_from_multiple_returns(self):
+        """Test that extraction handles (and fixes) invalid multiple RETURN syntax"""
+        raw = """MATCH (d:Domain {name: 'example.com'})
+RETURN d.name, d.registrar
+RETURN d.creation_date, d.expiration_date"""
+        # Should extract only up to first RETURN
+        result = Neo4jToolManager._extract_cypher_from_response(raw)
+        self.assertEqual(result, "MATCH (d:Domain {name: 'example.com'})\nRETURN d.name, d.registrar")
+
+
 class TestGenerateCypherViewScope(unittest.TestCase):
     """Test that _generate_cypher includes view scope in prompt."""
 

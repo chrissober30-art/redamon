@@ -73,11 +73,11 @@ sys.modules['langgraph.graph.message'].add_messages = _fake_add_messages
 
 
 # chat_persistence has a Prisma dependency — stub it so websocket_api imports.
-if 'chat_persistence' not in sys.modules:
+if 'orchestrator_helpers.chat_persistence' not in sys.modules:
     _cp = MagicMock()
     _cp.save_chat_message = AsyncMock()
     _cp.update_conversation = AsyncMock()
-    sys.modules['chat_persistence'] = _cp
+    sys.modules['orchestrator_helpers.chat_persistence'] = _cp
 
 
 from websocket_api import WebSocketManager, ToolStopMessage, MessageType

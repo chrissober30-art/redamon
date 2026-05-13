@@ -16,6 +16,8 @@ export const PRESET_EXCLUDED_FIELDS = new Set([
   'roeDocumentName',
   'roeDocumentMimeType',
   'jsReconUploadedFiles',
+  // Per-project custom wordlists (text content tied to the project, not reusable across targets)
+  'vhostSniCustomWordlist',
 ])
 
 /**

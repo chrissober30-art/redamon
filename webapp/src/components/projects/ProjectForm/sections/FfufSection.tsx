@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronDown, FolderSearch, Upload, X, Loader2, Play } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
+import { FileImportButton } from '../FileImportButton'
+import { AiToggleLabel } from '../AiToggleLabel'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -126,6 +128,7 @@ export function FfufSection({ data, updateField, projectId, mode, onRun }: FfufS
           <FolderSearch size={16} />
           FFuf Directory Fuzzer
           <NodeInfoTooltip section="Ffuf" />
+          <WikiInfoButton target="Ffuf" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>
@@ -198,10 +201,10 @@ export function FfufSection({ data, updateField, projectId, mode, onRun }: FfufS
                   <input
                     type="number"
                     className="textInput"
-                    value={data.ffufParallelism ?? 3}
-                    onChange={(e) => updateField('ffufParallelism', parseInt(e.target.value) || 3)}
+                    value={data.ffufParallelism ?? 20}
+                    onChange={(e) => updateField('ffufParallelism', parseInt(e.target.value) || 20)}
                     min={1}
-                    max={10}
+                    max={50}
                   />
                   <span className={styles.fieldHint}>Number of targets to fuzz in parallel</span>
                 </div>
@@ -225,7 +228,7 @@ export function FfufSection({ data, updateField, projectId, mode, onRun }: FfufS
                     type="number"
                     className="textInput"
                     value={data.ffufMaxTime}
-                    onChange={(e) => updateField('ffufMaxTime', parseInt(e.target.value) || 600)}
+                    onChange={(e) => updateField('ffufMaxTime', parseInt(e.target.value) || 1800)}
                     min={60}
                   />
                   <span className={styles.fieldHint}>Maximum total execution time per target</span>
@@ -377,22 +380,36 @@ export function FfufSection({ data, updateField, projectId, mode, onRun }: FfufS
               <div className={styles.fieldRow}>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Match Status Codes</label>
-                  <input
-                    type="text"
-                    className="textInput"
-                    value={(data.ffufMatchCodes ?? []).join(', ')}
-                    onChange={(e) => updateField('ffufMatchCodes', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <input
+                      type="text"
+                      className="textInput"
+                      value={(data.ffufMatchCodes ?? []).join(', ')}
+                      onChange={(e) => updateField('ffufMatchCodes', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
+                    />
+                    <FileImportButton
+                      fieldName="status codes"
+                      validator={(t) => /^\d+$/.test(t)}
+                      onImport={(values) => updateField('ffufMatchCodes', values.map(v => parseInt(v)).filter(n => !isNaN(n)))}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>Include these HTTP status codes (comma-separated)</span>
                 </div>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Filter Status Codes</label>
-                  <input
-                    type="text"
-                    className="textInput"
-                    value={(data.ffufFilterCodes ?? []).join(', ')}
-                    onChange={(e) => updateField('ffufFilterCodes', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <input
+                      type="text"
+                      className="textInput"
+                      value={(data.ffufFilterCodes ?? []).join(', ')}
+                      onChange={(e) => updateField('ffufFilterCodes', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
+                    />
+                    <FileImportButton
+                      fieldName="status codes"
+                      validator={(t) => /^\d+$/.test(t)}
+                      onImport={(values) => updateField('ffufFilterCodes', values.map(v => parseInt(v)).filter(n => !isNaN(n)))}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>Exclude these HTTP status codes (comma-separated)</span>
                 </div>
               </div>
@@ -411,14 +428,44 @@ export function FfufSection({ data, updateField, projectId, mode, onRun }: FfufS
                 </div>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Extensions</label>
-                  <input
-                    type="text"
-                    className="textInput"
-                    value={(data.ffufExtensions ?? []).join(', ')}
-                    onChange={(e) => updateField('ffufExtensions', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                    placeholder=".php, .bak, .env, .json"
-                  />
-                  <span className={styles.fieldHint}>File extensions to append to each word (comma-separated)</span>
+                  <div className={styles.toggleRow} style={{ marginBottom: 'var(--space-2)', alignItems: 'center' }}>
+                    <AiToggleLabel
+                      label="Use AI for Extensions"
+                      tooltip={
+                        'AI picks file extensions per target based on server response headers ' +
+                        '(Server, X-Powered-By, X-AspNet-Version). When on, the static list below ' +
+                        'is ignored. Same toggle as in the Target tab AI panel: flipping it here ' +
+                        'flips it there. A per-fingerprint cache means N hosts behind the same ' +
+                        'stack collapse to one LLM call. ' +
+                        (!data.aiInPipeline ? 'Enable "AI in Pipeline" in the Target tab to use this.' : '')
+                      }
+                    />
+                    <Toggle
+                      checked={data.ffufAiExtensions}
+                      disabled={!data.aiInPipeline}
+                      onChange={(checked) => updateField('ffufAiExtensions', checked)}
+                    />
+                  </div>
+                  <div className={styles.fileImportWrap}>
+                    <input
+                      type="text"
+                      className="textInput"
+                      value={(data.ffufExtensions ?? []).join(', ')}
+                      onChange={(e) => updateField('ffufExtensions', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                      placeholder=".php, .bak, .env, .json"
+                      disabled={data.ffufAiExtensions}
+                      style={data.ffufAiExtensions ? { opacity: 0.5 } : undefined}
+                    />
+                    <FileImportButton
+                      fieldName="extensions"
+                      onImport={(values) => updateField('ffufExtensions', values)}
+                    />
+                  </div>
+                  <span className={styles.fieldHint}>
+                    {data.ffufAiExtensions
+                      ? 'Extensions chosen by AI per target. Static list above is ignored.'
+                      : 'File extensions to append to each word (comma-separated)'}
+                  </span>
                 </div>
               </div>
 
@@ -483,13 +530,20 @@ export function FfufSection({ data, updateField, projectId, mode, onRun }: FfufS
                 <h3 className={styles.subSectionTitle}>Custom Headers</h3>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Request Headers</label>
-                  <textarea
-                    className="textarea"
-                    value={(data.ffufCustomHeaders ?? []).join('\n')}
-                    onChange={(e) => updateField('ffufCustomHeaders', e.target.value.split('\n').filter(Boolean))}
-                    placeholder="Cookie: session=abc123&#10;Authorization: Bearer token..."
-                    rows={3}
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <textarea
+                      className="textarea"
+                      value={(data.ffufCustomHeaders ?? []).join('\n')}
+                      onChange={(e) => updateField('ffufCustomHeaders', e.target.value.split('\n').filter(Boolean))}
+                      placeholder="Cookie: session=abc123&#10;Authorization: Bearer token..."
+                      rows={3}
+                    />
+                    <FileImportButton
+                      variant="textarea"
+                      fieldName="headers"
+                      onImport={(values) => updateField('ffufCustomHeaders', values)}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>One header per line. Sent with every request</span>
                 </div>
               </div>

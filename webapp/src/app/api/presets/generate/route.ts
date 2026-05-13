@@ -32,20 +32,47 @@ ${RECON_PARAMETER_CATALOG}
  * agentic/orchestrator_helpers/llm_setup.py:parse_model_provider()
  */
 function resolveProviderType(model: string): { providerType: string; modelId: string } {
-  if (model.startsWith('custom/')) {
-    return { providerType: 'openai_compatible', modelId: model.slice('custom/'.length) }
+  const prefixMap: Record<string, string> = {
+    'custom/': 'openai_compatible',
+    'openrouter/': 'openrouter',
+    'bedrock/': 'bedrock',
+    'deepseek/': 'deepseek',
+    'gemini/': 'gemini',
+    'glm/': 'glm',
+    'kimi/': 'kimi',
+    'qwen/': 'qwen',
+    'xai/': 'xai',
+    'mistral/': 'mistral',
   }
-  if (model.startsWith('openrouter/')) {
-    return { providerType: 'openrouter', modelId: model.slice('openrouter/'.length) }
-  }
-  if (model.startsWith('bedrock/')) {
-    return { providerType: 'bedrock', modelId: model.slice('bedrock/'.length) }
+  for (const [prefix, type] of Object.entries(prefixMap)) {
+    if (model.startsWith(prefix)) {
+      return { providerType: type, modelId: model.slice(prefix.length) }
+    }
   }
   if (model.startsWith('claude-')) {
     return { providerType: 'anthropic', modelId: model }
   }
   // Default: OpenAI
   return { providerType: 'openai', modelId: model }
+}
+
+/**
+ * Returns the OpenAI-compatible base URL for each provider type. Stays in sync
+ * with agentic/orchestrator_helpers/llm_setup.py setup_llm branches.
+ */
+function defaultBaseUrlFor(providerType: string): string {
+  switch (providerType) {
+    case 'openai': return 'https://api.openai.com/v1'
+    case 'openrouter': return 'https://openrouter.ai/api/v1'
+    case 'deepseek': return 'https://api.deepseek.com/v1'
+    case 'gemini': return 'https://generativelanguage.googleapis.com/v1beta/openai'
+    case 'glm': return 'https://open.bigmodel.cn/api/paas/v4'
+    case 'kimi': return 'https://api.moonshot.ai/v1'
+    case 'qwen': return 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+    case 'xai': return 'https://api.x.ai/v1'
+    case 'mistral': return 'https://api.mistral.ai/v1'
+    default: return 'https://api.openai.com/v1'
+  }
 }
 
 /**
@@ -183,6 +210,13 @@ export async function POST(request: NextRequest) {
         openai: 'OpenAI',
         openrouter: 'OpenRouter',
         openai_compatible: 'OpenAI-Compatible',
+        deepseek: 'DeepSeek',
+        gemini: 'Google Gemini',
+        glm: 'GLM (Zhipu AI)',
+        kimi: 'Kimi (Moonshot)',
+        qwen: 'Qwen (Alibaba)',
+        xai: 'xAI (Grok)',
+        mistral: 'Mistral AI',
       }
       return NextResponse.json(
         {
@@ -204,13 +238,10 @@ export async function POST(request: NextRequest) {
         provider.timeout,
       )
     } else {
-      // OpenAI, OpenRouter, OpenAI-compatible
-      let baseUrl = provider.baseUrl || 'https://api.openai.com/v1'
-      if (providerType === 'openrouter' && !provider.baseUrl) {
-        baseUrl = 'https://openrouter.ai/api/v1'
-      }
-      // Remove trailing slash
-      baseUrl = baseUrl.replace(/\/+$/, '')
+      // OpenAI-compatible: openai, openrouter, deepseek, gemini, glm, kimi,
+      // qwen, xai, mistral, and user-defined openai_compatible. Per-provider
+      // user override (provider.baseUrl) wins over the registry default.
+      const baseUrl = (provider.baseUrl || defaultBaseUrlFor(providerType)).replace(/\/+$/, '')
 
       const extraHeaders = (provider.defaultHeaders && typeof provider.defaultHeaders === 'object')
         ? provider.defaultHeaders as Record<string, string>

@@ -72,6 +72,9 @@ function makeThinking(overrides: Partial<ThinkingItem> = {}): ThinkingItem {
     id: nextId(),
     timestamp: new Date(),
     thought: 'Thinking...',
+    reasoning: '',
+    action: 'thinking',
+    updated_todo_list: [],
     ...overrides,
   }
 }
@@ -108,7 +111,10 @@ function makeDeepThink(overrides: Partial<DeepThinkItem> = {}): DeepThinkItem {
     type: 'deep_think',
     id: nextId(),
     timestamp: new Date(),
-    thought: 'Deep analysis...',
+    trigger_reason: 'periodic_review',
+    analysis: 'Deep analysis...',
+    iteration: 1,
+    phase: 'discovery',
     ...overrides,
   }
 }
@@ -117,6 +123,7 @@ function makeFileDownload(overrides: Partial<FileDownloadItem> = {}): FileDownlo
   return {
     type: 'file_download',
     id: nextId(),
+    timestamp: new Date(),
     filepath: '/tmp/report.md',
     filename: 'report.md',
     description: 'Report file',

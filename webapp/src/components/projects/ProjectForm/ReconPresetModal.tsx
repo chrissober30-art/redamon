@@ -6,7 +6,7 @@ import { icons } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { Modal } from '@/components/ui/Modal/Modal'
-import { useToast } from '@/components/ui'
+import { useToast, WikiInfoButton } from '@/components/ui'
 import { RECON_PRESETS, type ReconPreset } from '@/lib/recon-presets'
 import { GeneratePresetModal } from './GeneratePresetModal'
 import styles from './ReconPresetModal.module.css'
@@ -191,7 +191,10 @@ export function ReconPresetModal({
       {/* Drawer */}
       <div className={styles.drawer} onClick={(e) => e.stopPropagation()}>
         <div className={styles.drawerHeader}>
-          <h2 className={styles.drawerTitle}>Recon Presets</h2>
+          <h2 className={styles.drawerTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            Recon Presets
+            <WikiInfoButton target="ReconPreset" title="Open Recon Presets wiki page" />
+          </h2>
           <button
             type="button"
             className={styles.drawerClose}

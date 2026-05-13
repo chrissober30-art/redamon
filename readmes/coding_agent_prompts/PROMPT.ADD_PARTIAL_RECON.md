@@ -54,6 +54,7 @@ How to manage input fields from modal:
   - **Any other node type** (IP, URL, etc.) -> user must choose which existing node to attach to via a dropdown, OR select "Generic (UserInput)" for orphan provenance.
   - If attachment target doesn't exist at scan time, fall back to UserInput automatically.
 - **Mutual exclusion.** Only one partial recon OR full recon can run at a time per project. The orchestrator enforces this (409 Conflict).
+- **Honor the "Include Root Domain" scope toggle.** Every graph-builder call must pass `include_root_domain=_should_include_root_domain(settings)`. The graph builder gates the apex `Domain → IP` query, filters apex BaseURLs from Source 2, and stamps `metadata.include_root_domain` so `extract_targets_from_recon` excludes the apex hostname when scope says no. **Default is `False`** -- forgetting to pass it means the apex is excluded (safe default; mirrors `recon/main.py:parse_target`). See "Include Root Domain scope" below.
 - **Rebuild the recon image** after changing `recon/partial_recon.py`: `docker compose --profile tools build recon`
 
 ---
@@ -147,6 +148,42 @@ const nmapNoPorts = isNmap && !includeGraphTargets && !customPorts.trim()
 // Warning: "Nmap requires ports to scan. Provide custom ports below or enable graph targets."
 ```
 
+### Include Root Domain scope (apex toggle)
+
+The project's "Include Root Domain" setting (TargetSection UI) maps to whether `"."` is in `subdomainList`. Partial recon must honor this scope rule **exactly the same way the full pipeline does** (`recon/main.py:parse_target`). Without this, partial-recon writes apex BaseURL/Endpoint nodes that violate the user's stated scope.
+
+**The contract (single source of truth: `metadata.include_root_domain`):**
+- `_should_include_root_domain(settings)` returns True iff `SUBDOMAIN_LIST` contains `"."` (or any prefix that strips to empty). Mirrors `parse_target`.
+- The result flows into `_build_*_data_from_graph(..., include_root_domain=...)`.
+- The graph builder: (a) skips the apex `Domain → IP` query when False, (b) filters apex BaseURLs from `http_probe.by_url` (defends against stale apex BaseURLs from prior runs), (c) stamps `recon_data["metadata"]["include_root_domain"]`.
+- `extract_targets_from_recon` reads that metadata and skips `hostnames.add(domain)` when False.
+
+**Pattern to copy (graph-on branch):**
+```python
+recon_data = _build_http_probe_data_from_graph(
+    domain, user_id, project_id,
+    include_root_domain=_should_include_root_domain(settings),
+)
+```
+
+**Pattern for the graph-off `else` branch** (when `include_graph_targets=False`):
+```python
+recon_data = {
+    "domain": domain,
+    "dns": {
+        "domain": {"ips": {"ipv4": [], "ipv6": []}, "has_records": False},
+        "subdomains": {},
+    },
+    "http_probe": {"by_url": {}},
+    "metadata": {"include_root_domain": _should_include_root_domain(settings)},
+}
+```
+Always stamp the metadata flag, even when not querying the graph -- downstream consumers of `recon_data` rely on it.
+
+**Why the default is `False`:** the safer failure mode. Forgetting to pass `include_root_domain=` means the apex is excluded -- better to under-scan than to silently scan something the user toggled off. This also makes future graph-builder callers fail-safe.
+
+**Mirrors full pipeline:** the full pipeline already sets `combined_result["metadata"]["include_root_domain"]` in `recon/main.py:1032/1105`. Partial recon's metadata flag uses the same key so `extract_targets_from_recon` is the single point of enforcement for both pipelines.
+
 ### Naabu Example (Subdomain + IP textareas)
 
 See `PartialReconModal.tsx` -- search for `hasSubdomainInput` and `isPortScanner`:
@@ -170,12 +207,13 @@ The "Associate to" dropdown shows only graph subdomains (no custom subdomains si
 For other tool types, add a `run_<tool_name>(config)` function that:
 1. Calls `get_settings()` for project settings
 2. Reads `config["user_targets"]` for structured user input (keys depend on what the tool accepts)
-3. Builds `recon_data` from the graph via `_build_recon_data_from_graph()` or similar
-4. Injects user-provided targets into `recon_data`
-5. Calls the tool's scan function (same one used by the full pipeline)
-6. Normalizes results if needed (e.g. `masscan_scan` -> `port_scan`)
-7. Updates the graph via the appropriate `update_graph_from_*()` method
-8. Links user-provided inputs to graph nodes (RESOLVES_TO or UserInput PRODUCED)
+3. Builds `recon_data` from the graph via `_build_*_data_from_graph(..., include_root_domain=_should_include_root_domain(settings))` -- **always pass the apex flag** (see Critical Rules and "Include Root Domain scope")
+4. If you have an `else` branch for `include_graph_targets=False`, stamp `recon_data["metadata"]["include_root_domain"]` there too
+5. Injects user-provided targets into `recon_data`
+6. Calls the tool's scan function (same one used by the full pipeline)
+7. Normalizes results if needed (e.g. `masscan_scan` -> `port_scan`)
+8. Updates the graph via the appropriate `update_graph_from_*()` method
+9. Links user-provided inputs to graph nodes (RESOLVES_TO or UserInput PRODUCED)
 
 **Register in `main()`:**
 ```python
@@ -243,7 +281,26 @@ No changes needed:
 - Phase progress hidden for partial recon via `hidePhaseProgress`
 - Status shows `"Scanning: <phase>"` instead of `"Phase 1/1: <phase>"`
 
-### 9. Frontend: Section Header "Run partial recon" Button
+### 9. Frontend: Input/Output Logic Tooltip
+
+File: `webapp/src/components/projects/ProjectForm/WorkflowView/inputLogicTooltips.tsx`
+
+Every tool exposed via partial recon must have an entry in the `INPUT_LOGIC_TOOLTIPS` map. The tooltip is rendered automatically in two places:
+1. The project-form section header (merged under the existing graph-info icon).
+2. The partial recon modal, next to the "Input" label.
+
+**Each tooltip has two sections:**
+1. **"How input is generated"** — what graph nodes feed the scan, any priority/fallback chain, how custom user input from the modal merges in, and any bail conditions (when the scan refuses to start).
+2. **"How output transforms the graph"** — which nodes get created (real names: BaseURL, Endpoint, Vulnerability, etc.), which relationships (real names: HAS_ENDPOINT, RESOLVES_TO, etc.), and which existing nodes get enriched.
+
+**Rules:**
+- User-facing language only. Reference graph node and relationship names users see in the graph UI. **Never** mention internal Python/JS variable names, function names, file paths, JSON keys, or settings constants.
+- No em dashes (—).
+- Use the existing styled helpers (`sectionTitleStyle`, `paraStyle`, `codeStyle`, `listStyle`, `wrapperStyle`).
+- First section header is "How input is generated" (not "Final input").
+- Verify claims against the tool's `update_graph_from_*` mixin before writing the output section. If you claim a Vulnerability node is created, it must actually be created.
+
+### 10. Frontend: Section Header "Run partial recon" Button
 
 File: `webapp/src/components/projects/ProjectForm/sections/<ToolName>Section.tsx`
 
@@ -407,7 +464,8 @@ Reuse these -- do not reimplement:
 | `_is_ip_or_cidr(value)` | Validates IP or CIDR. |
 | `_is_valid_hostname(value)` | Validates hostname regex. |
 | `_resolve_hostname(hostname)` | DNS resolves via `socket.getaddrinfo()`. Returns `{"ipv4": [...], "ipv6": [...]}`. |
-| `_build_recon_data_from_graph(domain, user_id, project_id)` | Queries Neo4j, returns `recon_data` dict for `extract_targets_from_recon()`. |
+| `_build_recon_data_from_graph(domain, user_id, project_id, include_root_domain=False)` | Queries Neo4j, returns `recon_data` dict for `extract_targets_from_recon()`. **Always pass `include_root_domain`** -- see Critical Rules. |
+| `_should_include_root_domain(settings)` | Returns True iff `SUBDOMAIN_LIST` contains `"."` (or empty-stripped prefix). Mirrors `recon/main.py:parse_target`. Use this to derive the flag for graph-builder calls. |
 | `load_config()` | Loads JSON config from `PARTIAL_RECON_CONFIG` env var. |
 
 ---

@@ -220,6 +220,19 @@ def run_netlas_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     if not settings.get("NETLAS_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Netlas",
+        settings,
+        keys=[
+            ("NETLAS_ENABLED", "Toggle"),
+            ("NETLAS_MAX_RESULTS", "Limits"),
+            ("NETLAS_WORKERS", "Performance"),
+            ("NETLAS_API_KEY", "API credentials"),
+            ("NETLAS_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     key_rotator = settings.get("NETLAS_KEY_ROTATOR")
     api_key = _netlas_effective_key(settings, key_rotator)
     if not api_key:

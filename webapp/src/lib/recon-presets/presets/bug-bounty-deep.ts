@@ -212,6 +212,14 @@ Bug bounty hunters who have already triaged a target (perhaps with the Quick Win
     nucleiScanAllIps: false,
     nucleiInteractsh: true,
 
+    // --- VHost & SNI: hidden vhost discovery is bug-bounty staple ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+
     // --- Subdomain Takeover: all layers on (bug bounty gold) ---
     subdomainTakeoverEnabled: true,
     subjackEnabled: true,

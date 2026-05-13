@@ -1,14 +1,17 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
+import { ExternalLink } from '@/components/ui'
+import { githubSlugToUrl, isGithubSlug } from '@/lib/url-utils'
 import {
   SeverityBadge,
   Mono,
   Truncated,
   UrlCell,
+  HostCell,
   filterRowsByText,
 } from './formatters'
 import { normalizeSeverity } from './types'
@@ -60,30 +63,33 @@ export const SupplyChainTable = memo(function SupplyChainTable({ projectId }: Pr
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
-    exportRedZoneXlsx(
-      filtered,
-      'Supply-Chain',
-      [
-        { key: 'findingType', header: 'Type' },
-        { key: 'severity', header: 'Severity' },
-        { key: 'confidence', header: 'Confidence' },
-        { key: 'title', header: 'Title' },
-        { key: 'detail', header: 'Detail' },
-        { key: 'evidence', header: 'Evidence' },
-        { key: 'packageName', header: 'Package / Framework' },
-        { key: 'version', header: 'Version' },
-        { key: 'cloudProvider', header: 'Cloud Provider' },
-        { key: 'cloudAssetType', header: 'Cloud Asset Type' },
-        { key: 'sourceUrl', header: 'Source URL' },
-        { key: 'parentJsUrl', header: 'Parent JS File' },
-        { key: 'baseUrl', header: 'BaseURL' },
-        { key: 'subdomain', header: 'Subdomain' },
-        { key: 'discoveredAt', header: 'Discovered At' },
-      ],
-      'redzone-supply-chain',
-    )
-  }, [filtered])
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() =>
+    rows.length > 0
+      ? {
+          rows: filtered,
+          sheetName: 'Supply-Chain',
+          fileSlug: 'redzone-supply-chain',
+          columns: [
+            { key: 'findingType', header: 'Type' },
+            { key: 'severity', header: 'Severity' },
+            { key: 'confidence', header: 'Confidence' },
+            { key: 'title', header: 'Title' },
+            { key: 'detail', header: 'Detail' },
+            { key: 'evidence', header: 'Evidence' },
+            { key: 'packageName', header: 'Package / Framework' },
+            { key: 'version', header: 'Version' },
+            { key: 'cloudProvider', header: 'Cloud Provider' },
+            { key: 'cloudAssetType', header: 'Cloud Asset Type' },
+            { key: 'sourceUrl', header: 'Source URL' },
+            { key: 'parentJsUrl', header: 'Parent JS File' },
+            { key: 'baseUrl', header: 'BaseURL' },
+            { key: 'subdomain', header: 'Subdomain' },
+            { key: 'discoveredAt', header: 'Discovered At' },
+          ],
+        }
+      : undefined,
+    [filtered, rows.length],
+  )
 
   const m = data?.meta as any
   const meta = rows.length && m?.byType
@@ -97,7 +103,7 @@ export const SupplyChainTable = memo(function SupplyChainTable({ projectId }: Pr
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search package, framework, title, URL..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}
@@ -125,13 +131,18 @@ export const SupplyChainTable = memo(function SupplyChainTable({ projectId }: Pr
               <td><SeverityBadge severity={normalizeSeverity(r.severity)} /></td>
               <td><Truncated text={r.title} max={260} /></td>
               <td>
-                {r.packageName ? <Mono>{r.packageName}</Mono>
-                  : r.cloudProvider ? <Mono>{r.cloudProvider}{r.cloudAssetType ? ' · ' + r.cloudAssetType : ''}</Mono>
+                {r.packageName ? (
+                  <Mono>
+                    {isGithubSlug(r.packageName)
+                      ? <ExternalLink href={githubSlugToUrl(r.packageName)}>{r.packageName}</ExternalLink>
+                      : r.packageName}
+                  </Mono>
+                ) : r.cloudProvider ? <Mono>{r.cloudProvider}{r.cloudAssetType ? ' · ' + r.cloudAssetType : ''}</Mono>
                   : <span className={rowStyles.nullCell}>-</span>}
               </td>
               <td>{r.version ? <Mono>{r.version}</Mono> : <span className={rowStyles.nullCell}>-</span>}</td>
               <td><UrlCell url={r.sourceUrl} max={260} /></td>
-              <td><Truncated text={r.subdomain} max={160} /></td>
+              <td>{r.subdomain ? <HostCell host={r.subdomain} /> : <Truncated text={r.subdomain} max={160} />}</td>
               <td><Truncated text={r.evidence || r.detail} max={260} /></td>
             </tr>
           ))}

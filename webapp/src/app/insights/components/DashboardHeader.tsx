@@ -1,6 +1,7 @@
 'use client'
 
 import { RefreshCw, Globe, Server } from 'lucide-react'
+import { WikiInfoButton } from '@/components/ui'
 import styles from './DashboardHeader.module.css'
 
 interface DashboardHeaderProps {
@@ -15,7 +16,10 @@ export function DashboardHeader({ projectName, targetDomain, ipMode, isLoading, 
   return (
     <div className={styles.header}>
       <div className={styles.info}>
-        <h1 className={styles.title}>Insights</h1>
+        <h1 className={styles.title}>
+          Insights
+          <WikiInfoButton target="insights" title="Open Insights Dashboard wiki page" />
+        </h1>
         {projectName && (
           <div className={styles.project}>
             {ipMode ? <Server size={14} /> : <Globe size={14} />}

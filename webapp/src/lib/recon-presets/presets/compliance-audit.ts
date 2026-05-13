@@ -110,6 +110,14 @@ Security teams running compliance audits, blue teamers validating hardening base
     // --- Banner Grabbing: disabled ---
     bannerGrabEnabled: false,
 
+    // --- VHost & SNI: routing inconsistency (host_header_bypass) IS a compliance finding ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: false,    // compliance audits report findings; no need to feed downstream tools
+
     // --- DISABLE all web crawlers ---
     katanaEnabled: false,
     hakrawlerEnabled: false,

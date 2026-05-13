@@ -12,6 +12,7 @@ from recon.partial_recon_modules.helpers import (
     _is_ip_or_cidr,
     _is_valid_hostname,
     _resolve_hostname,
+    _should_include_root_domain,
 )
 from recon.partial_recon_modules.graph_builders import (
     _build_recon_data_from_graph,
@@ -106,7 +107,10 @@ def _run_port_scanner(config: dict, tool_id: str, scan_fn, label: str,
     include_graph = config.get("include_graph_targets", True)
     if include_graph:
         print(f"[*][Partial Recon] Querying graph for targets (IPs and subdomains)...")
-        recon_data = _build_recon_data_from_graph(domain, user_id, project_id)
+        recon_data = _build_recon_data_from_graph(
+            domain, user_id, project_id,
+            include_root_domain=_should_include_root_domain(settings),
+        )
     else:
         print(f"[*][Partial Recon] Skipping graph targets (user opted out)")
         recon_data = {
@@ -465,7 +469,10 @@ def run_nmap(config: dict) -> None:
     include_graph = config.get("include_graph_targets", True)
     if include_graph:
         print(f"[*][Partial Recon] Querying graph for targets (IPs, ports, subdomains)...")
-        recon_data = _build_port_scan_data_from_graph(domain, user_id, project_id)
+        recon_data = _build_port_scan_data_from_graph(
+            domain, user_id, project_id,
+            include_root_domain=_should_include_root_domain(settings),
+        )
     else:
         print(f"[*][Partial Recon] Skipping graph targets (user opted out)")
         recon_data = {

@@ -15,7 +15,7 @@ from pathlib import Path
 _agentic_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _agentic_dir)
 
-from skill_loader import _parse_frontmatter, list_skills, load_skill_content, _SKILLS_DIR
+from orchestrator_helpers.skill_loader import _parse_frontmatter, list_skills, load_skill_content, _SKILLS_DIR
 
 
 class TestParseFrontmatter(unittest.TestCase):

@@ -2,7 +2,7 @@
 
 import { Bot, Play, Download, Loader2, Terminal, Shield, Github, Target, Zap, MessageSquare, Pause, Square, ShieldAlert } from 'lucide-react'
 import { StealthIcon } from '@/components/icons/StealthIcon'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { ReconStatus, GvmStatus, GithubHuntStatus, TrufflehogStatus, PartialReconState } from '@/lib/recon-types'
 import { PartialReconBadges } from '@/components/PartialReconBadges'
 import styles from './GraphToolbar.module.css'
@@ -194,6 +194,8 @@ export function GraphToolbar({
 
   return (
     <div className={styles.toolbar}>
+      <WikiInfoButton target="graph" title="Open Red Zone wiki page" />
+
       {targetDomain && (
         <>
           <div className={styles.divider} />

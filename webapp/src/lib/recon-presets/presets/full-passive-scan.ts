@@ -151,6 +151,9 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
     nucleiEnabled: false,
     securityCheckEnabled: false,
 
+    // --- VHost & SNI: explicitly disabled — preset's identity is "no packets to target" ---
+    vhostSniEnabled: false,
+
     // --- ENABLE CVE lookup (queries NVD/Vulners APIs, not the target) ---
     cveLookupEnabled: true,
     cveLookupMaxCves: 50,

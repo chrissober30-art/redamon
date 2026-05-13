@@ -240,6 +240,9 @@ class PartialReconState(BaseModel):
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
     stats: Optional[dict] = None
+    # Last Docker-timestamp emitted to any SSE consumer; used as `since=` on
+    # reconnect so re-subscribing to the log stream doesn't replay history.
+    last_log_timestamp: Optional[datetime] = None
 
 
 class PartialReconListResponse(BaseModel):

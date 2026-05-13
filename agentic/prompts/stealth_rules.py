@@ -34,6 +34,16 @@ stop and inform the user honestly — do NOT proceed with noisy techniques.
 ### web_search — NO RESTRICTIONS
 - Passive external API query. Use freely for CVE research and recon.
 
+### cve_intel — NO RESTRICTIONS
+- Passive query against the ProjectDiscovery vulnx API. Sends NO traffic to the pentest target.
+- Returns structured CVE intelligence (NVD + CISA KEV + EPSS + PoC + Nuclei template availability).
+- Use freely in all allowed phases for CVE triage and exploit prioritization.
+
+### tradecraft_lookup — NO RESTRICTIONS
+- Fetches curated third-party knowledge sites (HackTricks, PayloadsAllTheThings, CVE PoC repos, ...) configured in the user's Global Settings.
+- Never sends traffic to the pentest target. All requests go to the user-trusted resource hosts.
+- Use freely whenever you need a specific exploitation technique, payload, or CVE PoC.
+
 ### execute_jsluice -- NO RESTRICTIONS
 - Passive local file analysis only. No network traffic. Use freely.
 

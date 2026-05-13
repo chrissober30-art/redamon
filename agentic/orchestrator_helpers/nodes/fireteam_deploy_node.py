@@ -64,18 +64,37 @@ def _mk_member_id(idx: int) -> str:
 def _validate_mutex_groups(plan_members: list) -> Optional[str]:
     """Return None if OK, or a diagnostic string if two members claim the same
     singleton tool group (e.g. two members both using metasploit)."""
-    for group, tools in TOOL_MUTEX_GROUPS.items():
+    for group, group_tools in TOOL_MUTEX_GROUPS.items():
         claimers = []
         for m in plan_members:
-            # A member "claims" a group if any of its declared skills overlaps the
-            # group name, or if the group's tools are referenced by its skills.
-            skills = [s.lower() for s in (m.get("skills") or [])]
-            tool_keywords = {t.split("_", 1)[-1] for t in tools}
-            if group.lower() in skills or any(k in skills for k in tool_keywords):
+            # A member "claims" a group if any of its declared tools overlaps the
+            # group name, or if the group's tools are referenced by its tools list.
+            member_tools = [s.lower() for s in (m.get("tools") or [])]
+            tool_keywords = {t.split("_", 1)[-1] for t in group_tools}
+            if group.lower() in member_tools or any(k in member_tools for k in tool_keywords):
                 claimers.append(m.get("name") or "(unnamed)")
         if len(claimers) > 1:
             return f"Multiple members claim mutex group '{group}': {claimers}"
     return None
+
+
+def _snapshot_parent_trace(parent_state: AgentState) -> list[dict]:
+    """Capture the parent's execution_trace plus any `_completed_step` not
+    yet merged in. Defensive against the iteration-edge case where think_node
+    decides deploy_fireteam in the same call that finalizes the prior tool's
+    output: depending on langgraph's update merge order, the freshly-analyzed
+    step may live in `_completed_step` while the trace itself still reflects
+    the pre-iteration state."""
+    trace = list(parent_state.get("execution_trace") or [])
+    completed = parent_state.get("_completed_step")
+    if completed:
+        completed_id = completed.get("step_id")
+        already_in_trace = any(
+            (s or {}).get("step_id") == completed_id for s in trace
+        ) if completed_id else False
+        if not already_in_trace:
+            trace = trace + [completed]
+    return trace
 
 
 def _build_member_state(
@@ -100,7 +119,28 @@ def _build_member_state(
     # project allows 20 — making the operator-facing setting feel broken.
     # If you want the model to have discretion back, reintroduce the
     # min(spec.max_iterations, project_cap) clamp here.
-    _resolved_max_iter = int(get_setting("FIRETEAM_MEMBER_MAX_ITERATIONS", 15))
+    _resolved_max_iter = int(get_setting("FIRETEAM_MEMBER_MAX_ITERATIONS", 10))
+
+    # Diagnostic: log what we see on the parent state at snapshot time so we
+    # can detect cases where think_node's analysis updates haven't reached the
+    # deploy node yet (chain_findings_memory / execution_trace empty even
+    # though target_info is populated).
+    _peer_count = max(
+        0,
+        len(((parent_state.get("_current_fireteam_plan") or {}).get("members") or [])) - 1,
+    )
+    logger.info(
+        "[%s] member=%s SNAPSHOT parent counts: findings=%d failures=%d decisions=%d trace=%d target_keys=%d peers=%d _completed_step=%s",
+        parent_state.get("session_id", "?"),
+        member_id,
+        len(parent_state.get("chain_findings_memory") or []),
+        len(parent_state.get("chain_failures_memory") or []),
+        len(parent_state.get("chain_decisions_memory") or []),
+        len(parent_state.get("execution_trace") or []),
+        len(parent_state.get("target_info") or {}),
+        _peer_count,
+        bool(parent_state.get("_completed_step")),
+    )
 
     base: dict = {
         "messages": [],
@@ -119,7 +159,7 @@ def _build_member_state(
         "member_name": spec.get("name") or member_id,
         "member_id": member_id,
         "fireteam_id": fireteam_id,
-        "skills": list(spec.get("skills") or []),
+        "tools": list(spec.get("tools") or []),
         "task": spec.get("task") or "",
 
         # Member-local
@@ -127,6 +167,45 @@ def _build_member_state(
         "target_info": dict(parent_state.get("target_info") or {}),
         "chain_findings_memory": [],
         "chain_failures_memory": [],
+
+        # Parent engagement-state snapshot at deploy time. Rendered into the
+        # member's system prompt via format_chain_context (the same renderer
+        # the root agent uses), so members see findings (with source_agent
+        # attribution), failed attempts, decisions, and recent tool outputs
+        # instead of a 200-char-per-step trace that omits the artifacts they
+        # need (captured JWTs, cleared endpoints, registered users, etc.).
+        #
+        # Edge case: when the parent decides to deploy_fireteam in the same
+        # think_node iteration that processes the prior tool's output, the
+        # latest step may live in `_completed_step` while `execution_trace`
+        # still reflects the pre-iteration state (depending on how langgraph
+        # serialized the updates between nodes). Belt-and-suspenders: merge
+        # `_completed_step` into the snapshot if it's not already in the
+        # trace. Dedup by step_id.
+        "_parent_chain_findings": list(parent_state.get("chain_findings_memory") or []),
+        "_parent_chain_failures": list(parent_state.get("chain_failures_memory") or []),
+        "_parent_chain_decisions": list(parent_state.get("chain_decisions_memory") or []),
+        "_parent_execution_trace": _snapshot_parent_trace(parent_state),
+
+        # Sibling member specs for this wave (everyone in the plan except this
+        # member). Rendered into the system prompt as an "out of scope" block
+        # so scope creep onto sibling surfaces is structurally discouraged.
+        "_peer_tasks": [
+            {
+                "name": p.get("name") or "(unnamed)",
+                "task_summary": (p.get("task") or "")[:240],
+                "tools": list(p.get("tools") or []),
+            }
+            for p in ((parent_state.get("_current_fireteam_plan") or {}).get("members") or [])
+            if p.get("name") != spec.get("name")
+        ],
+
+        # Soft skill-allowlist accounting. Seeded to zero so the budget nudge
+        # in _build_member_prompt stays silent until the member actually
+        # reaches into the fallback toolbox.
+        "fallback_uses_this_run": 0,
+        "iterations_since_new_finding": 0,
+        "last_findings_count": 0,
 
         # Confirmation escalation
         "_pending_confirmation": None,
@@ -416,13 +495,13 @@ async def fireteam_deploy_node(
     )
     # Iteration budget is uniform across all members in a wave — set by the
     # operator via FIRETEAM_MEMBER_MAX_ITERATIONS (see _build_member_state).
-    _member_max_iter = int(get_setting("FIRETEAM_MEMBER_MAX_ITERATIONS", 15))
+    _member_max_iter = int(get_setting("FIRETEAM_MEMBER_MAX_ITERATIONS", 10))
     logger.info(f"[{session_id}] plan_rationale: {plan_data.get('plan_rationale', '')[:300]}")
     logger.info(f"[{session_id}] per-member iteration cap: {_member_max_iter}")
     for i, m in enumerate(members):
         logger.info(
             f"[{session_id}]   member[{i}]: name={m.get('name')!r} "
-            f"skills={m.get('skills') or []} "
+            f"tools={m.get('tools') or []} "
             f"task={(m.get('task') or '')[:200]}"
         )
     logger.info(f"{'=' * 80}")
@@ -444,8 +523,13 @@ async def fireteam_deploy_node(
                 iteration=iteration,
                 plan_rationale=plan_data.get("plan_rationale", ""),
                 members=[
-                    {"member_id": mid, "name": m.get("name"), "task": m.get("task"),
-                     "skills": m.get("skills") or [], "max_iterations": _member_max_iter}
+                    {
+                        "member_id": mid,
+                        "name": m.get("name"),
+                        "task": m.get("task"),
+                        "tools": m.get("tools") or [],
+                        "max_iterations": _member_max_iter,
+                    }
                     for mid, m in zip(member_ids, members)
                 ],
             )
@@ -465,7 +549,7 @@ async def fireteam_deploy_node(
             "projectId": project_id,
             "members": [
                 {"memberIdKey": mid, "name": m.get("name") or mid, "task": m.get("task") or "",
-                 "skills": m.get("skills") or []}
+                 "tools": m.get("tools") or []}
                 for mid, m in zip(member_ids, members)
             ],
         },
@@ -481,10 +565,10 @@ async def fireteam_deploy_node(
             member_state = _build_member_state(state, spec, member_id, fireteam_id_key)
             t0 = time.monotonic()
             logger.info(
-                "[%s] wave=%s member=%s (%s) STARTED skills=%s max_iter=%s",
+                "[%s] wave=%s member=%s (%s) STARTED tools=%s max_iter=%s",
                 session_id, fireteam_id_key, member_id,
                 spec.get("name") or member_id,
-                spec.get("skills") or [],
+                spec.get("tools") or [],
                 _member_max_iter,
             )
             if streaming_cb:
@@ -536,7 +620,10 @@ async def fireteam_deploy_node(
                 )
             except asyncio.CancelledError:
                 logger.info("[%s] wave=%s member=%s CANCELLED", session_id, fireteam_id_key, member_id)
-                # Propagate cancellation to gather.
+                # Propagate cancellation to gather. Per-member DB persistence on
+                # wave-timeout happens in the outer TimeoutError handler below,
+                # which has access to the full results list (including real
+                # iteration/token counts) and can label status correctly.
                 raise
             except Exception as exc:
                 logger.exception("[%s] wave=%s member=%s CRASHED", session_id, fireteam_id_key, member_id)
@@ -614,6 +701,45 @@ async def fireteam_deploy_node(
                 results.append(_timeout_result(m, mid, time.monotonic() - wave_start))
             except Exception as e:
                 results.append(_error_result(m, mid, e, time.monotonic() - wave_start))
+        # Persist per-member timeout to Postgres. Without this, members whose
+        # _run_one was cancelled never reach the post-try _patch_member call,
+        # so on session restore /fireteams returns them as `running` and the
+        # UI shows specialists "still running" forever. Mirrors the
+        # operator-cancel branch's per-member patch loop.
+        for r, m, mid in zip(results, members, member_ids):
+            await _patch_member(session_id, fireteam_id_key, mid, {
+                "status": r.get("status", "timeout"),
+                "completionReason": r.get("completion_reason") or "wave_timeout",
+                "iterationsUsed": r.get("iterations_used", 0),
+                "tokensUsed": r.get("tokens_used", 0),
+                "findingsCount": len(r.get("findings") or []),
+                "wallClockSeconds": r.get("wall_clock_seconds", 0.0),
+                "errorMessage": r.get("error_message"),
+                "resultBlob": r,
+            })
+        # Emit per-member WS events for cancelled members so the live UI
+        # flips cards from running to timeout without waiting for a refresh.
+        # _run_one's own emit at line ~614 is unreachable after t.cancel(),
+        # mirroring the persistence gap above. Mirrors the operator-cancel
+        # branch's WS emit loop.
+        if streaming_cb:
+            for r, m, mid in zip(results, members, member_ids):
+                try:
+                    await streaming_cb.on_fireteam_member_completed(
+                        fireteam_id=fireteam_id_key,
+                        member_id=mid,
+                        name=r.get("name") or m.get("name") or mid,
+                        status=r.get("status", "timeout"),
+                        iterations_used=r.get("iterations_used", 0),
+                        tokens_used=r.get("tokens_used", 0),
+                        input_tokens_used=r.get("input_tokens_used", 0),
+                        output_tokens_used=r.get("output_tokens_used", 0),
+                        findings_count=len(r.get("findings") or []),
+                        wall_clock_seconds=r.get("wall_clock_seconds", 0.0),
+                        error_message=r.get("error_message"),
+                    )
+                except Exception:
+                    logger.exception("timeout emit member_completed failed")
     except asyncio.CancelledError:
         logger.info("[%s] fireteam %s cancelled by operator", session_id, fireteam_id_key)
         from orchestrator_helpers.fireteam_confirmation_registry import drop_wave as _drop_wave

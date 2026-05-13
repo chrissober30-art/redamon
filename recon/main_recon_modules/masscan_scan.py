@@ -331,6 +331,23 @@ def run_masscan_scan(recon_data: dict, output_file: Path = None, settings: dict 
         print("[-][Masscan] Disabled — skipping")
         return recon_data
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Masscan",
+        settings,
+        keys=[
+            ("MASSCAN_ENABLED", "Toggle"),
+            ("MASSCAN_TOP_PORTS", "Ports"),
+            ("MASSCAN_CUSTOM_PORTS", "Ports"),
+            ("MASSCAN_RATE", "Performance"),
+            ("MASSCAN_WAIT", "Performance"),
+            ("MASSCAN_RETRIES", "Performance"),
+            ("MASSCAN_BANNERS", "Features"),
+            ("MASSCAN_EXCLUDE_TARGETS", "Features"),
+            ("USE_TOR_FOR_RECON", "Anonymity"),
+        ],
+    )
+
     MASSCAN_RATE = settings.get('MASSCAN_RATE', 1000)
     MASSCAN_CUSTOM_PORTS = settings.get('MASSCAN_CUSTOM_PORTS', '')
     MASSCAN_TOP_PORTS = settings.get('MASSCAN_TOP_PORTS', '1000')

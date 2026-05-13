@@ -1,14 +1,14 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
 import {
-  Mono,
   Truncated,
   ListCell,
   NumCell,
+  HostCell,
   filterRowsByText,
 } from './formatters'
 import rowStyles from './RedZoneTableRow.module.css'
@@ -60,7 +60,8 @@ export const DnsDriftTable = memo(function DnsDriftTable({ projectId }: Props) {
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() => {
+    if (rows.length === 0) return undefined
     const flat = filtered.map(r => ({
       domain: r.domain,
       historicIpCount: r.historicIpCount,
@@ -78,10 +79,11 @@ export const DnsDriftTable = memo(function DnsDriftTable({ projectId }: Props) {
       danglingSubCount: r.danglingSubCount,
       danglingSubs: r.danglingSubs.join(', '),
     }))
-    exportRedZoneXlsx(
-      flat,
-      'DNS-Drift',
-      [
+    return {
+      rows: flat,
+      sheetName: 'DNS-Drift',
+      fileSlug: 'redzone-dns-drift',
+      columns: [
         { key: 'domain', header: 'Domain' },
         { key: 'historicIpCount', header: 'Historic IP Count' },
         { key: 'historicIps', header: 'Historic IPs' },
@@ -98,9 +100,8 @@ export const DnsDriftTable = memo(function DnsDriftTable({ projectId }: Props) {
         { key: 'danglingSubCount', header: 'Dangling Subdomain Count' },
         { key: 'danglingSubs', header: 'Dangling Subdomains' },
       ],
-      'redzone-dns-drift',
-    )
-  }, [filtered])
+    }
+  }, [filtered, rows.length])
 
   return (
     <RedZoneTableShell
@@ -109,7 +110,7 @@ export const DnsDriftTable = memo(function DnsDriftTable({ projectId }: Props) {
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search domain, ASN, country, external, dangling sub..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}
@@ -133,7 +134,7 @@ export const DnsDriftTable = memo(function DnsDriftTable({ projectId }: Props) {
         <tbody>
           {sliced.map((r, i) => (
             <tr key={`${r.domain}-${i}`}>
-              <td><Mono>{r.domain}</Mono></td>
+              <td><HostCell host={r.domain} /></td>
               <td>
                 {r.historicIpCount > 0 ? (
                   <span title={r.historicResolutions.map(h => h.address).filter(Boolean).join('\n')}>

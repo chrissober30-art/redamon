@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Loader2, CheckCircle, XCircle, Plus, Trash2, Eye, EyeOff } from 'lucide-react'
+import { Loader2, CheckCircle, XCircle, Plus, Trash2, Eye, EyeOff, ExternalLink } from 'lucide-react'
 import { useToast } from '@/components/ui'
 import { PROVIDER_TYPES, OPENAI_COMPAT_PRESETS } from '@/lib/llmProviderPresets'
 import type { ProviderType } from '@/lib/llmProviderPresets'
@@ -10,6 +10,7 @@ import styles from './Settings.module.css'
 interface LlmProviderFormProps {
   userId: string
   provider?: ProviderData | null
+  existingProviderTypes?: string[]
   onSave: () => void
   onCancel: () => void
 }
@@ -47,7 +48,7 @@ const EMPTY_PROVIDER: ProviderData = {
   awsSecretKey: '',
 }
 
-export function LlmProviderForm({ userId, provider, onSave, onCancel }: LlmProviderFormProps) {
+export function LlmProviderForm({ userId, provider, existingProviderTypes = [], onSave, onCancel }: LlmProviderFormProps) {
   const isEditing = !!provider?.id
   const toast = useToast()
   const [form, setForm] = useState<ProviderData>(() => provider || { ...EMPTY_PROVIDER })
@@ -153,17 +154,27 @@ export function LlmProviderForm({ userId, provider, onSave, onCancel }: LlmProvi
       <div className={styles.formSection}>
         <h3 className={styles.formTitle}>Choose Provider Type</h3>
         <div className={styles.providerTypeGrid}>
-          {PROVIDER_TYPES.map(pt => (
-            <button
-              key={pt.id}
-              className={styles.providerTypeCard}
-              onClick={() => selectType(pt.id)}
-            >
-              <span className={styles.providerTypeIcon}>{pt.icon}</span>
-              <span className={styles.providerTypeName}>{pt.name}</span>
-              <span className={styles.providerTypeDesc}>{pt.description}</span>
-            </button>
-          ))}
+          {PROVIDER_TYPES.map(pt => {
+            const alreadyAdded = pt.id !== 'openai_compatible' && existingProviderTypes.includes(pt.id)
+            return (
+              <button
+                key={pt.id}
+                className={styles.providerTypeCard}
+                onClick={() => selectType(pt.id)}
+                disabled={alreadyAdded}
+                title={alreadyAdded ? `${pt.name} already configured` : undefined}
+                style={alreadyAdded ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+              >
+                <span className={styles.providerTypeIcon} aria-label={pt.name}>
+                  <pt.Icon size={40} />
+                </span>
+                <span className={styles.providerTypeName}>
+                  {pt.name}{alreadyAdded ? ' (added)' : ''}
+                </span>
+                <span className={styles.providerTypeDesc}>{pt.description}</span>
+              </button>
+            )
+          })}
         </div>
         <div className={styles.formActions}>
           <button className="secondaryButton" onClick={onCancel}>Cancel</button>
@@ -174,19 +185,32 @@ export function LlmProviderForm({ userId, provider, onSave, onCancel }: LlmProvi
 
   // Step 2: Configure
   const ptype = form.providerType as ProviderType
-  const isKeyBased = ['openai', 'anthropic', 'openrouter'].includes(ptype)
+  const providerDef = PROVIDER_TYPES.find(p => p.id === ptype)
+  const isKeyBased = ['openai', 'anthropic', 'openrouter', 'deepseek', 'gemini', 'glm', 'kimi', 'qwen', 'xai', 'mistral'].includes(ptype)
   const isBedrock = ptype === 'bedrock'
   const isCompat = ptype === 'openai_compatible'
+  const apiKeyUrl = providerDef?.apiKeyUrl
+  const apiKeyLinkLabel = isBedrock ? 'Get AWS credentials' : 'Get API key'
   return (
     <div className={styles.formSection}>
       <div className={styles.formHeader}>
         <h3 className={styles.formTitle}>
-          {isEditing ? 'Edit' : 'Add'} {PROVIDER_TYPES.find(p => p.id === ptype)?.name || ptype} Provider
+          {isEditing ? 'Edit' : 'Add'} {providerDef?.name || ptype} Provider
         </h3>
         {!isEditing && (
           <button className="textButton" onClick={() => setStep('type')}>Change type</button>
         )}
       </div>
+      {apiKeyUrl && (
+        <a
+          href={apiKeyUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={styles.apiKeyLink}
+        >
+          {apiKeyLinkLabel} <ExternalLink size={12} />
+        </a>
+      )}
 
       {/* Name */}
       <div className="formGroup">
@@ -376,7 +400,7 @@ export function LlmProviderForm({ userId, provider, onSave, onCancel }: LlmProvi
           </div>
 
           {/* SSL verify toggle */}
-          <div className="formGroup">
+          <div className="formGroup" style={{ marginTop: 'var(--space-4)' }}>
             <label className={styles.checkboxLabel}>
               <input
                 type="checkbox"

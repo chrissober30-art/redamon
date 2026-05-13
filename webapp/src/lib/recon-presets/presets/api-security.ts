@@ -115,6 +115,14 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
     // --- DISABLE banner grabbing ---
     bannerGrabEnabled: false,
 
+    // --- VHost & SNI: API gateways often hide behind reverse proxies + SNI routing ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+
     // --- Katana: moderate crawl for API endpoint discovery in frontend ---
     katanaEnabled: true,
     katanaDepth: 2,

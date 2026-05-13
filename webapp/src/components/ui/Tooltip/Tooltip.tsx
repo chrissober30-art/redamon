@@ -15,6 +15,12 @@ interface TooltipProps {
   delay?: number
   /** Whether tooltip is disabled */
   disabled?: boolean
+  /** Override default max-width (CSS default is 260px) */
+  maxWidth?: number | string
+  /** When true, the tooltip stays open while the mouse is over its body —
+   *  needed so the user can scroll inside the tooltip or click links inside it.
+   *  Default: false (legacy hover-and-leave behavior). */
+  interactive?: boolean
 }
 
 interface Position {
@@ -28,12 +34,15 @@ export function Tooltip({
   position = 'top',
   delay = 200,
   disabled = false,
+  maxWidth,
+  interactive = false,
 }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState<Position>({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const calculatePosition = useCallback(() => {
     if (!triggerRef.current || !tooltipRef.current) return
@@ -74,6 +83,10 @@ export function Tooltip({
 
   const showTooltip = useCallback(() => {
     if (disabled) return
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current)
+      hideTimeoutRef.current = null
+    }
     timeoutRef.current = setTimeout(() => {
       setIsVisible(true)
     }, delay)
@@ -82,8 +95,25 @@ export function Tooltip({
   const hideTooltip = useCallback(() => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
     }
-    setIsVisible(false)
+    if (interactive) {
+      // Defer hide so the mouse has time to enter the tooltip body.
+      // onMouseEnter on the tooltip cancels this timeout.
+      hideTimeoutRef.current = setTimeout(() => {
+        setIsVisible(false)
+        hideTimeoutRef.current = null
+      }, 150)
+    } else {
+      setIsVisible(false)
+    }
+  }, [interactive])
+
+  const cancelPendingHide = useCallback(() => {
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current)
+      hideTimeoutRef.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -96,6 +126,9 @@ export function Tooltip({
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
+      }
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current)
       }
     }
   }, [])
@@ -129,8 +162,12 @@ export function Tooltip({
             style={{
               top: tooltipPosition.top,
               left: tooltipPosition.left,
+              ...(maxWidth !== undefined ? { maxWidth } : {}),
+              ...(interactive ? { pointerEvents: 'auto' } : {}),
             }}
             role="tooltip"
+            onMouseEnter={interactive ? cancelPendingHide : undefined}
+            onMouseLeave={interactive ? hideTooltip : undefined}
           >
             {content}
           </div>,

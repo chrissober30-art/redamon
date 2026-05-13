@@ -2,6 +2,7 @@
 
 import type { Project } from '@prisma/client'
 import { Toggle } from '@/components/ui/Toggle/Toggle'
+import { WikiInfoButton } from '@/components/ui/WikiInfoButton'
 import styles from '../ProjectForm.module.css'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
@@ -13,7 +14,10 @@ interface DosSectionProps {
 
 export function DosSection({ data, updateField }: DosSectionProps) {
   return (
-    <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
+    <div style={{ padding: 'var(--space-3) var(--space-4)', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 8, right: 16 }}>
+        <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Agent-Skills" title="Open Agent Skills wiki page" />
+      </div>
       <p className={styles.sectionDescription}>
         Configure availability testing settings. These control test intensity,
         duration limits, and whether to perform assessment-only (non-destructive) checks.

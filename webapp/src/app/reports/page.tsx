@@ -5,7 +5,7 @@ import { FileText, Download, ExternalLink, Trash2, Loader2, AlertCircle, Sparkle
 import { useAllReports, type ReportMeta } from '@/hooks/useReports'
 import { useProjects } from '@/hooks/useProjects'
 import { useProject } from '@/providers/ProjectProvider'
-import { useToast } from '@/components/ui'
+import { useToast, WikiInfoButton } from '@/components/ui'
 import styles from './page.module.css'
 
 function formatBytes(bytes: number): string {
@@ -94,6 +94,7 @@ export default function ReportsPage() {
           <FileText size={18} />
           <h2 className={styles.title}>Pentest Reports</h2>
           <span className={styles.count}>{reports.length}</span>
+          <WikiInfoButton target="reports" title="Open Pentest Reports wiki page" />
         </div>
 
         <div className={styles.generateSection}>

@@ -153,6 +153,14 @@ Cloud security engineers, red teams targeting cloud-hosted organizations, and se
     // --- DISABLE parameter discovery ---
     arjunEnabled: false,
 
+    // --- VHost & SNI: critical for k8s ingress / Cloudflare / NGINX vhost discovery ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,                    // Catches k8s ingress / CDN routing -- core to cloud-exposure preset
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+
     // --- Nuclei: cloud/misconfig focus ---
     nucleiEnabled: true,
     nucleiSeverity: ['critical', 'high', 'medium'],

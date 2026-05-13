@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -231,6 +231,8 @@ class ContainerManager:
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
                     "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
+                    # Agent API for AI hooks (FFuf AI extensions, etc.)
+                    "AGENT_API_URL": os.environ.get("AGENT_API_URL", "http://localhost:8090"),
                 },
                 volumes={
                     "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
@@ -244,6 +246,10 @@ class ContainerManager:
                     # JS Recon shared volumes with webapp
                     "redamon_js_recon_uploads": {"bind": "/data/js-recon-uploads", "mode": "ro"},
                     "redamon_js_recon_custom": {"bind": "/data/js-recon-custom", "mode": "ro"},
+                    # Official nuclei-templates volume (read-only) for the AI tag
+                    # selector to read TEMPLATES-STATS.json. Populated by
+                    # ensure_templates_volume() before any nuclei pass.
+                    "nuclei-templates": {"bind": "/opt/nuclei-templates-official", "mode": "ro"},
                 },
                 command="python /app/recon/main.py",
             )
@@ -666,6 +672,7 @@ class ContainerManager:
         tool_id: str,
         config: dict,
         recon_path: str,
+        custom_templates_path: str = "",
     ) -> PartialReconState:
         """Start a partial recon container for a specific tool.
 
@@ -674,6 +681,11 @@ class ContainerManager:
             tool_id: Tool to run (e.g., "SubdomainDiscovery")
             config: Full config dict to write as JSON for the container
             recon_path: Host path to the recon directory
+            custom_templates_path: Host path to mc/nuclei-templates so the
+                spawned container can sibling-mount it for nuclei. Without
+                this, custom-template selection is silently ignored and
+                build_nuclei_command falls back to the full ~8000-template
+                pool (the bug Ritesh hit before this fix).
         """
         # Check concurrency limit
         if self._count_active_partial_recons(project_id) >= MAX_PARALLEL_PARTIAL_RECONS:
@@ -727,10 +739,17 @@ class ContainerManager:
                     "PARTIAL_RECON_RUN_ID": run_id,
                     "UPDATE_GRAPH_DB": "true",
                     "HOST_RECON_OUTPUT_PATH": f"{recon_path}/output",
+                    # Required for nuclei custom-template support: build_nuclei_command
+                    # uses this env var to bind-mount mcp/nuclei-templates into the
+                    # sibling nuclei container. Without it, custom-template selection
+                    # is silently dropped and the full built-in pool runs instead.
+                    "HOST_CUSTOM_TEMPLATES_PATH": custom_templates_path,
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
                     "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
+                    # Agent API for AI hooks (FFuf AI extensions, etc.)
+                    "AGENT_API_URL": os.environ.get("AGENT_API_URL", "http://localhost:8090"),
                 },
                 volumes={
                     "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
@@ -740,6 +759,9 @@ class ContainerManager:
                     # JS Recon shared volumes with webapp (uploaded files + custom patterns)
                     "redamon_js_recon_uploads": {"bind": "/data/js-recon-uploads", "mode": "ro"},
                     "redamon_js_recon_custom": {"bind": "/data/js-recon-custom", "mode": "ro"},
+                    # Official nuclei-templates volume (read-only) for the AI tag
+                    # selector to read TEMPLATES-STATS.json.
+                    "nuclei-templates": {"bind": "/opt/nuclei-templates-official", "mode": "ro"},
                 },
                 command="python /app/recon/partial_recon.py",
             )
@@ -822,9 +844,20 @@ class ContainerManager:
             log_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
             loop = asyncio.get_running_loop()
 
+            # On reconnect, resume from the last timestamp we already emitted so
+            # the SSE client doesn't receive duplicate history. Docker's `since`
+            # is second-granular, so advance by 1us to avoid re-emitting the
+            # boundary line (timestamps we tracked are sub-second precise).
+            since_ts = None
+            if state.last_log_timestamp is not None:
+                since_ts = state.last_log_timestamp + timedelta(microseconds=1)
+
             def read_logs():
                 try:
-                    for line in container.logs(stream=True, follow=True, timestamps=True):
+                    log_stream_kwargs = {"stream": True, "follow": True, "timestamps": True}
+                    if since_ts is not None:
+                        log_stream_kwargs["since"] = since_ts
+                    for line in container.logs(**log_stream_kwargs):
                         asyncio.run_coroutine_threadsafe(
                             log_queue.put(line), loop
                         ).result(timeout=5)
@@ -874,6 +907,20 @@ class ContainerManager:
                                     pass
 
                         event = self._parse_log_line(log_text, current_phase, current_phase_num, timestamp=docker_ts)
+                        # Partial recon always runs a single tool/phase, so pin
+                        # phase_number to 1 regardless of which full-pipeline
+                        # pattern the line happens to match (e.g. NUCLEI => 5).
+                        event.phase_number = 1
+                        if event.is_phase_start:
+                            current_phase = event.phase
+                            current_phase_num = 1
+                        # Track the high-water mark so a reconnecting SSE client
+                        # resumes after this line instead of replaying history.
+                        if docker_ts is not None:
+                            if project_id in self.partial_recon_states and run_id in self.partial_recon_states[project_id]:
+                                cur = self.partial_recon_states[project_id][run_id].last_log_timestamp
+                                if cur is None or docker_ts > cur:
+                                    self.partial_recon_states[project_id][run_id].last_log_timestamp = docker_ts
                         yield event
 
                 except asyncio.TimeoutError:

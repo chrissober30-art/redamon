@@ -242,6 +242,19 @@ def run_zoomeye_enrichment(combined_result: dict, settings: dict) -> dict:
     if not settings.get("ZOOMEYE_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "ZoomEye",
+        settings,
+        keys=[
+            ("ZOOMEYE_ENABLED", "Toggle"),
+            ("ZOOMEYE_MAX_RESULTS", "Limits"),
+            ("ZOOMEYE_WORKERS", "Performance"),
+            ("ZOOMEYE_API_KEY", "API credentials"),
+            ("ZOOMEYE_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     api_key = settings.get("ZOOMEYE_API_KEY", "")
     key_rotator = settings.get("ZOOMEYE_KEY_ROTATOR")
     max_results = int(settings.get("ZOOMEYE_MAX_RESULTS", 1000) or 1000)

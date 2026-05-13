@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { ChevronDown, Globe, Play } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
 import { TimeEstimate } from '../TimeEstimate'
+import { FileImportButton } from '../FileImportButton'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -26,6 +27,7 @@ export function HttpxSection({ data, updateField, onRun }: HttpxSectionProps) {
           <Globe size={16} />
           httpx HTTP Probing
           <NodeInfoTooltip section="Httpx" />
+          <WikiInfoButton target="Httpx" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>
@@ -377,24 +379,38 @@ export function HttpxSection({ data, updateField, onRun }: HttpxSectionProps) {
             <h3 className={styles.subSectionTitle}>Custom Paths & Headers</h3>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Additional Paths to Probe</label>
-              <textarea
-                className="textarea"
-                value={(data.httpxPaths ?? []).join('\n')}
-                onChange={(e) => updateField('httpxPaths', e.target.value.split('\n').filter(Boolean))}
-                placeholder="/robots.txt&#10;/.well-known/security.txt&#10;/sitemap.xml"
-                rows={3}
-              />
+              <div className={styles.fileImportWrap}>
+                <textarea
+                  className="textarea"
+                  value={(data.httpxPaths ?? []).join('\n')}
+                  onChange={(e) => updateField('httpxPaths', e.target.value.split('\n').filter(Boolean))}
+                  placeholder="/robots.txt&#10;/.well-known/security.txt&#10;/sitemap.xml"
+                  rows={3}
+                />
+                <FileImportButton
+                  variant="textarea"
+                  fieldName="paths"
+                  onImport={(values) => updateField('httpxPaths', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Probe these paths on each host (in addition to root)</span>
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Custom Headers</label>
-              <textarea
-                className="textarea"
-                value={(data.httpxCustomHeaders ?? []).join('\n')}
-                onChange={(e) => updateField('httpxCustomHeaders', e.target.value.split('\n').filter(Boolean))}
-                placeholder="User-Agent: CustomAgent/1.0&#10;Authorization: Bearer token"
-                rows={3}
-              />
+              <div className={styles.fileImportWrap}>
+                <textarea
+                  className="textarea"
+                  value={(data.httpxCustomHeaders ?? []).join('\n')}
+                  onChange={(e) => updateField('httpxCustomHeaders', e.target.value.split('\n').filter(Boolean))}
+                  placeholder="User-Agent: CustomAgent/1.0&#10;Authorization: Bearer token"
+                  rows={3}
+                />
+                <FileImportButton
+                  variant="textarea"
+                  fieldName="headers"
+                  onImport={(values) => updateField('httpxCustomHeaders', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Browser-like headers help avoid WAF/bot detection</span>
             </div>
           </div>
@@ -403,24 +419,38 @@ export function HttpxSection({ data, updateField, onRun }: HttpxSectionProps) {
             <h3 className={styles.subSectionTitle}>Status Code Filters</h3>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Match Status Codes</label>
-              <input
-                type="text"
-                className="textInput"
-                value={(data.httpxMatchCodes ?? []).join(', ')}
-                onChange={(e) => updateField('httpxMatchCodes', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                placeholder="200, 301, 302 (empty = all)"
-              />
+              <div className={styles.fileImportWrap}>
+                <input
+                  type="text"
+                  className="textInput"
+                  value={(data.httpxMatchCodes ?? []).join(', ')}
+                  onChange={(e) => updateField('httpxMatchCodes', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  placeholder="200, 301, 302 (empty = all)"
+                />
+                <FileImportButton
+                  fieldName="status codes"
+                  validator={(t) => /^\d+$/.test(t)}
+                  onImport={(values) => updateField('httpxMatchCodes', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Whitelist: only include hosts returning these codes</span>
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Filter Status Codes</label>
-              <input
-                type="text"
-                className="textInput"
-                value={(data.httpxFilterCodes ?? []).join(', ')}
-                onChange={(e) => updateField('httpxFilterCodes', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                placeholder="404, 503"
-              />
+              <div className={styles.fileImportWrap}>
+                <input
+                  type="text"
+                  className="textInput"
+                  value={(data.httpxFilterCodes ?? []).join(', ')}
+                  onChange={(e) => updateField('httpxFilterCodes', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  placeholder="404, 503"
+                />
+                <FileImportButton
+                  fieldName="status codes"
+                  validator={(t) => /^\d+$/.test(t)}
+                  onImport={(values) => updateField('httpxFilterCodes', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Blacklist: exclude hosts returning these codes</span>
             </div>
           </div>
@@ -541,7 +571,7 @@ export function HttpxSection({ data, updateField, onRun }: HttpxSectionProps) {
                     type="number"
                     className="textInput"
                     value={data.bannerGrabMaxLength}
-                    onChange={(e) => updateField('bannerGrabMaxLength', parseInt(e.target.value) || 500)}
+                    onChange={(e) => updateField('bannerGrabMaxLength', parseInt(e.target.value) || 1000)}
                     min={100}
                     max={5000}
                   />

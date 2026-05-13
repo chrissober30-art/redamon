@@ -102,6 +102,14 @@ Pentesters and bug bounty hunters focused on injection vulnerabilities. Ideal fo
     // --- DISABLE banner grabbing ---
     bannerGrabEnabled: false,
 
+    // --- VHost & SNI: more endpoints to discover = more parameters to fuzz ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,     // new URLs feed Katana/ParamSpider/Arjun
+
     // --- Katana: paramsOnly mode for parameterized URL extraction ---
     katanaEnabled: true,
     katanaDepth: 2,

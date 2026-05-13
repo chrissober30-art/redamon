@@ -1,6 +1,7 @@
 'use client'
 
 import type { Project } from '@prisma/client'
+import { WikiInfoButton } from '@/components/ui/WikiInfoButton'
 import styles from '../ProjectForm.module.css'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
@@ -12,7 +13,10 @@ interface PhishingSectionProps {
 
 export function PhishingSection({ data, updateField }: PhishingSectionProps) {
   return (
-    <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
+    <div style={{ padding: 'var(--space-3) var(--space-4)', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 8, right: 16 }}>
+        <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Project-Settings-Reference#social-engineering-simulation" title="Open Social Engineering wiki section" />
+      </div>
       <p className={styles.sectionDescription}>
         Configure SMTP settings for social engineering simulation email delivery. The agent uses these when sending
         payloads or documents via email. Leave empty to be asked at runtime.

@@ -72,12 +72,31 @@ def _crawl_single_url(
             text=True,
         )
 
+        # Heartbeat thread: emit progress every 30s independently of the
+        # readline() loop below, which can block for arbitrary periods
+        # while the subprocess is silent. Defined outside the inner try
+        # so the finally always sees a valid thread reference.
+        start_time = time.time()
+        overall_timeout = timeout * 2 + 60
+        heartbeat_stop = threading.Event()
+
+        def _hb():
+            while not heartbeat_stop.wait(30):
+                elapsed = int(time.time() - start_time)
+                with urls_lock:
+                    found = len(shared_urls)
+                print(
+                    f"[*][Hakrawler] still running... "
+                    f"({elapsed}s elapsed, {found} URLs found)",
+                    flush=True,
+                )
+
+        heartbeat_thread = threading.Thread(target=_hb, daemon=True)
+        heartbeat_thread.start()
+
         try:
             process.stdin.write(base_url + "\n")
             process.stdin.close()
-
-            start_time = time.time()
-            overall_timeout = timeout * 2 + 60
 
             while True:
                 if time.time() - start_time > overall_timeout:
@@ -126,9 +145,11 @@ def _crawl_single_url(
                         break
 
         finally:
+            heartbeat_stop.set()
             if process.poll() is None:
                 process.kill()
             process.wait()
+            heartbeat_thread.join(timeout=1)
 
     except Exception as e:
         print(f"[!][Hakrawler] Error for {base_url}: {e}")

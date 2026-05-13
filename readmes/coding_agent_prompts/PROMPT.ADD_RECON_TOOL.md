@@ -192,5 +192,20 @@ Integrate **[TOOL_NAME]** into the RedAmon recon pipeline.
   7. Add all new tool parameters to `reconPresetSchema` in `webapp/src/lib/recon-presets/recon-preset-schema.ts` (Zod validation). Without this, AI-generated presets will silently strip the new tool's settings during validation.
   8. Add the new tool's parameters (name, type, default, description) to the `RECON_PARAMETER_CATALOG` in `webapp/src/app/api/presets/generate/route.ts`. Without this, the LLM that generates AI presets won't know the tool exists and will never include its settings.
   9. If the new tool introduces file-upload or target-identity settings, add them to `PRESET_EXCLUDED_FIELDS` in `webapp/src/lib/project-preset-utils.ts` so they are stripped when users save reusable presets. Standard toggle/number/string settings do NOT need to be excluded.
+- [ ] **Input/Output logic tooltip** (`webapp/src/components/projects/ProjectForm/WorkflowView/inputLogicTooltips.tsx`):
+  Every tool that consumes graph data or writes nodes/relationships must have an entry in the `INPUT_LOGIC_TOOLTIPS` map. The tooltip is rendered both in the project-form section header (next to the existing graph-info icon) and in the partial recon modal next to the "Input" label.
+
+  Each tooltip needs **two sections**:
+  1. **"How input is generated"** — explain what graph nodes feed the scan, any priority/fallback chain, how custom user input from the partial recon modal merges in, and any bail conditions.
+  2. **"How output transforms the graph"** — list the nodes created (real names: BaseURL, Endpoint, Vulnerability, etc.), the relationships used (real names: HAS_ENDPOINT, RESOLVES_TO, etc.), and which existing nodes get enriched with new properties.
+
+  **Rules for the tooltip text**:
+  - Use only user-facing language. Reference graph node and relationship names users actually see in the graph UI. **Never** mention internal Python/JS variable names, function names, file paths, JSON keys, or settings constants.
+  - Don't use em dashes (—).
+  - Use the existing styled helpers (`sectionTitleStyle`, `paraStyle`, `codeStyle`, `listStyle`, `wrapperStyle`).
+  - Don't start with "Final input" — use "How input is generated" as the first section header.
+  - Keep claims grounded in code: read the tool's `update_graph_from_*` mixin to confirm which nodes/relationships actually get created before writing the output section.
+
+  Tools with single trivial input (e.g. just a Domain) still need a tooltip — focus the input section on what the seed is, and put the depth in the output section.
 - [ ] Error handling: try/except with timeout, Docker/binary not found, API errors — follow existing patterns
 - [ ] Build and test: `docker compose build recon` then run a scan

@@ -1,8 +1,8 @@
 /**
- * Unit tests for JS Recon Excel export column completeness.
+ * Unit tests for JS Recon CSV export column completeness.
  *
  * Verifies that every field produced by the Python backend
- * is included in the Excel export columns for each sheet.
+ * is included in the CSV export columns for each section.
  */
 import { describe, test, expect } from 'vitest'
 
@@ -26,7 +26,7 @@ function extractRow(row: Record<string, unknown>, columns: string[]): Record<str
 }
 
 // ============================================================
-// Column definitions (must match JsReconTable.tsx exportJsReconXlsx)
+// Column definitions (must match JsReconTable.tsx exportJsReconCsv)
 // ============================================================
 
 const EXPORT_COLUMNS = {
@@ -198,7 +198,7 @@ function mockExternalDomain() {
 // Tests
 // ============================================================
 
-describe('Excel export column completeness', () => {
+describe('CSV export column completeness', () => {
 
   test('Secrets: all backend fields are exported', () => {
     const secret = mockSecret()

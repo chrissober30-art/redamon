@@ -88,6 +88,14 @@ Bug bounty hunters and red teamers who want to maximize credential and secret di
     // Banner grabbing: disabled
     bannerGrabEnabled: false,
 
+    // --- VHost & SNI: admin/internal panels behind hidden vhosts often leak secrets ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,     // newly discovered URLs feed Katana/Hakrawler for secret discovery
+
     // Katana
     katanaEnabled: true,
     katanaDepth: 3,

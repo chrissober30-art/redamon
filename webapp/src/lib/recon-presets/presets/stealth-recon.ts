@@ -176,6 +176,10 @@ Red team operators performing authorized reconnaissance against targets with act
     nucleiScanAllIps: false,
     nucleiExcludeTags: ['dos', 'fuzz', 'intrusive', 'sqli', 'rce'],
 
+    // --- VHost & SNI: explicitly disabled — 2300+ probes through Tor would be both
+    //     catastrophically slow AND noisy in Tor exit-node logs ---
+    vhostSniEnabled: false,
+
     // --- Subdomain Takeover: passive DNS-only (subjack), disable active Nuclei templates ---
     subdomainTakeoverEnabled: true,
     subjackEnabled: true,

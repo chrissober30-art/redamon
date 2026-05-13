@@ -284,6 +284,16 @@
   color: var(--color-blue-400);
 }
 
+/* Target-list breakdown ("[*][Targets] Merged N URLs: ...") emitted by
+   build_target_urls. Tinted background + accent left border so the union
+   summary stands out when scrolling through verbose scan logs. */
+.logTargets {
+  background: rgba(34, 197, 94, 0.06);
+  border-left: 3px solid rgba(34, 197, 94, 0.55);
+  padding-left: calc(var(--space-2) - 3px);
+  font-weight: 500;
+}
+
 /* Scroll to bottom button */
 .scrollToBottom {
   position: absolute;

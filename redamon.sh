@@ -7,7 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
 GVM_FLAG_FILE="$SCRIPT_DIR/.gvm-enabled"
-SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
+KBASE_FLAG_FILE="$SCRIPT_DIR/.kbase-enabled"
+KBASE_DISABLED_FLAG_FILE="$SCRIPT_DIR/.kbase-disabled"
+LEGACY_SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
 
 # Service lists
 CORE_SERVICES="postgres neo4j recon-orchestrator kali-sandbox agent webapp"
@@ -54,8 +56,34 @@ is_gvm_enabled() {
     [[ -f "$GVM_FLAG_FILE" ]]
 }
 
-is_skipkbase() {
-    [[ -f "$SKIPKBASE_FLAG_FILE" ]]
+is_kbase_enabled() {
+    [[ -f "$KBASE_FLAG_FILE" ]]
+}
+
+# One-time migration from the legacy `.skipkbase` flag (RedAmon <=4.9.3) to the
+# new explicit flag pair (`.kbase-enabled` / `.kbase-disabled`). cmd_install
+# always writes one of the two markers so the user's explicit choice is sticky
+# across `clean` (which keeps KB data on disk). Behavior per case:
+#   - .kbase-enabled or .kbase-disabled exists → already migrated → no-op
+#   - .skipkbase exists                        → legacy default install (KB off) → convert to .kbase-disabled
+#   - no markers, FAISS index on disk          → legacy --kbase install (KB on)  → create .kbase-enabled
+#   - no markers, no data                      → fresh clone → create .kbase-disabled (README default)
+# Called from every command except cmd_install (which sets the markers explicitly).
+_migrate_legacy_kbase_flag() {
+    if [[ -f "$KBASE_FLAG_FILE" || -f "$KBASE_DISABLED_FLAG_FILE" ]]; then
+        rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
+        return
+    fi
+    if [[ -f "$LEGACY_SKIPKBASE_FLAG_FILE" ]]; then
+        rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
+        touch "$KBASE_DISABLED_FLAG_FILE"
+        return
+    fi
+    if [[ -s "$SCRIPT_DIR/knowledge_base/data/index.faiss" ]]; then
+        touch "$KBASE_FLAG_FILE"
+    else
+        touch "$KBASE_DISABLED_FLAG_FILE"
+    fi
 }
 
 check_prerequisites() {
@@ -298,28 +326,26 @@ except Exception:
 " 2>/dev/null || echo "$fallback"
 }
 
-# Feature gate mirroring is_gvm_enabled(). Reads KB_ENABLED from
-# knowledge_base/kb_config.yaml. Env var override wins if explicitly set:
-# KB_ENABLED=false ./redamon.sh install
+# Feature gate mirroring is_gvm_enabled(). Single source of truth: the
+# `.kbase-enabled` flag file, written by `install --kbase`. The README contract
+# is that KB is opt-in — default install has no KB.
 is_kb_enabled() {
-    # Env var override takes precedence
-    if [[ -n "${KB_ENABLED:-}" ]]; then
-        [[ "${KB_ENABLED}" != "false" ]]
-        return
-    fi
-    # Otherwise read from YAML (default: true)
-    local value
-    value=$(_kb_yaml_get "KB_ENABLED" "true")
-    [[ "$value" != "false" ]]
+    is_kbase_enabled
 }
 
-# Export KB-related env vars derived from kb_config.yaml so downstream
-# processes (docker compose, make) see consistent values. Called from
-# cmd_install, cmd_up, and the cmd_kb_* functions before shelling out.
+# Export KB-related env vars so downstream processes (docker compose, make)
+# see a value that matches the flag file. Called from every cmd_* that
+# shells out to docker compose. Always exports — the flag is authoritative,
+# any pre-existing $KB_ENABLED in the environment is overwritten so direct
+# `KB_ENABLED=true docker compose up` shenanigans can't lie to the agent
+# when the image was built without KB deps.
 _kb_export_env() {
-    if [[ -z "${KB_ENABLED:-}" ]]; then
-        export KB_ENABLED
-        KB_ENABLED=$(_kb_yaml_get "KB_ENABLED" "true")
+    if is_kbase_enabled; then
+        export KB_ENABLED="true"
+        export SKIP_KB="false"
+    else
+        export KB_ENABLED="false"
+        export SKIP_KB="true"
     fi
 }
 
@@ -515,12 +541,12 @@ _kb_get_neo4j_count() {
 
 cmd_install() {
     local gvm_mode="false"
-    local skipkbase="false"
+    local kbase_mode="false"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --gvm)       gvm_mode="true" ;;
-            --skipkbase) skipkbase="true" ;;
+            --gvm)   gvm_mode="true" ;;
+            --kbase) kbase_mode="true" ;;
             *) error "Unknown flag: $1"; exit 1 ;;
         esac
         shift
@@ -539,14 +565,22 @@ cmd_install() {
         info "Mode: Core services (without GVM/OpenVAS)"
         rm -f "$GVM_FLAG_FILE"
     fi
-    if [[ "$skipkbase" == "true" ]]; then
-        info "Mode: Skipping Knowledge Base (--skipkbase)"
-        export SKIP_KB="true"
-        export KB_ENABLED="false"
-        touch "$SKIPKBASE_FLAG_FILE"
+    # KB is OPT-IN at install time. The install always writes ONE of the two
+    # markers (.kbase-enabled or .kbase-disabled) so the user's explicit choice
+    # is sticky — `clean` keeps KB data on disk, and without an explicit
+    # "disabled" marker the migration heuristic would later see leftover FAISS
+    # data and re-enable KB. The legacy `.skipkbase` flag is removed.
+    rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
+    if [[ "$kbase_mode" == "true" ]]; then
+        info "Mode: Including Knowledge Base (--kbase)"
+        touch "$KBASE_FLAG_FILE"
+        rm -f "$KBASE_DISABLED_FLAG_FILE"
     else
-        rm -f "$SKIPKBASE_FLAG_FILE"
+        info "Mode: Skipping Knowledge Base (default; pass --kbase to enable)"
+        rm -f "$KBASE_FLAG_FILE"
+        touch "$KBASE_DISABLED_FLAG_FILE"
     fi
+    _kb_export_env
     echo ""
 
     # Export version for docker build arg
@@ -618,10 +652,8 @@ cmd_install() {
 }
 
 cmd_update() {
-    if is_skipkbase; then
-        export SKIP_KB="true"
-        export KB_ENABLED="false"
-    fi
+    _migrate_legacy_kbase_flag
+    _kb_export_env
 
     print_banner
     check_prerequisites
@@ -807,12 +839,12 @@ ensure_tool_images() {
 }
 
 cmd_up_dev() {
+    _migrate_legacy_kbase_flag
+    _kb_export_env
+
     local gvm_flag="false"
     if is_gvm_enabled; then
         gvm_flag="true"
-    fi
-    if is_skipkbase; then
-        export KB_ENABLED="false"
     fi
 
     ensure_tool_images
@@ -859,12 +891,12 @@ cmd_up_dev() {
 }
 
 cmd_up() {
+    _migrate_legacy_kbase_flag
+    _kb_export_env
+
     local gvm_mode="false"
     if is_gvm_enabled; then
         gvm_mode="true"
-    fi
-    if is_skipkbase; then
-        export KB_ENABLED="false"
     fi
 
     ensure_tool_images
@@ -1015,13 +1047,17 @@ cmd_purge() {
     fi
 
     rm -f "$GVM_FLAG_FILE"
-    rm -f "$SKIPKBASE_FLAG_FILE"
+    rm -f "$KBASE_FLAG_FILE"
+    rm -f "$KBASE_DISABLED_FLAG_FILE"
+    rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
     success "Full cleanup complete. All RedAmon data and images have been removed."
     echo ""
     info "To reinstall: ./redamon.sh install"
 }
 
 cmd_status() {
+    _migrate_legacy_kbase_flag
+
     local version
     version="$(get_version)"
 
@@ -1210,9 +1246,9 @@ cmd_help() {
     echo -e "${BOLD}Usage:${NC} ./redamon.sh <command> [options]"
     echo ""
     echo -e "${BOLD}Commands:${NC}"
-    echo -e "  ${GREEN}install${NC}              Build and start RedAmon (without GVM)"
+    echo -e "  ${GREEN}install${NC}              Build and start RedAmon (no GVM, no Knowledge Base)"
     echo -e "  ${GREEN}install --gvm${NC}        Build and start RedAmon (with GVM/OpenVAS)"
-    echo -e "  ${GREEN}install --skipkbase${NC}  Build without Knowledge Base (~4.4 GB lighter)"
+    echo -e "  ${GREEN}install --kbase${NC}      Build with Knowledge Base (~4.4 GB heavier, local KB enabled)"
     echo -e "  ${GREEN}update${NC}           Pull latest version and smart-rebuild changed services"
     echo -e "  ${GREEN}up${NC}               Start services"
     echo -e "  ${GREEN}up dev${NC}           Start in dev mode (hot-reload, auto-detects GVM mode)"
@@ -1224,9 +1260,10 @@ cmd_help() {
     echo -e "  ${GREEN}help${NC}             Show this help message"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo "  ./redamon.sh install               # First-time setup (no GVM)"
-    echo "  ./redamon.sh install --gvm         # First-time setup (full stack)"
-    echo "  ./redamon.sh install --skipkbase   # Lightweight (Tavily-only, no KB)"
+    echo "  ./redamon.sh install               # First-time setup (lightweight: no GVM, no KB)"
+    echo "  ./redamon.sh install --kbase       # First-time setup with local Knowledge Base"
+    echo "  ./redamon.sh install --gvm         # First-time setup with GVM/OpenVAS"
+    echo "  ./redamon.sh install --gvm --kbase # First-time setup with everything"
     echo "  ./redamon.sh update           # Update to latest version"
     echo "  ./redamon.sh up               # Start after reboot"
     echo "  ./redamon.sh up dev           # Dev mode with hot-reload (auto-detects GVM)"

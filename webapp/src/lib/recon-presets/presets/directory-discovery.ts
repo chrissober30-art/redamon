@@ -104,6 +104,14 @@ Pentesters and bug bounty hunters in the early recon phase who want a complete m
     // --- DISABLE banner grabbing ---
     bannerGrabEnabled: false,
 
+    // --- VHost & SNI: hidden vhosts are hidden HTTP surfaces (same discovery class as ffuf dirs) ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+
     // --- Katana: deep crawl ---
     katanaEnabled: true,
     katanaDepth: 4,

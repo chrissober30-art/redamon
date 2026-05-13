@@ -436,14 +436,14 @@ class TestAgenticKeyRotator(unittest.TestCase):
     """Verify the agentic copy of KeyRotator works identically."""
 
     def test_agentic_rotator_import(self):
-        """Can import KeyRotator from agentic/key_rotation.py."""
+        """Can import KeyRotator from agentic/orchestrator_helpers/key_rotation.py."""
         # Re-import from agentic path
         agentic_path = str(REPO_ROOT / "agentic")
         if agentic_path not in sys.path:
             sys.path.insert(0, agentic_path)
 
         import importlib
-        mod = importlib.import_module("key_rotation")
+        mod = importlib.import_module("orchestrator_helpers.key_rotation")
         importlib.reload(mod)  # Force reload to get agentic version
         AgenticKeyRotator = mod.KeyRotator
 

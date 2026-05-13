@@ -66,7 +66,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
         select: { id: true, name: true, description: true, content: true },
       })
-      return NextResponse.json({ ...projectWithoutBinary, userAttackSkills: skills })
+
+      // User-managed MCP servers (UI-driven via /settings/mcp). Read raw
+      // from UserSettings.mcpServers; the agent validates and merges them
+      // with system MCP servers via mcp_registry.parse_user_servers().
+      const userSettings = await prisma.userSettings.findUnique({
+        where: { userId: project.userId },
+        select: { mcpServers: true },
+      })
+      const userMcpServers = (userSettings?.mcpServers as Prisma.JsonValue) ?? []
+
+      return NextResponse.json({
+        ...projectWithoutBinary,
+        userAttackSkills: skills,
+        userMcpServers,
+      })
     }
 
     return NextResponse.json(projectWithoutBinary)

@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ExternalLink } from '@/components/ui'
+import { hostPortToUrl, ipToUrl, resolveLinkable } from '@/lib/url-utils'
 import { severityColor } from '../utils/chartTheme'
 import { ChartCard } from './ChartCard'
 import styles from './DataTable.module.css'
@@ -49,6 +51,16 @@ export function FindingsTable({ data, isLoading }: FindingsTableProps) {
     return '-'
   }
 
+  const getTargetHref = (f: SecurityFinding): string | null => {
+    if (f.target) return resolveLinkable(f.target)
+    if (f.host) {
+      if (f.targetPort) return hostPortToUrl(f.host, f.targetPort)
+      return resolveLinkable(f.host)
+    }
+    if (f.targetIp) return ipToUrl(f.targetIp, f.targetPort ?? undefined)
+    return null
+  }
+
   return (
     <ChartCard title="Security Findings" subtitle={`${data?.length || 0} findings`} isLoading={isLoading} isEmpty={!sorted.length}>
       <div className={styles.tableWrap}>
@@ -79,7 +91,11 @@ export function FindingsTable({ data, isLoading }: FindingsTableProps) {
                 </td>
                 <td className="tableCell tableCellTruncate" title={row.name}>{row.name}</td>
                 <td className="tableCell tableCellMono tableCellTruncate" title={getTargetDisplay(row)}>
-                  {getTargetDisplay(row)}
+                  {(() => {
+                    const display = getTargetDisplay(row)
+                    const href = getTargetHref(row)
+                    return href ? <ExternalLink href={href}>{display}</ExternalLink> : display
+                  })()}
                 </td>
                 <td className="tableCell">
                   <span className={styles.sourceBadge}>{row.findingSource}</span>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, Play, Shield } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
@@ -25,6 +25,7 @@ export function NmapSection({ data, updateField, onRun }: NmapSectionProps) {
           <Shield size={16} />
           Nmap Service Detection
           <NodeInfoTooltip section="Nmap" />
+          <WikiInfoButton target="Nmap" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>

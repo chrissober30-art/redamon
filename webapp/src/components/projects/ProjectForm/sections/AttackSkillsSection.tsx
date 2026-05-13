@@ -2,14 +2,19 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { ChevronDown, Bug, KeyRound, Mail, Swords, Loader2, Settings, Zap, Database, Code2 } from 'lucide-react'
+import { ChevronDown, Bug, KeyRound, Mail, Swords, Loader2, Settings, Zap, Database, Code2, Globe, Terminal, FolderTree, Download } from 'lucide-react'
 import type { Project } from '@prisma/client'
 import { useProject } from '@/providers/ProjectProvider'
 import { Toggle } from '@/components/ui/Toggle/Toggle'
+import { useAlertModal } from '@/components/ui/AlertModal'
+import { WikiInfoButton } from '@/components/ui/WikiInfoButton'
 import { HydraSection } from './BruteForceSection'
 import { PhishingSection } from './PhishingSection'
 import { DosSection } from './DosSection'
 import { SqliSection } from './SqliSection'
+import { SsrfSection } from './SsrfSection'
+import { RceSection } from './RceSection'
+import { PathTraversalSection } from './PathTraversalSection'
 import styles from '../ProjectForm.module.css'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
@@ -53,6 +58,24 @@ const BUILT_IN_SKILLS: BuiltInSkillDef[] = [
     icon: <Code2 size={16} />,
   },
   {
+    id: 'ssrf',
+    name: 'Server-Side Request Forgery',
+    description: 'SSRF detection, internal-network probing, cloud-metadata pivots, protocol smuggling, DNS rebinding, and Redis/FastCGI/Docker RCE chains',
+    icon: <Globe size={16} />,
+  },
+  {
+    id: 'rce',
+    name: 'Remote Code Execution',
+    description: 'RCE / command injection across six primitives: shell-metachar injection (commix), SSTI (sstimap), Java/PHP/Python deserialization (ysoserial), eval / OGNL / SpEL, media-pipeline RCE, and SSRF-to-RCE chains',
+    icon: <Terminal size={16} />,
+  },
+  {
+    id: 'path_traversal',
+    name: 'Path Traversal / LFI / RFI',
+    description: 'Arbitrary file read via path traversal, Local File Inclusion, Remote File Inclusion, PHP wrapper chains (php://filter, data://, expect://), log poisoning, and Zip Slip archive-extraction tests',
+    icon: <FolderTree size={16} />,
+  },
+  {
     id: 'brute_force_credential_guess',
     name: 'Credential Testing',
     description: 'Credential policy validation using Hydra against login services',
@@ -82,6 +105,9 @@ const DEFAULT_CONFIG: AttackSkillConfig = {
     cve_exploit: true,
     sql_injection: true,
     xss: true,
+    ssrf: true,
+    rce: true,
+    path_traversal: true,
     brute_force_credential_guess: false,
     phishing_social_engineering: false,
     denial_of_service: false,
@@ -99,10 +125,12 @@ function getConfig(data: FormData): AttackSkillConfig {
 
 export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionProps) {
   const { userId } = useProject()
+  const { alertError, alert: showAlert } = useAlertModal()
   const [builtInOpen, setBuiltInOpen] = useState(true)
   const [userOpen, setUserOpen] = useState(true)
   const [userSkills, setUserSkills] = useState<UserSkillDef[]>([])
   const [loading, setLoading] = useState(true)
+  const [importing, setImporting] = useState(false)
 
   const config = getConfig(data)
 
@@ -122,11 +150,20 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
   useEffect(() => { fetchUserSkills() }, [fetchUserSkills])
 
   const isBuiltInEnabled = (skillId: string) => {
-    return config.builtIn[skillId] !== false
+    if (skillId in config.builtIn) {
+      return config.builtIn[skillId] !== false
+    }
+    // Key missing from saved config: fall back to the shipped default so the
+    // UI matches what the Python agent does (get_enabled_builtin_skills is a
+    // strict has-key check; missing key = disabled). Without this fallback,
+    // legacy projects show new skills as ON in the UI while the agent treats
+    // them as OFF, and toggling does not persist until the user explicitly
+    // clicks. Default-OFF skills like ssrf are the obvious victim.
+    return DEFAULT_CONFIG.builtIn[skillId] ?? false
   }
 
   const isUserEnabled = (skillId: string) => {
-    return config.user[skillId] !== false
+    return config.user[skillId] === true
   }
 
   const toggleBuiltIn = (skillId: string, enabled: boolean) => {
@@ -149,6 +186,67 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
     updateField('attackSkillConfig', newConfig as unknown as FormData['attackSkillConfig'])
   }
 
+  const downloadSkill = useCallback(async (skillId: string, skillName: string) => {
+    if (!userId) return
+    try {
+      const resp = await fetch(`/api/users/${userId}/attack-skills/${skillId}`)
+      if (!resp.ok) return
+      const skill = await resp.json()
+      const blob = new Blob([skill.content], { type: 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${skillName}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Failed to download skill:', err)
+    }
+  }, [userId])
+
+  const importCommunityAgentSkills = useCallback(async () => {
+    if (!userId || importing) return
+    setImporting(true)
+    try {
+      const previousIds = new Set(userSkills.map(s => s.id))
+
+      const resp = await fetch(`/api/users/${userId}/attack-skills/import-community`, { method: 'POST' })
+      const result = await resp.json()
+      if (!resp.ok) {
+        alertError(result.error || 'Failed to import community skills')
+        return
+      }
+
+      const refreshResp = await fetch(`/api/users/${userId}/attack-skills`)
+      if (!refreshResp.ok) {
+        showAlert(result.message || `Imported ${result.imported ?? 0} community skill(s).`)
+        return
+      }
+      const fresh: UserSkillDef[] = await refreshResp.json()
+      setUserSkills(fresh)
+
+      // Enable newly imported skills in THIS project's config (existing ones untouched).
+      const newlyImported = fresh.filter(s => !previousIds.has(s.id))
+      if (newlyImported.length > 0) {
+        const updatedUser = { ...config.user }
+        for (const s of newlyImported) updatedUser[s.id] = true
+        const newConfig: AttackSkillConfig = { ...config, user: updatedUser }
+        updateField('attackSkillConfig', newConfig as unknown as FormData['attackSkillConfig'])
+      }
+
+      showAlert(
+        `Imported ${result.imported ?? 0} community skill(s)` +
+        (result.skipped ? `, skipped ${result.skipped} duplicate(s)` : '') +
+        '. New skills are enabled for this project.'
+      )
+    } catch (err) {
+      console.error('Failed to import community skills:', err)
+      alertError('Failed to import community skills')
+    } finally {
+      setImporting(false)
+    }
+  }, [userId, importing, userSkills, config, updateField, alertError, showAlert])
+
   return (
     <>
       {/* Built-in Agent Skills */}
@@ -157,6 +255,7 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
           <h2 className={styles.sectionTitle}>
             <Bug size={16} />
             Built-in Agent Skills
+            <WikiInfoButton target="AttackSkills" />
             <span className={styles.badgeActive}>Active</span>
           </h2>
           <ChevronDown
@@ -234,6 +333,15 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
                   {enabled && skill.id === 'sql_injection' && (
                     <SqliSection data={data} updateField={updateField} />
                   )}
+                  {enabled && skill.id === 'ssrf' && (
+                    <SsrfSection data={data} updateField={updateField} />
+                  )}
+                  {enabled && skill.id === 'rce' && (
+                    <RceSection data={data} updateField={updateField} />
+                  )}
+                  {enabled && skill.id === 'path_traversal' && (
+                    <PathTraversalSection data={data} updateField={updateField} />
+                  )}
                 </div>
               )
             })}
@@ -247,18 +355,35 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
           <h2 className={styles.sectionTitle}>
             <Swords size={16} />
             User Agent Skills
+            <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/Agent-Skills#community-skills" title="Open Community Agent Skills wiki section" />
           </h2>
-          <ChevronDown
-            size={16}
-            className={`${styles.sectionIcon} ${userOpen ? styles.sectionIconOpen : ''}`}
-          />
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={(e) => { e.stopPropagation(); importCommunityAgentSkills() }}
+              disabled={importing || !userId}
+              title="Import all community attack skills into your library and enable them for this project"
+            >
+              {importing
+                ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                : <Download size={14} />}
+              Import from Community
+            </button>
+            <ChevronDown
+              size={16}
+              className={`${styles.sectionIcon} ${userOpen ? styles.sectionIconOpen : ''}`}
+            />
+          </div>
         </div>
 
         {userOpen && (
           <div className={styles.sectionContent}>
             <p className={styles.sectionDescription}>
               Custom agent skills uploaded from Global Settings. Enable a skill to let the agent
-              classify requests into it and use its workflow.
+              classify requests into it and use its workflow. Newly imported skills default to off
+              for new projects; use the Import shortcut above to bulk-import community templates and
+              auto-enable them for this project.
             </p>
 
             {loading ? (
@@ -320,7 +445,7 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
                       onChange={(v) => toggleUser(skill.id, v)}
                       size="large"
                     />
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -337,9 +462,26 @@ export function AttackSkillsSection({ data, updateField }: AttackSkillsSectionPr
                         color: 'var(--text-tertiary)',
                         marginTop: '2px',
                       }}>
+                        {skill.description || (
+                          <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No description</span>
+                        )}
+                      </div>
+                      <div style={{
+                        fontSize: 'var(--text-xs)',
+                        color: 'var(--text-tertiary)',
+                        marginTop: '2px',
+                      }}>
                         Uploaded {new Date(skill.createdAt).toLocaleDateString()}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="iconButton"
+                      title="Download .md"
+                      onClick={() => downloadSkill(skill.id, skill.name)}
+                    >
+                      <Download size={14} />
+                    </button>
                   </div>
                 )
               })

@@ -964,6 +964,7 @@ flowchart TB
     subgraph InfoTools["Informational Tools"]
         QG[query_graph<br/>Neo4j queries]
         WS[web_search<br/>Tavily web search]
+        CVE[cve_intel<br/>vulnx CVE intelligence]
         CURL[execute_curl<br/>HTTP requests & vuln probing]
         NAABU[execute_naabu<br/>Port scanning]
         NMAP_T[execute_nmap<br/>Deep scanning & NSE scripts]
@@ -2123,6 +2124,37 @@ What members deliberately do NOT inherit from `AgentState`:
 - `phase_transition_pending`, `user_approval_response`, members cannot request phase transitions.
 - `qa_history`, `objective_history`, `chain_decisions_memory`, `prior_chains`, root-only conversation memory.
 - `_deploy_fireteam_plan`, members cannot recursively deploy.
+
+### Chain Context Propagation (Parent ⇄ Members ⇄ Next Wave)
+
+Members are not dispatched cold. Each receives a snapshot of the parent's engagement state at deploy time, rendered into the member's system prompt with the same `format_chain_context()` function the root agent uses on itself, so members open every iteration with full visibility into what has already been discovered.
+
+**What flows parent → member at deploy time** (snapshotted in [`fireteam_deploy_node._build_member_state`](../agentic/orchestrator_helpers/nodes/fireteam_deploy_node.py)):
+
+| Field on `FireteamMemberState` | Source on `AgentState` | Rendered as |
+|---|---|---|
+| `_parent_chain_findings` | `chain_findings_memory` | `── Findings ──` block with `(from <agent>)` attribution, `evidence` up to 10 000 chars |
+| `_parent_chain_failures` | `chain_failures_memory` | `── Failed Attempts ──` with `lesson_learned` |
+| `_parent_chain_decisions` | `chain_decisions_memory` | `── Decisions ──` (phase transitions, etc.) |
+| `_parent_execution_trace` | `execution_trace` + `_completed_step` (belt-and-suspenders) | `── Recent Steps ──` with tool args, analysis, and full output of the last tool (5 000 char cap) |
+| `parent_target_info` | `target_info` | `## Target context` block (ports, services, technologies, vulns) |
+
+These four `_parent_*` fields **must** be declared on the `FireteamMemberState` TypedDict for the same reason described in the previous section, otherwise LangGraph strips them at the boundary.
+
+The member's system prompt then carries two distinct chain-context renders, both produced by `format_chain_context()`:
+
+- **`## Engagement state`** ← `_parent_*` snapshot. Frozen at deploy time, lets the member see findings from the root agent and any earlier fireteam wave, with source attribution preserved.
+- **`## Your local progress in this run`** ← member's own `chain_findings_memory` + `execution_trace`. Updates every iteration so the member sees its own prior tool calls and findings.
+
+**What flows member → parent at wave completion** (in `fireteam_collect_node`):
+
+- Each `FireteamMemberResult.findings` is appended to the parent's `chain_findings_memory` with extra `source_agent`, `agent_id`, and `fireteam_id` stamps. Findings are simultaneously persisted to Neo4j inline by the member's own think node, so the graph DB is the durable ground truth and `chain_findings_memory` is the in-prompt mirror.
+- Each member's `target_info_delta` is merged into the parent's `target_info` via `_merge_target_info` (de-duplicated list extension, dict merge, scalars only filled when empty).
+- TODOs that reference a succeeded member name are auto-completed.
+
+The parent's next `think_node` invocation re-renders the merged `chain_findings_memory` into its own `--- CHAIN CONTEXT ---` block. If the parent then dispatches another fireteam, the cycle repeats: the new wave's members snapshot the now-enriched `chain_findings_memory` into their `_parent_chain_findings`, and they open with everything the engagement has learned so far.
+
+**The critical condition for this pipeline to carry anything.** A finding only enters `chain_findings_memory` if the member's LLM emits it under `output_analysis.chain_findings` during an iteration. If a member finishes with discoveries described only in prose `completion_reason`, the rest of the pipeline transports nothing. The member system prompt enforces this with an explicit *"every distinct discovery in your trace MUST appear as a `chain_findings` entry; a 0-finding completion is almost always wrong"* rule, alongside three self-check rules (find-rate, duplicate-target, negative-result) that the member is asked to re-read every iteration.
 
 ### Worked Example
 
@@ -4129,7 +4161,8 @@ flowchart LR
   "execute_code": ["exploitation", "post_exploitation"],
   "metasploit_console": ["exploitation", "post_exploitation"],
   "msf_restart": ["exploitation", "post_exploitation"],
-  "web_search": ["informational", "exploitation", "post_exploitation"]
+  "web_search": ["informational", "exploitation", "post_exploitation"],
+  "cve_intel": ["informational", "exploitation", "post_exploitation"]
 }
 ```
 

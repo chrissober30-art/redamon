@@ -161,6 +161,16 @@ def whois_lookup(domain: str, save_output: bool = True, settings: Optional[dict]
     Returns:
         Dictionary containing all WHOIS data with metadata.
     """
+    if settings:
+        from recon.helpers import print_effective_settings
+        print_effective_settings(
+            "WHOIS",
+            settings,
+            keys=[
+                ("WHOIS_MAX_RETRIES", "Retry policy"),
+            ],
+        )
+
     whois_result, domain = get_whois_data(domain, settings=settings)
     result = whois_to_dict(whois_result, domain)
 

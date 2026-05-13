@@ -129,6 +129,19 @@
 .providerIcon {
   font-size: var(--text-lg);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+}
+
+.providerLogoImg {
+  width: 28px !important;
+  height: 28px !important;
+  max-width: 28px;
+  max-height: 28px;
+  object-fit: contain;
+  display: block;
 }
 
 .providerInfo {
@@ -190,6 +203,21 @@
 
 .providerTypeIcon {
   font-size: var(--text-xl);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  margin-bottom: var(--space-3);
+  color: var(--text-primary);
+}
+
+.providerTypeLogo {
+  width: 40px !important;
+  height: 40px !important;
+  max-width: 40px;
+  max-height: 40px;
+  object-fit: contain;
+  display: block;
 }
 
 .providerTypeName {
@@ -212,11 +240,33 @@
   padding: var(--space-5);
 }
 
+.formSection :global(.formGroup) {
+  margin-bottom: var(--space-4);
+}
+
+.formSection :global(.formGroup):last-child {
+  margin-bottom: 0;
+}
+
 .formHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-4);
+}
+
+.apiKeyLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--accent-primary);
+  text-decoration: none;
+  margin-bottom: var(--space-4);
+}
+
+.apiKeyLink:hover {
+  text-decoration: underline;
 }
 
 .formTitle {

@@ -357,6 +357,18 @@ def run_otx_enrichment(combined_result: dict, settings: dict[str, Any]) -> dict:
     if not settings.get("OTX_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "OTX",
+        settings,
+        keys=[
+            ("OTX_ENABLED", "Toggle"),
+            ("OTX_WORKERS", "Performance"),
+            ("OTX_API_KEY", "API credentials"),
+            ("OTX_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     key_rotator = settings.get("OTX_KEY_ROTATOR")
     api_key = _otx_effective_key(settings, key_rotator)
     # Allow anonymous requests — OTX API v1 works without a key (reduced rate limits)

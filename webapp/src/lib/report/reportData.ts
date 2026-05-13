@@ -150,6 +150,24 @@ export interface ThreatPulseRecord {
   ipAddress: string | null
 }
 
+export interface VhostSniFindingRecord {
+  hostname: string
+  ip: string | null
+  port: number | null
+  layer: 'L7' | 'L4' | 'both' | string
+  type: string
+  severity: string
+  internalPatternMatch: string | null
+  baselineStatus: number | null
+  baselineSize: number | null
+  observedStatus: number | null
+  observedSize: number | null
+  sizeDelta: number | null
+  description: string | null
+  firstSeen: string | null
+  lastSeen: string | null
+}
+
 export interface MalwareRecord {
   hash: string
   hashType: string | null
@@ -258,6 +276,20 @@ export interface ReportData {
     findings: GraphqlFindingRecord[]
   }
 
+  // VHost & SNI Enumeration
+  vhostSni: {
+    totalFindings: number
+    ipsTested: number
+    candidatesTested: number
+    anomaliesL7: number
+    anomaliesL4: number
+    reverseProxiesDetected: number
+    bySeverity: { severity: string; count: number }[]
+    byLayer: { layer: string; count: number }[]
+    byType: { findingType: string; count: number }[]
+    findings: VhostSniFindingRecord[]
+  }
+
   // OTX Threat Intelligence
   otx: {
     totalPulses: number
@@ -355,6 +387,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
     secretsData,
     jsReconData,
     graphqlData,
+    vhostSniData,
     otxData,
   ] = await Promise.all([
     withSession(s => queryGraphOverview(s, projectId)),
@@ -366,6 +399,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
     withSession(s => querySecrets(s, projectId)),
     withSession(s => queryJsRecon(s, projectId)),
     withSession(s => queryGraphql(s, projectId)),
+    withSession(s => queryVhostSni(s, projectId)),
     withSession(s => queryOtx(s, projectId)),
   ])
 
@@ -439,6 +473,10 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       return sum + d.count * w
     }, 0)
     const otxScore = otxData.totalPulses * 20 + otxData.totalMalware * 50
+    const vhostSniScore = vhostSniData.bySeverity.reduce((sum: number, d: { severity: string; count: number }) => {
+      const w = d.severity === 'high' ? 40 : d.severity === 'medium' ? 20 : d.severity === 'low' ? 8 : 2
+      return sum + d.count * w
+    }, 0)
     const injectableScore = injectableParams * 25
     const expiredCertScore = graphOverview.certificateHealth.expired * 10
     // Missing security headers penalty
@@ -456,7 +494,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       + chainExploitScore + chainFindingsScore + capecScore
       + secretsScore + sensitiveFilesScore + injectableScore
       + expiredCertScore + missingHeaderScore
-      + trufflehogScore + jsReconScore + graphqlScore + otxScore
+      + trufflehogScore + jsReconScore + graphqlScore + otxScore + vhostSniScore
     const riskScore = Math.min(100, Math.round(15 * Math.log(rawRisk + 1)))
     const riskLabel: 'Critical' | 'High' | 'Medium' | 'Low' | 'Minimal' =
       riskScore >= 80 ? 'Critical' : riskScore >= 60 ? 'High'
@@ -559,6 +597,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       secrets: secretsData,
       jsRecon: jsReconData,
       graphqlScan: graphqlData,
+      vhostSni: vhostSniData,
       otx: otxData,
       attackChains: attackChainData,
       fireteams: fireteamsBlock,
@@ -808,6 +847,7 @@ async function queryVulnerabilities(session: any, pid: string) {
           ep.path AS endpointPath,
           param.name AS paramName,
           CASE WHEN v.source = 'takeover_scan' THEN 'Subdomain Takeover'
+               WHEN v.source = 'vhost_sni_enum' THEN 'VHost & SNI'
                WHEN ep IS NOT NULL THEN 'DAST'
                WHEN v.source = 'gvm' THEN 'GVM'
                WHEN v.source = 'nuclei' THEN 'Nuclei'
@@ -1243,6 +1283,95 @@ async function queryGraphql(session: any, pid: string) {
         curlVerify,
       }
     }),
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function queryVhostSni(session: any, pid: string) {
+  const bySevRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'vhost_sni_enum'})
+     RETURN v.severity AS severity, count(v) AS count ORDER BY count DESC`,
+    { pid }
+  )
+  const byLayerRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'vhost_sni_enum'})
+     RETURN coalesce(v.layer, 'unknown') AS layer, count(v) AS count ORDER BY count DESC`,
+    { pid }
+  )
+  const byTypeRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'vhost_sni_enum'})
+     RETURN coalesce(v.type, 'unknown') AS findingType, count(v) AS count ORDER BY count DESC`,
+    { pid }
+  )
+  const ipsRes = await session.run(
+    `MATCH (i:IP {project_id: $pid, vhost_sni_tested: true})
+     RETURN count(i) AS ipsTested,
+            sum(coalesce(i.hidden_vhost_count, 0)) AS candidatesAnomalies,
+            sum(CASE WHEN coalesce(i.is_reverse_proxy, false) THEN 1 ELSE 0 END) AS reverseProxies`,
+    { pid }
+  )
+  const findingsRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'vhost_sni_enum'})
+     RETURN v.hostname AS hostname,
+            v.ip AS ip,
+            v.port AS port,
+            coalesce(v.layer, 'L7') AS layer,
+            coalesce(v.type, 'hidden_vhost') AS type,
+            v.severity AS severity,
+            v.internal_pattern_match AS internalPatternMatch,
+            v.baseline_status AS baselineStatus,
+            v.baseline_size AS baselineSize,
+            v.observed_status AS observedStatus,
+            v.observed_size AS observedSize,
+            v.size_delta AS sizeDelta,
+            v.description AS description,
+            v.first_seen AS firstSeen,
+            v.last_seen AS lastSeen
+     ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+              v.hostname
+     LIMIT 50`,
+    { pid }
+  )
+
+  const totalFindings = bySevRes.records.reduce((s: number, r: any) => s + toNum(r.get('count')), 0)
+  const ipsRecord = ipsRes.records[0]
+  const byLayer = byLayerRes.records.map((r: any) => ({ layer: r.get('layer') as string, count: toNum(r.get('count')) }))
+  const anomaliesL7 = byLayer.filter((d: { layer: string; count: number }) => d.layer === 'L7' || d.layer === 'both').reduce((s: number, d: { count: number }) => s + d.count, 0)
+  const anomaliesL4 = byLayer.filter((d: { layer: string; count: number }) => d.layer === 'L4' || d.layer === 'both').reduce((s: number, d: { count: number }) => s + d.count, 0)
+
+  return {
+    totalFindings,
+    ipsTested: ipsRecord ? toNum(ipsRecord.get('ipsTested')) : 0,
+    candidatesTested: ipsRecord ? toNum(ipsRecord.get('candidatesAnomalies')) : 0,
+    anomaliesL7,
+    anomaliesL4,
+    reverseProxiesDetected: ipsRecord ? toNum(ipsRecord.get('reverseProxies')) : 0,
+    bySeverity: bySevRes.records.map((r: any) => ({
+      severity: (r.get('severity') as string) || 'unknown',
+      count: toNum(r.get('count')),
+    })),
+    byLayer,
+    byType: byTypeRes.records.map((r: any) => ({
+      findingType: (r.get('findingType') as string) || 'unknown',
+      count: toNum(r.get('count')),
+    })),
+    findings: findingsRes.records.map((r: any) => ({
+      hostname: (r.get('hostname') as string) || '',
+      ip: (r.get('ip') as string) || null,
+      port: r.get('port') != null ? toNum(r.get('port')) : null,
+      layer: (r.get('layer') as string) || 'L7',
+      type: (r.get('type') as string) || 'hidden_vhost',
+      severity: (r.get('severity') as string) || 'info',
+      internalPatternMatch: (r.get('internalPatternMatch') as string) || null,
+      baselineStatus: r.get('baselineStatus') != null ? toNum(r.get('baselineStatus')) : null,
+      baselineSize: r.get('baselineSize') != null ? toNum(r.get('baselineSize')) : null,
+      observedStatus: r.get('observedStatus') != null ? toNum(r.get('observedStatus')) : null,
+      observedSize: r.get('observedSize') != null ? toNum(r.get('observedSize')) : null,
+      sizeDelta: r.get('sizeDelta') != null ? toNum(r.get('sizeDelta')) : null,
+      description: (r.get('description') as string) || null,
+      firstSeen: (r.get('firstSeen') as string) || null,
+      lastSeen: (r.get('lastSeen') as string) || null,
+    })),
   }
 }
 

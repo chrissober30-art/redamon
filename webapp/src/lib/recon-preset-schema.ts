@@ -17,6 +17,8 @@ export const reconPresetSchema = z.object({
   // -- Global --
   scanModules: strArr,
   stealthMode: bool,
+  aiInPipeline: bool,
+  aiPipelineModel: str,
   updateGraphDb: bool,
   useTorForRecon: bool,
   useBruteforceForSubdomains: bool,
@@ -234,6 +236,7 @@ export const reconPresetSchema = z.object({
   ffufFollowRedirects: bool,
   ffufSmartFuzz: bool,
   ffufParallelism: int,
+  ffufAiExtensions: bool,
 
   // -- Parameter Discovery: Arjun --
   arjunEnabled: bool,
@@ -301,6 +304,8 @@ export const reconPresetSchema = z.object({
   nucleiMaxRedirects: int,
   nucleiScanAllIps: bool,
   nucleiInteractsh: bool,
+  nucleiAiTags: bool,
+  nucleiAiResponseFilter: bool,
 
   // -- Subdomain Takeover --
   subdomainTakeoverEnabled: bool,
@@ -319,11 +324,25 @@ export const reconPresetSchema = z.object({
   takeoverConfidenceThreshold: int,
   takeoverRateLimit: int,
   takeoverManualReviewAutoPublish: bool,
+  takeoverAiClassifier: bool,
   baddnsEnabled: bool,
   baddnsDockerImage: str,
   baddnsModules: strArr,
   baddnsNameservers: strArr,
   baddnsRunTimeout: int,
+
+  // -- VHost & SNI Enumeration --
+  vhostSniEnabled: bool,
+  vhostSniTimeout: int,
+  vhostSniConcurrency: int,
+  vhostSniBaselineSizeTolerance: int,
+  vhostSniTestL7: bool,
+  vhostSniTestL4: bool,
+  vhostSniInjectDiscovered: bool,
+  vhostSniUseDefaultWordlist: bool,
+  vhostSniUseGraphCandidates: bool,
+  vhostSniMaxCandidatesPerIp: int,
+  vhostSniCustomWordlist: str,
 
   // -- CVE Lookup --
   cveLookupEnabled: bool,
@@ -346,6 +365,7 @@ export const reconPresetSchema = z.object({
   securityCheckDirectIpHttps: bool,
   securityCheckIpApiExposed: bool,
   securityCheckWafBypass: bool,
+  wafAiClassifier: bool,
   securityCheckTlsExpiringSoon: bool,
   securityCheckTlsExpiryDays: int,
   securityCheckMissingReferrerPolicy: bool,
@@ -415,6 +435,8 @@ export const RECON_PARAMETER_CATALOG = `
 ## Scan Modules & Global
 - scanModules: string[] - Pipeline phases to run. Values: "domain_discovery", "port_scan", "http_probe", "resource_enum", "vuln_scan", "js_recon"
 - stealthMode: boolean - Reduce scan aggressiveness and network noise
+- aiInPipeline: boolean - Master toggle that enables AI-powered enhancements across all recon modules that support them. Cascades on/off to per-tool AI flags (ffufAiExtensions, nucleiAiTags, wafAiClassifier, nucleiAiResponseFilter, takeoverAiClassifier).
+- aiPipelineModel: string - Model identifier for the AI hooks in recon (e.g. "claude-opus-4-6", "claude-haiku-4-5-20251001"). Independent of agentOpenaiModel.
 - updateGraphDb: boolean - Store results in the graph database
 - useTorForRecon: boolean - Route traffic through Tor
 - useBruteforceForSubdomains: boolean - Enable DNS brute-force for subdomain discovery
@@ -632,6 +654,7 @@ export const RECON_PARAMETER_CATALOG = `
 - ffufFollowRedirects: boolean
 - ffufSmartFuzz: boolean
 - ffufParallelism: integer - Targets fuzzed in parallel
+- ffufAiExtensions: boolean - When true, FFuf file extensions are picked per-target by AI from response headers (requires aiInPipeline=true). The static ffufExtensions list is ignored.
 
 ## Parameter Discovery - Arjun
 - arjunEnabled: boolean - Run Arjun parameter discovery
@@ -699,6 +722,8 @@ export const RECON_PARAMETER_CATALOG = `
 - nucleiMaxRedirects: integer
 - nucleiScanAllIps: boolean
 - nucleiInteractsh: boolean - Out-of-band interaction detection
+- nucleiAiTags: boolean - Use AI to prune the Nuclei tag list based on detected tech stack (requires aiInPipeline=true). Replaces the static nucleiTags list with a tech-aware subset chosen by the LLM at scan time. Default false.
+- nucleiAiResponseFilter: boolean - Use AI to classify Nuclei response bodies as WAF/rate-limit block pages when the static keyword list misses (requires aiInPipeline=true). Augments is_false_positive(); kicks in only on suspicious status codes (403/406/418/429/503) so cost stays bounded. Default false.
 
 ## Subdomain Takeover (Subjack + Nuclei takeover templates)
 - subdomainTakeoverEnabled: boolean - Master switch for the layered takeover scanner (default false)
@@ -717,11 +742,25 @@ export const RECON_PARAMETER_CATALOG = `
 - takeoverConfidenceThreshold: integer - 0..100. Findings >= threshold+10 are confirmed, >= threshold are likely, otherwise manual_review
 - takeoverRateLimit: integer - Nuclei requests/second for the takeover pass (default 50)
 - takeoverManualReviewAutoPublish: boolean - Publish manual_review findings into the main Vulnerability stream (default false)
+- takeoverAiClassifier: boolean - Use AI to disambiguate takeover findings from WAF "no host" block pages that match the same static fingerprint (requires aiInPipeline=true). For each finding the scanner probes the host, short-circuits on third-party vendor tokens, and otherwise asks the LLM to classify the body. AI-flagged collisions get score -40 (lands in manual_review). Default false.
 - baddnsEnabled: boolean - Run the BadDNS sidecar (AGPL-3.0, isolated Docker container). Requires "docker compose --profile tools build baddns-scanner". Default false.
 - baddnsDockerImage: string - BadDNS image name. Default "redamon-baddns:latest" (built locally from baddns_scan/Dockerfile)
 - baddnsModules: string[] - Subset of BadDNS modules to run. Valid: cname, ns, mx, txt, spf, dmarc, wildcard, nsec, references, zonetransfer. (MTA-STS exists in baddns 2.1.0 but is not CLI-addressable due to an upstream validator regex bug -- omit.) Default: ["cname","ns","mx","txt","spf"]
 - baddnsNameservers: string[] - Optional custom DNS resolvers (e.g. ["1.1.1.1","8.8.8.8"]). Empty = system resolvers.
 - baddnsRunTimeout: integer - Hard wall clock for the BadDNS pass in seconds. Default 1800.
+
+## VHost & SNI Enumeration (curl-based hidden virtual host discovery)
+- vhostSniEnabled: boolean - Master switch. Tests every (subdomain, IP, port) for hidden virtual hosts via L7 (HTTP Host header trick) and L4 (TLS SNI trick). Active scan, sends extra traffic to each target IP. Default false.
+- vhostSniTimeout: integer - curl --connect-timeout per request in seconds (total budget per request is 3x). Default 3.
+- vhostSniConcurrency: integer - Parallel curl probes per IP/port. Higher = faster, louder. Default 20.
+- vhostSniBaselineSizeTolerance: integer - Body size deltas within this many bytes are not flagged (suppresses Set-Cookie / timestamp jitter). Default 50.
+- vhostSniTestL7: boolean - Run the HTTP Host header trick (catches classic Apache/Nginx vhosts). Default true.
+- vhostSniTestL4: boolean - Run the TLS SNI trick via curl --resolve (catches modern reverse proxies, k8s ingress, Cloudflare). Default true.
+- vhostSniInjectDiscovered: boolean - When a hidden vhost is confirmed, create a BaseURL node so a follow-up partial recon (Katana, Nuclei) can scan it. Default true.
+- vhostSniUseDefaultWordlist: boolean - Use the bundled vhost-common.txt wordlist (~2,300 admin/dev/staging/internal/modern-stack prefixes, expanded as {prefix}.{target_apex}). Default true.
+- vhostSniUseGraphCandidates: boolean - Pull hostnames from existing Subdomain, ExternalDomain, TLS SAN list, CNAME targets and reverse-DNS PTR records resolving to each target IP. Highest signal source. Default true.
+- vhostSniMaxCandidatesPerIp: integer - Hard cap on candidates per IP to bound run time. Default 2000.
+- vhostSniCustomWordlist: string - Optional newline-separated custom prefixes/hostnames (per-project file/text). Bare prefixes expand as {prefix}.{target_apex}; full hostnames are used as-is. Default "".
 
 ## CVE Lookup
 - cveLookupEnabled: boolean
@@ -744,6 +783,7 @@ export const RECON_PARAMETER_CATALOG = `
 - securityCheckDirectIpHttps: boolean - Check direct IP HTTPS access
 - securityCheckIpApiExposed: boolean
 - securityCheckWafBypass: boolean
+- wafAiClassifier: boolean - Use AI to classify WAF/CDN presence from response headers/body/latency when the static check misses (requires aiInPipeline=true). Augments _has_cdn_markers and check_waf_bypass; AI-detected bypasses are tagged detection_method=ai_classifier. Default false.
 - securityCheckTlsExpiringSoon: boolean
 - securityCheckTlsExpiryDays: integer - Days threshold
 - securityCheckMissingReferrerPolicy: boolean

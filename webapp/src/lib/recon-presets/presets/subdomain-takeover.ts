@@ -175,6 +175,17 @@ Discover every subdomain that exists and squeeze every possible takeover finding
     takeoverRateLimit: 100,                    // Higher than default 50 -- faster Nuclei pass
     takeoverManualReviewAutoPublish: true,     // Elevate manual_review findings to severity: medium
 
+    // VHost & SNI -- discovers hidden vhosts behind shared IPs (admin / staging /
+    // internal panels not listed in DNS). Conceptually adjacent to subdomain
+    // takeover hunting — both expose hidden infrastructure.
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+    vhostSniConcurrency: 30,            // Aggressive on a takeover-hunting preset
+
     // BadDNS AGPL-3.0 sidecar -- deep DNS coverage across all high-value modules.
     // Runs in its own Docker image (redamon-baddns:latest); no license contagion
     // since RedAmon never imports baddns and communicates over stdout only.

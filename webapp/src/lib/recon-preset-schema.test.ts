@@ -2,6 +2,7 @@
  * Unit tests for the recon preset schema, extractJson helper,
  * and the resolveProviderType logic used by the generate API route.
  */
+/// <reference types="vite/client" />
 import { describe, test, expect } from 'vitest'
 import { reconPresetSchema, extractJson, RECON_PARAMETER_CATALOG } from './recon-preset-schema'
 

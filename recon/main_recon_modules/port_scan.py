@@ -453,6 +453,29 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
         print("[-][Naabu] Disabled — skipping")
         return recon_data
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Naabu",
+        settings,
+        keys=[
+            ("NAABU_ENABLED", "Toggle"),
+            ("NAABU_DOCKER_IMAGE", "Image"),
+            ("NAABU_TOP_PORTS", "Ports"),
+            ("NAABU_CUSTOM_PORTS", "Ports"),
+            ("NAABU_RATE_LIMIT", "Performance"),
+            ("NAABU_THREADS", "Performance"),
+            ("NAABU_TIMEOUT", "Performance"),
+            ("NAABU_RETRIES", "Performance"),
+            ("NAABU_SCAN_TYPE", "Behavior"),
+            ("NAABU_EXCLUDE_CDN", "Behavior"),
+            ("NAABU_DISPLAY_CDN", "Behavior"),
+            ("NAABU_SKIP_HOST_DISCOVERY", "Behavior"),
+            ("NAABU_VERIFY_PORTS", "Behavior"),
+            ("NAABU_PASSIVE_MODE", "Behavior"),
+            ("USE_TOR_FOR_RECON", "Anonymity"),
+        ],
+    )
+
     # Extract settings from passed dict
     NAABU_DOCKER_IMAGE = settings.get('NAABU_DOCKER_IMAGE', 'projectdiscovery/naabu:latest')
     NAABU_TOP_PORTS = settings.get('NAABU_TOP_PORTS', '1000')

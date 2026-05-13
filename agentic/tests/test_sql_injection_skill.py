@@ -92,13 +92,16 @@ class TestStateRegistration(unittest.TestCase):
         self.assertEqual(apc.attack_path_type, "sql_injection")
 
     def test_all_known_paths_present(self):
-        """All built-in skills should be in KNOWN_ATTACK_PATHS."""
-        expected = {
+        """All originally-shipped built-in skills must remain in KNOWN_ATTACK_PATHS.
+        Subset check (not strict equality) so adding new skills like ssrf/rce
+        doesn't regress this test."""
+        required = {
             "cve_exploit", "brute_force_credential_guess",
             "phishing_social_engineering", "denial_of_service",
             "sql_injection", "xss",
         }
-        self.assertEqual(KNOWN_ATTACK_PATHS, expected)
+        self.assertTrue(required.issubset(KNOWN_ATTACK_PATHS),
+                        f"Missing required paths: {required - KNOWN_ATTACK_PATHS}")
 
 
 # ===========================================================================

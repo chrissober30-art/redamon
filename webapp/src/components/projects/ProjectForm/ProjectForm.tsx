@@ -11,7 +11,7 @@ import { useProject } from '@/providers/ProjectProvider'
 import useReconStatus from '@/hooks/useReconStatus'
 import { useMultiPartialReconStatus } from '@/hooks/useMultiPartialReconStatus'
 import { useMultiPartialReconSSE } from '@/hooks/useMultiPartialReconSSE'
-import { useAlertModal, useToast } from '@/components/ui'
+import { useAlertModal, useToast, WikiInfoButton } from '@/components/ui'
 import type { PartialReconParams, PartialReconState } from '@/lib/recon-types'
 import { PARTIAL_RECON_PHASE_MAP } from '@/lib/recon-types'
 import type { ReconStatus } from '@/lib/recon-types'
@@ -54,6 +54,7 @@ import { OsintEnrichmentSection } from './sections/OsintEnrichmentSection'
 import { JsReconSection } from './sections/JsReconSection'
 import { GraphqlScanSection } from './sections/GraphqlScanSection'
 import { TakeoverSection } from './sections/TakeoverSection'
+import { VhostSniSection } from './sections/VhostSniSection'
 import { PartialReconModal } from './WorkflowView/PartialReconModal'
 import { ReconPresetModal } from './ReconPresetModal'
 import { SavePresetModal } from './SavePresetModal'
@@ -487,6 +488,10 @@ export function ProjectForm({
       <div className={styles.header}>
         <h1 className={styles.title}>
           {mode === 'create' ? 'Create New Project' : 'Project Settings'}
+          <WikiInfoButton
+            target={mode === 'create' ? 'projectsNew' : 'projectSettings'}
+            title={mode === 'create' ? 'Open Creating a Project wiki page' : 'Open Project Settings Reference wiki page'}
+          />
           {appliedPreset && (
             <span className={styles.presetBadge}>Started from: {appliedPreset.name}</span>
           )}
@@ -756,6 +761,7 @@ export function ProjectForm({
           <>
             <NucleiSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Nuclei') : undefined} />
             <TakeoverSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('SubdomainTakeover') : undefined} />
+            <VhostSniSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('VhostSni') : undefined} />
             <GraphqlScanSection data={formData} updateField={updateField} projectId={projectId} mode={mode} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('GraphqlScan') : undefined} />
           </>
         )}

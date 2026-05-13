@@ -7,6 +7,8 @@ Functions for running the Katana web crawler to discover URLs with parameters.
 import subprocess
 from typing import List
 
+from .subprocess_helpers import run_with_heartbeat
+
 
 # =============================================================================
 # Katana Web Crawler
@@ -99,13 +101,16 @@ def run_katana_crawler(
             cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
         
         try:
-            result = subprocess.run(
+            # Emit a heartbeat every 30s while Katana crawls so the drawer
+            # doesn't go silent on slow targets (deep crawls can run for
+            # minutes per BaseURL with no output before the final URL list).
+            result = run_with_heartbeat(
                 cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout + 60  # Extra buffer
+                label="Katana",
+                interval=30,
+                timeout=timeout + 60,  # Extra buffer
             )
-            
+
             if result.stdout:
                 for line in result.stdout.strip().split('\n'):
                     url = line.strip()

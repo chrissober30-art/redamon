@@ -291,6 +291,18 @@ def run_censys_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     if not settings.get("CENSYS_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Censys",
+        settings,
+        keys=[
+            ("CENSYS_ENABLED", "Toggle"),
+            ("CENSYS_WORKERS", "Performance"),
+            ("CENSYS_API_TOKEN", "API credentials"),
+            ("CENSYS_ORG_ID", "API credentials"),
+        ],
+    )
+
     api_token = settings.get("CENSYS_API_TOKEN", "") or ""
     org_id = settings.get("CENSYS_ORG_ID", "") or ""
     if not api_token or not org_id:

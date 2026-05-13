@@ -1428,6 +1428,20 @@ td:hover .tableCellCopyButton {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+  /* nicer scrollbar inside the dark tooltip */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+.phaseToolsTooltip::-webkit-scrollbar {
+  width: 6px;
+}
+
+.phaseToolsTooltip::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
 }
 
 .phaseToolsHeader {

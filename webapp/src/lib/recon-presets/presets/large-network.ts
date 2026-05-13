@@ -175,6 +175,10 @@ Network security teams and pentesters who need to map large external perimeters 
     // --- DISABLE Nuclei (mapping, not vuln testing) ---
     nucleiEnabled: false,
 
+    // --- VHost & SNI: explicitly disabled — per-IP serial loop × thousands of IPs
+    //     in a /16 would run for hours/days. Use partial recon on specific IPs instead. ---
+    vhostSniEnabled: false,
+
     // --- CVE Lookup: comprehensive, all CVSS scores ---
     cveLookupEnabled: true,
     cveLookupMaxCves: 40,

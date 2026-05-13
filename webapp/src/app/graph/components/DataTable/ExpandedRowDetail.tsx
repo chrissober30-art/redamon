@@ -1,16 +1,16 @@
 'use client'
 
 import { memo, useMemo } from 'react'
+import { ExternalLink } from '@/components/ui'
 import { NODE_COLORS } from '../../config'
 import { renderPropertyValue } from '../../utils/renderPropertyValue'
+import { getNodeUrl, getUrlForTypeName, HIDDEN_KEYS } from '../../utils'
 import type { TableRow } from '../../hooks/useTableData'
 import styles from './ExpandedRowDetail.module.css'
 
 interface ExpandedRowDetailProps {
   row: TableRow
 }
-
-const HIDDEN_KEYS = new Set(['project_id', 'user_id'])
 
 export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: ExpandedRowDetailProps) {
   const properties = Object.entries(row.node.properties)
@@ -20,6 +20,15 @@ export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: Expand
   // Lazy BFS: computed on first expand, cached thereafter
   const level2 = useMemo(() => row.getLevel2(), [row])
   const level3 = useMemo(() => row.getLevel3(), [row])
+
+  const nodeUrl = useMemo(() => getNodeUrl(row.node), [row.node])
+
+  const renderConnName = (nodeType: string, nodeName: string) => {
+    const url = getUrlForTypeName(nodeType, nodeName)
+    return url
+      ? <ExternalLink href={url}>{nodeName}</ExternalLink>
+      : nodeName
+  }
 
   return (
     <div className={styles.detail}>
@@ -34,7 +43,11 @@ export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: Expand
               {properties.map(([key, value]) => (
                 <div key={key} className={styles.propRow}>
                   <span className={styles.propKey}>{key}</span>
-                  <span className={styles.propValue}>{renderPropertyValue(value)}</span>
+                  <span className={styles.propValue}>
+                    {key === 'name' && nodeUrl
+                      ? <ExternalLink href={nodeUrl}>{String(value)}</ExternalLink>
+                      : renderPropertyValue(value)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -58,7 +71,7 @@ export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: Expand
                     style={{ background: NODE_COLORS[conn.nodeType] || NODE_COLORS.Default }}
                   />
                   <span className={styles.connType}>{conn.nodeType}</span>
-                  <span className={styles.connName}>{conn.nodeName}</span>
+                  <span className={styles.connName}>{renderConnName(conn.nodeType, conn.nodeName)}</span>
                   <span className={styles.connRel}>{conn.relationType}</span>
                 </div>
               ))}
@@ -83,7 +96,7 @@ export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: Expand
                     style={{ background: NODE_COLORS[conn.nodeType] || NODE_COLORS.Default }}
                   />
                   <span className={styles.connType}>{conn.nodeType}</span>
-                  <span className={styles.connName}>{conn.nodeName}</span>
+                  <span className={styles.connName}>{renderConnName(conn.nodeType, conn.nodeName)}</span>
                   <span className={styles.connRel}>{conn.relationType}</span>
                 </div>
               ))}
@@ -108,7 +121,7 @@ export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: Expand
                     style={{ background: NODE_COLORS[conn.nodeType] || NODE_COLORS.Default }}
                   />
                   <span className={styles.connType}>{conn.nodeType}</span>
-                  <span className={styles.connName}>{conn.nodeName}</span>
+                  <span className={styles.connName}>{renderConnName(conn.nodeType, conn.nodeName)}</span>
                 </div>
               ))}
             </div>
@@ -132,7 +145,7 @@ export const ExpandedRowDetail = memo(function ExpandedRowDetail({ row }: Expand
                     style={{ background: NODE_COLORS[conn.nodeType] || NODE_COLORS.Default }}
                   />
                   <span className={styles.connType}>{conn.nodeType}</span>
-                  <span className={styles.connName}>{conn.nodeName}</span>
+                  <span className={styles.connName}>{renderConnName(conn.nodeType, conn.nodeName)}</span>
                 </div>
               ))}
             </div>

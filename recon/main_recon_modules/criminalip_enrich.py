@@ -343,6 +343,18 @@ def run_criminalip_enrichment(combined_result: dict, settings: dict) -> dict:
     if not settings.get("CRIMINALIP_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "CriminalIP",
+        settings,
+        keys=[
+            ("CRIMINALIP_ENABLED", "Toggle"),
+            ("CRIMINALIP_WORKERS", "Performance"),
+            ("CRIMINALIP_API_KEY", "API credentials"),
+            ("CRIMINALIP_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     api_key = settings.get("CRIMINALIP_API_KEY", "")
     key_rotator = settings.get("CRIMINALIP_KEY_ROTATOR")
 

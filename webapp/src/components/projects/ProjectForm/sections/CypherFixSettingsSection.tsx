@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronDown, Shield, Search, Loader2, X } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 
@@ -109,6 +109,7 @@ export function CypherFixSettingsSection({ data, updateField }: CypherFixSetting
         <h2 className={styles.sectionTitle}>
           <Shield size={16} />
           CypherFix Settings
+          <WikiInfoButton target="CypherFixSettings" />
         </h2>
         <ChevronDown
           size={16}

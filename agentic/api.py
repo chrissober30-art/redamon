@@ -15,6 +15,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -128,8 +129,8 @@ async def check_target_guardrail(body: GuardrailRequest):
     2. Soft guardrail (LLM-based): blocks well-known private companies.
        Fails open if LLM is unavailable.
     """
-    from hard_guardrail import is_hard_blocked
-    from guardrail import check_target_allowed
+    from orchestrator_helpers.hard_guardrail import is_hard_blocked
+    from orchestrator_helpers.guardrail import check_target_allowed
     from project_settings import DEFAULT_AGENT_SETTINGS
 
     # Hard guardrail: deterministic, non-disableable
@@ -174,12 +175,26 @@ async def check_target_guardrail(body: GuardrailRequest):
                 openai_p = _resolve_provider_key(user_providers, "openai")
                 anthropic_p = _resolve_provider_key(user_providers, "anthropic")
                 openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+                deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+                gemini_p = _resolve_provider_key(user_providers, "gemini")
+                glm_p = _resolve_provider_key(user_providers, "glm")
+                kimi_p = _resolve_provider_key(user_providers, "kimi")
+                qwen_p = _resolve_provider_key(user_providers, "qwen")
+                xai_p = _resolve_provider_key(user_providers, "xai")
+                mistral_p = _resolve_provider_key(user_providers, "mistral")
 
                 orchestrator.llm = setup_llm(
                     model_name,
                     openai_api_key=(openai_p or {}).get("apiKey"),
                     anthropic_api_key=(anthropic_p or {}).get("apiKey"),
                     openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+                    deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+                    gemini_api_key=(gemini_p or {}).get("apiKey"),
+                    glm_api_key=(glm_p or {}).get("apiKey"),
+                    kimi_api_key=(kimi_p or {}).get("apiKey"),
+                    qwen_api_key=(qwen_p or {}).get("apiKey"),
+                    xai_api_key=(xai_p or {}).get("apiKey"),
+                    mistral_api_key=(mistral_p or {}).get("apiKey"),
                 )
                 orchestrator.model_name = model_name
                 logger.info(f"Guardrail: bootstrapped LLM with default model {model_name}")
@@ -367,7 +382,7 @@ class ReportSummarizeRequest(BaseModel):
 @app.post("/api/report/summarize", tags=["Report"])
 async def summarize_report(body: ReportSummarizeRequest):
     """Generate LLM narrative summaries for pentest report sections."""
-    from report_summarizer import generate_report_narratives
+    from orchestrator_helpers.report_summarizer import generate_report_narratives
     from project_settings import DEFAULT_AGENT_SETTINGS
     from orchestrator_helpers.llm_setup import setup_llm
 
@@ -390,6 +405,618 @@ async def summarize_report(body: ReportSummarizeRequest):
             content={"error": f"Failed to generate report narratives: {str(e)}"},
             status_code=500,
         )
+
+
+class FfufExtensionsRequest(BaseModel):
+    url: str
+    headers: dict
+    model: str
+    max_extensions: int = 6
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+_FFUF_EXT_SYSTEM_PROMPT = """You are a security testing assistant helping with directory fuzzing.
+
+Given a target URL and its HTTP response headers, suggest the file extensions
+most likely to discover real files on this server. Use header signals
+(Server, X-Powered-By, Set-Cookie like JSESSIONID, framework hints) and the
+URL path context to choose suffixes.
+
+Rules:
+- Path-aware: if the path is /js/ or /static/, prefer no extensions or only
+  source-map/config-style extensions (.map). For /api/ prefer .json, .xml.
+- Tech-aware: Apache+PHP -> .php, .phtml, .bak. IIS/ASP.NET -> .aspx, .asmx,
+  .config. Tomcat/Java -> .jsp, .do, .action.
+- Always include a small tail of generic backup/config suffixes when the
+  path looks admin-like: .bak, .old, .config, .zip.
+- Each extension must start with '.' and be a-z/0-9 only, max 8 chars.
+- If the path is clearly a CDN/static asset path with no useful suffixes,
+  return an empty list -- do not invent.
+- Never include leading wildcards or directory separators.
+
+Respond with ONLY a JSON object of this exact shape, no prose:
+{"extensions": [".ext1", ".ext2", ...]}"""
+
+
+def _build_llm_with_model_for_user(model_name: str, user_id: Optional[str]):
+    """Build an LLM using the user's saved providers but force a specific model.
+    Mirrors `_build_llm_for_user` but takes the model as an explicit argument
+    instead of reading it from project settings."""
+    import os
+    import requests as requests_mod
+    from orchestrator_helpers.llm_setup import setup_llm, _resolve_provider_key
+
+    user_providers: list = []
+    if user_id:
+        webapp_url = os.environ.get('WEBAPP_URL', 'http://webapp:3000')
+        internal_key = os.environ.get('INTERNAL_API_KEY', '')
+        try:
+            resp = requests_mod.get(
+                f"{webapp_url.rstrip('/')}/api/users/{user_id}/llm-providers?internal=true",
+                headers={'x-internal-key': internal_key} if internal_key else {},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            user_providers = resp.json() or []
+        except Exception as e:
+            logger.warning(f"ffuf-extensions: failed to fetch user LLM providers: {e}")
+
+    openai_p = _resolve_provider_key(user_providers, "openai")
+    anthropic_p = _resolve_provider_key(user_providers, "anthropic")
+    openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+    bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+    deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+    gemini_p = _resolve_provider_key(user_providers, "gemini")
+    glm_p = _resolve_provider_key(user_providers, "glm")
+    kimi_p = _resolve_provider_key(user_providers, "kimi")
+    qwen_p = _resolve_provider_key(user_providers, "qwen")
+    xai_p = _resolve_provider_key(user_providers, "xai")
+    mistral_p = _resolve_provider_key(user_providers, "mistral")
+    return setup_llm(
+        model_name,
+        openai_api_key=(openai_p or {}).get("apiKey"),
+        anthropic_api_key=(anthropic_p or {}).get("apiKey"),
+        openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+        deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+        gemini_api_key=(gemini_p or {}).get("apiKey"),
+        glm_api_key=(glm_p or {}).get("apiKey"),
+        kimi_api_key=(kimi_p or {}).get("apiKey"),
+        qwen_api_key=(qwen_p or {}).get("apiKey"),
+        xai_api_key=(xai_p or {}).get("apiKey"),
+        mistral_api_key=(mistral_p or {}).get("apiKey"),
+        aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
+        aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+        aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
+    )
+
+
+@app.post("/llm/ffuf-extensions", tags=["LLM"])
+async def llm_ffuf_extensions(body: FfufExtensionsRequest):
+    """Suggest FFuf file extensions for a target based on its response headers.
+
+    Called by the recon container's AI planner when FFUF_AI_EXTENSIONS is on.
+    Reuses the same per-user LLM provider resolution as the agent itself.
+    """
+    import json as json_mod
+
+    logger.info(
+        "ffuf-extensions: url=%s model=%s user=%s headers=%d-keys",
+        body.url, body.model, body.user_id, len(body.headers or {}),
+    )
+
+    try:
+        llm = _build_llm_with_model_for_user(body.model, body.user_id)
+    except Exception as e:
+        logger.error(f"ffuf-extensions: cannot set up LLM: {e}")
+        return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
+
+    user_msg = (
+        f"URL: {body.url}\n"
+        f"Headers: {json_mod.dumps(body.headers)}\n"
+        f"Suggest up to {body.max_extensions} extensions."
+    )
+
+    try:
+        response = await llm.ainvoke([
+            SystemMessage(content=_FFUF_EXT_SYSTEM_PROMPT),
+            HumanMessage(content=user_msg),
+        ])
+    except Exception as e:
+        logger.error(f"ffuf-extensions: LLM call failed: {e}")
+        return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
+
+    raw_text = (getattr(response, 'content', None) or '').strip()
+    # Strip ``` fences if the model wrapped the JSON
+    if raw_text.startswith('```'):
+        raw_text = raw_text.strip('`')
+        if raw_text.startswith('json'):
+            raw_text = raw_text[4:].strip()
+
+    try:
+        data = json_mod.loads(raw_text)
+    except (json_mod.JSONDecodeError, ValueError) as e:
+        logger.warning(f"ffuf-extensions: model returned non-JSON ({e}): {raw_text[:200]}")
+        return JSONResponse(content={"error": "Model returned non-JSON", "raw": raw_text[:500]}, status_code=502)
+
+    extensions = data.get('extensions', [])
+    if not isinstance(extensions, list):
+        return JSONResponse(content={"error": "Model returned non-list extensions", "raw": str(extensions)[:500]}, status_code=502)
+
+    return {"extensions": extensions[:body.max_extensions]}
+
+
+class NucleiTagsRequest(BaseModel):
+    technologies: list[str]
+    servers: list[str]
+    current_tags: list[str]
+    candidates: list[str]
+    model: str
+    max_tags: int = 15
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+_NUCLEI_TAGS_SYSTEM_PROMPT = """You are a security testing assistant selecting Nuclei
+template tags for a vulnerability scan. Given a tech stack fingerprint, pick the
+tags most likely to find real vulnerabilities and drop irrelevant ones.
+
+Rules:
+- You MUST pick ONLY from the `candidates` list provided. Any tag not in
+  candidates will be rejected.
+- ALWAYS keep universal high-impact tags when present in candidates: cve,
+  exposure, misconfig, default-login, kev, oast, takeover.
+- INCLUDE tech-specific tags ONLY when the technology is detected:
+    WordPress signal -> wordpress, wp-plugin, wp (when in candidates)
+    Apache signal    -> apache
+    Nginx signal     -> nginx
+    IIS / ASP.NET    -> iis, dotnet
+    Tomcat / JVM     -> tomcat, java
+    PHP signal       -> php
+    Node/React/Express signal -> nodejs
+    Joomla / Drupal / Magento / Jenkins / GitLab / Jira / Confluence -> their tag
+    AWS / Azure / GCP / cloud signal -> their cloud tag
+- DROP tech tags whose stack is NOT detected. Do not invent technologies that
+  are not in the input.
+- DROP narrow vuln-class tags that don't fit the stack (e.g. drop xxe on pure-JS
+  apps with no XML, drop ssti if no template engine signal, drop sqli if the
+  app appears static).
+- Cap output at `max_tags` (default 15). Prefer breadth over redundancy.
+- Be conservative: if unsure whether a tag matches, drop it.
+
+Respond with ONLY a JSON object of this exact shape, no prose:
+{"tags": ["tag1", "tag2", ...]}"""
+
+
+@app.post("/llm/nuclei-tags", tags=["LLM"])
+async def llm_nuclei_tags(body: NucleiTagsRequest):
+    """Suggest Nuclei tags for a vuln scan based on tech fingerprint.
+
+    Called by the recon container's AI planner when NUCLEI_AI_TAGS is on.
+    Reuses the same per-user LLM provider resolution as the agent itself.
+    """
+    import json as json_mod
+
+    logger.info(
+        "nuclei-tags: model=%s user=%s techs=%d servers=%d candidates=%d",
+        body.model, body.user_id, len(body.technologies or []),
+        len(body.servers or []), len(body.candidates or []),
+    )
+
+    try:
+        llm = _build_llm_with_model_for_user(body.model, body.user_id)
+    except Exception as e:
+        logger.error(f"nuclei-tags: cannot set up LLM: {e}")
+        return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
+
+    user_msg = (
+        f"Detected technologies: {json_mod.dumps(body.technologies)}\n"
+        f"Detected servers: {json_mod.dumps(body.servers)}\n"
+        f"User's current tags: {json_mod.dumps(body.current_tags)}\n"
+        f"Candidates (pick only from these): {json_mod.dumps(body.candidates)}\n"
+        f"Pick up to {body.max_tags} tags."
+    )
+
+    try:
+        response = await llm.ainvoke([
+            SystemMessage(content=_NUCLEI_TAGS_SYSTEM_PROMPT),
+            HumanMessage(content=user_msg),
+        ])
+    except Exception as e:
+        logger.error(f"nuclei-tags: LLM call failed: {e}")
+        return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
+
+    raw_text = (getattr(response, 'content', None) or '').strip()
+    if raw_text.startswith('```'):
+        raw_text = raw_text.strip('`')
+        if raw_text.startswith('json'):
+            raw_text = raw_text[4:].strip()
+
+    try:
+        data = json_mod.loads(raw_text)
+    except (json_mod.JSONDecodeError, ValueError) as e:
+        logger.warning(f"nuclei-tags: model returned non-JSON ({e}): {raw_text[:200]}")
+        return JSONResponse(content={"error": "Model returned non-JSON", "raw": raw_text[:500]}, status_code=502)
+
+    tags = data.get('tags', [])
+    if not isinstance(tags, list):
+        return JSONResponse(content={"error": "Model returned non-list tags", "raw": str(tags)[:500]}, status_code=502)
+
+    return {"tags": tags[:body.max_tags]}
+
+
+class WafClassifyRequest(BaseModel):
+    url: str
+    status_code: int
+    headers: dict
+    body_sample: str = ""
+    response_time_ms: int = 0
+    model: str
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+_WAF_CLASSIFY_SYSTEM_PROMPT = """You are a security testing assistant classifying whether
+an HTTP response came through a WAF (Web Application Firewall) or CDN edge layer.
+Your output drives downstream throttling and false-positive filtering, so calibrated
+confidence matters more than guessing a vendor.
+
+You will receive: target URL, HTTP status code, full response headers, the first
+4KB of the response body, and an optional response_time_ms hint.
+
+Detection signals to weigh:
+- Header tokens (vendor-branded): cf-ray, cf-cache-status, x-amz-cf-id, x-served-by,
+  x-akamai-*, x-fastly-request-id, x-azure-ref, x-azure-fdid, x-sucuri-id, x-iinfo
+  (Imperva), Server: cloudflare/cloudfront/akamai/fastly/varnish/imperva/sucuri.
+- Cookie tokens: __cf_bm, cf_clearance, __cfduid (cloudflare), incap_ses_, visid_incap_
+  (imperva), AKA_A2/AKAALB_ (akamai), awsalb (AWS), TS01* (BIG-IP/F5).
+- Body fingerprints: "Attention Required! | Cloudflare", "error 1003", "Request blocked",
+  "Access denied", "Reference #", challenge-page HTML structures, captcha widgets,
+  Akamai "Pragma" pages, AWS WAF "Request blocked" JSON.
+- Status+body mismatch: 200 OK with a tiny "blocked" body, 403 with branded reason
+  phrase, 406/418/429 returned for benign requests.
+- Latency outliers: response_time_ms >> 200ms for a static-looking 403 hints at
+  inspection delay.
+- Status codes commonly used by WAFs to short-circuit: 403, 406, 418, 429, 503.
+
+WAF type values you may emit (lowercase, snake/kebab):
+cloudflare, akamai, aws_waf, imperva, sucuri, fastly, azure_frontdoor, cloudfront,
+modsecurity, f5, fortinet, barracuda, stackpath, custom. Use null for waf_type when
+waf_detected is false. Use "custom" if signals indicate a WAF but vendor is unclear.
+
+Confidence calibration (be honest, not optimistic):
+- 90-100: clear vendor branding in multiple places (header + cookie + body)
+- 70-89: strong fingerprint (one branded header OR challenge-page body)
+- 40-69: suggestive signals (status+body mismatch, latency, no vendor token)
+- 10-39: weak hints, mostly speculative
+- 0-9:   no signal at all (return waf_detected=false)
+
+Reasoning field: ONE sentence (<=200 chars) citing the strongest signals.
+
+Respond with ONLY a JSON object of this exact shape, no prose:
+{"waf_detected": true|false, "waf_type": "cloudflare"|null, "confidence": 0..100, "reasoning": "..."}"""
+
+
+@app.post("/llm/waf-classify", tags=["LLM"])
+async def llm_waf_classify(body: WafClassifyRequest):
+    """Classify whether a response came through a WAF/CDN.
+
+    Called by the recon container's WAF AI classifier when WAF_AI_CLASSIFIER is on.
+    Reuses the same per-user LLM provider resolution as the agent itself.
+    """
+    import json as json_mod
+
+    logger.info(
+        "waf-classify: url=%s status=%d model=%s user=%s headers=%d body=%dB rt=%dms",
+        body.url, body.status_code, body.model, body.user_id,
+        len(body.headers or {}), len(body.body_sample or ''), body.response_time_ms,
+    )
+
+    try:
+        llm = _build_llm_with_model_for_user(body.model, body.user_id)
+    except Exception as e:
+        logger.error(f"waf-classify: cannot set up LLM: {e}")
+        return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
+
+    user_msg = (
+        f"URL: {body.url}\n"
+        f"Status: {body.status_code}\n"
+        f"Response time (ms): {body.response_time_ms}\n"
+        f"Headers: {json_mod.dumps(body.headers)}\n"
+        f"Body sample (first 4KB):\n{body.body_sample}"
+    )
+
+    try:
+        response = await llm.ainvoke([
+            SystemMessage(content=_WAF_CLASSIFY_SYSTEM_PROMPT),
+            HumanMessage(content=user_msg),
+        ])
+    except Exception as e:
+        logger.error(f"waf-classify: LLM call failed: {e}")
+        return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
+
+    raw_text = (getattr(response, 'content', None) or '').strip()
+    if raw_text.startswith('```'):
+        raw_text = raw_text.strip('`')
+        if raw_text.startswith('json'):
+            raw_text = raw_text[4:].strip()
+
+    try:
+        data = json_mod.loads(raw_text)
+    except (json_mod.JSONDecodeError, ValueError) as e:
+        logger.warning(f"waf-classify: model returned non-JSON ({e}): {raw_text[:200]}")
+        return JSONResponse(content={"error": "Model returned non-JSON", "raw": raw_text[:500]}, status_code=502)
+
+    if not isinstance(data, dict):
+        return JSONResponse(content={"error": "Model returned non-object", "raw": str(data)[:500]}, status_code=502)
+
+    detected = data.get('waf_detected')
+    confidence = data.get('confidence')
+    if not isinstance(detected, bool) or not isinstance(confidence, (int, float)):
+        return JSONResponse(content={"error": "Model returned malformed schema", "raw": str(data)[:500]}, status_code=502)
+
+    return {
+        "waf_detected": detected,
+        "waf_type": data.get('waf_type'),
+        "confidence": int(confidence),
+        "reasoning": (data.get('reasoning') or '')[:500],
+    }
+
+
+class NucleiFpFilterRequest(BaseModel):
+    template_id: str
+    tags: list[str] = []
+    status_line: str = ""
+    response_sample: str = ""
+    model: str
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+_NUCLEI_FP_FILTER_SYSTEM_PROMPT = """You are a security testing assistant deciding
+whether a Nuclei response is a real vulnerability hit or a WAF/rate-limit block
+page disguised as one. Your verdict gates the finding -- a wrong "blocked" call
+HIDES a real vuln, a wrong "real" call SHIPS a false positive. Calibrate.
+
+You will receive: Nuclei template id, template tags (sqli/xss/rce/...), HTTP
+status line, and the first 4KB of the response body.
+
+Block-page signals (lean toward is_blocked=true):
+- Status 403/406/418/429/503 paired with a tiny generic body.
+- Body contains vendor-branded WAF text: "Cloudflare Ray ID", "Reference #",
+  "Request ID:", "AWS WAF", "Imperva Incapsula", "Sucuri", "ModSecurity",
+  "Forbidden by F5", "Fortinet". Note: a body MENTIONING WAF terms in a
+  legitimate context (admin panel, docs) is NOT a block; look at structure.
+- Body is a generic 1-2 line error: "Access Denied", "Request blocked",
+  "Sorry, your request couldn't be processed".
+- AWS WAF JSON shape: {"message": "Forbidden"} or similar minimal JSON error.
+- Cookies set in response: __cf_bm, cf_clearance, incap_ses_, visid_incap_,
+  AKA_A2, awsalb, TS01* (BIG-IP/F5).
+- Body is a captcha/challenge page: "Please verify you are human", JS challenge
+  redirect, "Just a moment...".
+
+Real-finding signals (lean toward is_blocked=false):
+- Status 200/302 with substantive content (DB error message, reflected payload,
+  exposed file content, version banner, debug page).
+- Body contains actual evidence the template was looking for: SQL error string,
+  reflected XSS payload echo, OS command output, leaked stack trace, file system
+  paths, debug variable dumps.
+- Body discusses WAF terms in CONTEXT (e.g. an admin panel that lets you toggle
+  WAF settings) -- that's the page being exposed, not the page blocking you.
+- Status code matches what the template hunts for (e.g. 200 for an exposure
+  template, 500 for a backend error template).
+
+Confidence calibration (be honest):
+- 90-100: clear vendor branding (WAF cookie + status + branded body).
+- 70-89: strong block-page shape (small body + suspicious status + generic
+  error tone) OR strong real-hit shape (clear template-target evidence).
+- 40-69: ambiguous (small 403 with no vendor signature, could be either).
+- 10-39: weak hint, mostly speculative.
+- 0-9: no signal -- return is_blocked=false.
+
+Reason field: ONE sentence (<=200 chars) citing the strongest signal.
+
+Respond with ONLY a JSON object of this exact shape, no prose:
+{"is_blocked": true|false, "confidence": 0..100, "reason": "..."}"""
+
+
+@app.post("/llm/nuclei-fp-filter", tags=["LLM"])
+async def llm_nuclei_fp_filter(body: NucleiFpFilterRequest):
+    """Classify whether a Nuclei response is a WAF/rate-limit block page
+    rather than a real vulnerability hit.
+
+    Called by the recon container's Nuclei FP filter when
+    NUCLEI_AI_RESPONSE_FILTER is on. Reuses the same per-user LLM provider
+    resolution as the agent itself.
+    """
+    import json as json_mod
+
+    logger.info(
+        "nuclei-fp-filter: template=%s tags=%s status=%s body=%dB model=%s user=%s",
+        body.template_id, body.tags, body.status_line[:60],
+        len(body.response_sample or ''), body.model, body.user_id,
+    )
+
+    try:
+        llm = _build_llm_with_model_for_user(body.model, body.user_id)
+    except Exception as e:
+        logger.error(f"nuclei-fp-filter: cannot set up LLM: {e}")
+        return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
+
+    user_msg = (
+        f"Template: {body.template_id}\n"
+        f"Tags: {json_mod.dumps(body.tags)}\n"
+        f"Status: {body.status_line}\n"
+        f"Response sample (first 4KB):\n{body.response_sample}"
+    )
+
+    try:
+        response = await llm.ainvoke([
+            SystemMessage(content=_NUCLEI_FP_FILTER_SYSTEM_PROMPT),
+            HumanMessage(content=user_msg),
+        ])
+    except Exception as e:
+        logger.error(f"nuclei-fp-filter: LLM call failed: {e}")
+        return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
+
+    raw_text = (getattr(response, 'content', None) or '').strip()
+    if raw_text.startswith('```'):
+        raw_text = raw_text.strip('`')
+        if raw_text.startswith('json'):
+            raw_text = raw_text[4:].strip()
+
+    try:
+        data = json_mod.loads(raw_text)
+    except (json_mod.JSONDecodeError, ValueError) as e:
+        logger.warning(f"nuclei-fp-filter: model returned non-JSON ({e}): {raw_text[:200]}")
+        return JSONResponse(content={"error": "Model returned non-JSON", "raw": raw_text[:500]}, status_code=502)
+
+    if not isinstance(data, dict):
+        return JSONResponse(content={"error": "Model returned non-object", "raw": str(data)[:500]}, status_code=502)
+
+    is_blocked = data.get('is_blocked')
+    confidence = data.get('confidence')
+    if not isinstance(is_blocked, bool) or not isinstance(confidence, (int, float)):
+        return JSONResponse(content={"error": "Model returned malformed schema", "raw": str(data)[:500]}, status_code=502)
+
+    return {
+        "is_blocked": is_blocked,
+        "confidence": int(confidence),
+        "reason": (data.get('reason') or '')[:500],
+    }
+
+
+class TakeoverClassifyRequest(BaseModel):
+    hostname: str
+    expected_provider: str = ""
+    status_code: int = 0
+    headers: dict = {}
+    response_sample: str = ""
+    model: str
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+_TAKEOVER_CLASSIFY_SYSTEM_PROMPT = """You are a security testing assistant deciding
+whether an HTTP response is a genuine third-party SaaS "service unclaimed" page
+(a real subdomain takeover candidate) or a WAF block page that LOOKS like one.
+
+Subdomain takeover detectors (Subjack, Nuclei takeover templates) match against
+fingerprint strings like "There's nothing here yet" (Heroku), "NoSuchBucket"
+(S3), "The page you have requested does not exist" (Bitbucket). WAFs and CDN
+edges with no origin configured for a hostname return very similar text. The
+collision produces critical-severity false positives that page on-call.
+
+You will receive: hostname, the takeover provider the static signature claimed
+to match, HTTP status code, response headers, and the first 4KB of the
+response body.
+
+WAF-block signals (lean is_waf_block=true):
+- Status 403/406/429/503 (most SaaS unclaimed pages return 404).
+- Body is a generic 1-2 line error with no provider branding.
+- Body contains vendor WAF signatures: "Cloudflare Ray ID", "Reference #",
+  "AWS WAF", "Imperva", "Akamai", "Sucuri", "ModSecurity", "Forbidden by F5".
+- Cookies set: __cf_bm, cf_clearance, incap_ses_, awsalb, TS01*, akamai-*.
+- Response body claims "blocked" / "denied" / "unauthorized" without naming
+  the SaaS provider the static fingerprint claimed.
+- Body shape mismatches the claimed provider (e.g. claimed "heroku" but the
+  body has no Heroku branding, dyno mention, or characteristic styling).
+
+Genuine-unclaimed signals (lean is_waf_block=false):
+- Status 404 with body that EXPLICITLY names the claimed provider:
+  - heroku: "There's nothing here yet", references herokuapp.com
+  - s3: "NoSuchBucket", "The specified bucket does not exist"
+  - github pages: "There isn't a GitHub Pages site here"
+  - bitbucket: "Repository not found"
+  - netlify/vercel/surge: provider-branded "site not found" pages
+- Body has provider-specific HTML structure (Heroku error theme, S3 XML
+  error, GitHub octocat).
+- Headers include the SaaS edge's Server token (Server: AmazonS3,
+  GitHub.com, Netlify, Vercel) -- this is unambiguous proof.
+
+Special case -- AMBIGUOUS but lean WAF when:
+- Generic "page not found" 404 with NO provider branding at all (could be
+  either; absence of provider signal is itself suspicious for a real
+  takeover).
+
+Confidence calibration:
+- 90-100: clear vendor branding (WAF cookie/branded body OR clear SaaS-
+  branded unclaimed page).
+- 70-89: strong shape signal (clean WAF block tone OR clean SaaS error).
+- 40-69: ambiguous, no clear vendor token either way.
+- 10-39: weak hint.
+- 0-9: no signal.
+
+Reason field: ONE sentence (<=200 chars) citing the strongest signal.
+
+Respond with ONLY a JSON object of this exact shape, no prose:
+{"is_waf_block": true|false, "confidence": 0..100, "reason": "..."}"""
+
+
+@app.post("/llm/takeover-classify", tags=["LLM"])
+async def llm_takeover_classify(body: TakeoverClassifyRequest):
+    """Disambiguate a takeover finding from a WAF block masquerading as one.
+
+    Called by the recon container's takeover scanner when
+    TAKEOVER_AI_CLASSIFIER is on. Reuses the same per-user LLM provider
+    resolution as the agent itself.
+    """
+    import json as json_mod
+
+    logger.info(
+        "takeover-classify: host=%s provider=%s status=%d body=%dB model=%s user=%s",
+        body.hostname, body.expected_provider, body.status_code,
+        len(body.response_sample or ''), body.model, body.user_id,
+    )
+
+    try:
+        llm = _build_llm_with_model_for_user(body.model, body.user_id)
+    except Exception as e:
+        logger.error(f"takeover-classify: cannot set up LLM: {e}")
+        return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
+
+    user_msg = (
+        f"Hostname: {body.hostname}\n"
+        f"Claimed provider: {body.expected_provider}\n"
+        f"Status: {body.status_code}\n"
+        f"Headers: {json_mod.dumps(body.headers)}\n"
+        f"Response sample (first 4KB):\n{body.response_sample}"
+    )
+
+    try:
+        response = await llm.ainvoke([
+            SystemMessage(content=_TAKEOVER_CLASSIFY_SYSTEM_PROMPT),
+            HumanMessage(content=user_msg),
+        ])
+    except Exception as e:
+        logger.error(f"takeover-classify: LLM call failed: {e}")
+        return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
+
+    raw_text = (getattr(response, 'content', None) or '').strip()
+    if raw_text.startswith('```'):
+        raw_text = raw_text.strip('`')
+        if raw_text.startswith('json'):
+            raw_text = raw_text[4:].strip()
+
+    try:
+        data = json_mod.loads(raw_text)
+    except (json_mod.JSONDecodeError, ValueError) as e:
+        logger.warning(f"takeover-classify: model returned non-JSON ({e}): {raw_text[:200]}")
+        return JSONResponse(content={"error": "Model returned non-JSON", "raw": raw_text[:500]}, status_code=502)
+
+    if not isinstance(data, dict):
+        return JSONResponse(content={"error": "Model returned non-object", "raw": str(data)[:500]}, status_code=502)
+
+    is_waf_block = data.get('is_waf_block')
+    confidence = data.get('confidence')
+    if not isinstance(is_waf_block, bool) or not isinstance(confidence, (int, float)):
+        return JSONResponse(content={"error": "Model returned malformed schema", "raw": str(data)[:500]}, status_code=502)
+
+    return {
+        "is_waf_block": is_waf_block,
+        "confidence": int(confidence),
+        "reason": (data.get('reason') or '')[:500],
+    }
 
 
 @app.post("/emergency-stop-all", tags=["System"])
@@ -455,17 +1082,434 @@ def _setup_llm_for_endpoint(model_name: str) -> "BaseChatModel":
     anthropic_p = _resolve_provider_key(user_providers, "anthropic")
     openrouter_p = _resolve_provider_key(user_providers, "openrouter")
     bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+    deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+    gemini_p = _resolve_provider_key(user_providers, "gemini")
+    glm_p = _resolve_provider_key(user_providers, "glm")
+    kimi_p = _resolve_provider_key(user_providers, "kimi")
+    qwen_p = _resolve_provider_key(user_providers, "qwen")
+    xai_p = _resolve_provider_key(user_providers, "xai")
+    mistral_p = _resolve_provider_key(user_providers, "mistral")
 
     return setup_llm(
         model_name,
         openai_api_key=(openai_p or {}).get("apiKey"),
         anthropic_api_key=(anthropic_p or {}).get("apiKey"),
         openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+        deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+        gemini_api_key=(gemini_p or {}).get("apiKey"),
+        glm_api_key=(glm_p or {}).get("apiKey"),
+        kimi_api_key=(kimi_p or {}).get("apiKey"),
+        qwen_api_key=(qwen_p or {}).get("apiKey"),
+        xai_api_key=(xai_p or {}).get("apiKey"),
+        mistral_api_key=(mistral_p or {}).get("apiKey"),
         aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
         aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
         aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
         custom_llm_config=custom_config,
     )
+
+
+# =============================================================================
+# TRADECRAFT — Verify endpoint for the per-user knowledge resource catalog
+# =============================================================================
+
+class TradecraftVerifyRequest(BaseModel):
+    url: str
+    user_id: Optional[str] = None      # used to load the user's LLM provider keys
+    github_token: Optional[str] = None
+    force: bool = False
+
+
+def _build_llm_for_user(user_id: Optional[str]):
+    """Build an LLM for a non-project endpoint by loading the user's providers
+    via the internal webapp API. Falls back to env-based providers when user_id
+    is missing or the lookup fails."""
+    import os
+    import requests
+    from orchestrator_helpers.llm_setup import setup_llm, _resolve_provider_key
+    from project_settings import DEFAULT_AGENT_SETTINGS, get_settings
+
+    model_name = (get_settings() or {}).get(
+        'OPENAI_MODEL', DEFAULT_AGENT_SETTINGS.get('OPENAI_MODEL', 'claude-opus-4-6')
+    )
+    user_providers: list = []
+    if user_id:
+        webapp_url = os.environ.get('WEBAPP_URL', 'http://webapp:3000')
+        internal_key = os.environ.get('INTERNAL_API_KEY', '')
+        try:
+            resp = requests.get(
+                f"{webapp_url.rstrip('/')}/api/users/{user_id}/llm-providers?internal=true",
+                headers={'x-internal-key': internal_key} if internal_key else {},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            user_providers = resp.json() or []
+        except Exception as e:
+            logger.warning(f"tradecraft verify: failed to fetch user LLM providers: {e}")
+
+    openai_p = _resolve_provider_key(user_providers, "openai")
+    anthropic_p = _resolve_provider_key(user_providers, "anthropic")
+    openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+    bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+    deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+    gemini_p = _resolve_provider_key(user_providers, "gemini")
+    glm_p = _resolve_provider_key(user_providers, "glm")
+    kimi_p = _resolve_provider_key(user_providers, "kimi")
+    qwen_p = _resolve_provider_key(user_providers, "qwen")
+    xai_p = _resolve_provider_key(user_providers, "xai")
+    mistral_p = _resolve_provider_key(user_providers, "mistral")
+    return setup_llm(
+        model_name,
+        openai_api_key=(openai_p or {}).get("apiKey"),
+        anthropic_api_key=(anthropic_p or {}).get("apiKey"),
+        openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+        deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+        gemini_api_key=(gemini_p or {}).get("apiKey"),
+        glm_api_key=(glm_p or {}).get("apiKey"),
+        kimi_api_key=(kimi_p or {}).get("apiKey"),
+        qwen_api_key=(qwen_p or {}).get("apiKey"),
+        xai_api_key=(xai_p or {}).get("apiKey"),
+        mistral_api_key=(mistral_p or {}).get("apiKey"),
+        aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
+        aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+        aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
+    )
+
+
+@app.post("/tradecraft/verify", tags=["Tradecraft"])
+async def tradecraft_verify(body: TradecraftVerifyRequest):
+    """
+    Fetch a tradecraft resource URL, detect its type, build a sitemap, and
+    LLM-summarize its scope. Called by the webapp `/api/users/{id}/tradecraft-resources/{rid}/verify` route.
+    """
+    from orchestrator_helpers.tradecraft_lookup import verify_resource
+    from project_settings import DEFAULT_AGENT_SETTINGS
+
+    if not orchestrator or not orchestrator._initialized:
+        return JSONResponse(
+            {"error": "Agent not initialized"}, status_code=503
+        )
+    # SSRF / scheme validation runs BEFORE LLM setup so a private-IP probe
+    # never wakes the LLM client. verify_resource also re-validates internally,
+    # but failing fast here keeps the path symmetric with the webapp guard.
+    from orchestrator_helpers.tradecraft_lookup import validate_url
+    ok, err = validate_url(body.url)
+    if not ok:
+        return {
+            "summary": "",
+            "resource_type": "agentic-crawl",
+            "sitemap": {},
+            "crawl_stopped_because": "",
+            "crawl_stats": {},
+            "last_error": err,
+        }
+    # Prefer the agent's loaded LLM (a project session is active);
+    # otherwise build one on demand from the user's saved providers.
+    llm = orchestrator.llm
+    if llm is None:
+        try:
+            llm = _build_llm_for_user(body.user_id)
+        except Exception as e:
+            logger.error(f"tradecraft verify: cannot set up LLM: {e}")
+            return JSONResponse(
+                {"error": f"LLM not configured: {e}"}, status_code=503
+            )
+    bounds = {
+        "max_pages": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_PAGES", 30),
+        "max_llm_calls": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_LLM_CALLS", 20),
+        "time_budget_sec": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_TIME_BUDGET_SEC", 180),
+        "max_depth": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_DEPTH", 3),
+    }
+    mcp_manager = getattr(orchestrator, "_mcp_manager", None)
+    try:
+        result = await verify_resource(
+            body.url,
+            github_token=body.github_token or "",
+            force=body.force,
+            llm=llm,
+            mcp_manager=mcp_manager,
+            bounds=bounds,
+        )
+        return result
+    except Exception as exc:
+        logger.error(f"tradecraft verify failed: {exc}")
+        return JSONResponse(
+            {"error": str(exc)}, status_code=500
+        )
+
+
+@app.get("/mcp/manifest", tags=["MCP"])
+async def get_mcp_manifest():
+    """
+    Return the current MCP server manifest as seen by the agent.
+
+    Combines the 5 system MCP servers (shipped with the product) and any
+    user-managed servers loaded from the most recent project session. Auth
+    tokens are NOT exposed — only env-var references.
+    """
+    import mcp_registry
+    return {
+        "servers": mcp_registry.redact_for_api(mcp_registry.current()),
+        "errors": [e.model_dump() for e in mcp_registry.current_errors()],
+        "warnings": [w.model_dump() for w in mcp_registry.current_warnings()],
+        "system_server_ids": sorted(mcp_registry.SYSTEM_SERVER_IDS),
+    }
+
+
+@app.post("/mcp/reload", tags=["MCP"])
+async def reload_mcp_manifest(payload: dict = None):
+    """
+    Re-merge system + user MCP servers and reconnect the MCP client.
+
+    Called by the webapp after a user adds/edits/deletes an MCP server.
+    Body (optional): {"userMcpServers": [...]} — when omitted, uses the
+    most recent cached project settings.
+    """
+    if orchestrator is None:
+        return JSONResponse({"error": "orchestrator not ready"}, status_code=503)
+
+    user_servers_raw = None
+    if isinstance(payload, dict):
+        user_servers_raw = payload.get("userMcpServers")
+
+    try:
+        result = await orchestrator.reload_mcp_manifests(user_servers_raw)
+        return result
+    except Exception as exc:
+        logger.exception(f"/mcp/reload failed: {exc}")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/mcp/test", tags=["MCP"])
+async def test_mcp_server(server: dict):
+    """
+    Test connectivity to a single MCP server draft (NOT yet persisted).
+
+    Builds a throwaway MultiServerMCPClient, calls list_tools(), tears it down.
+    Does not mutate any agent state — safe to call while scans are in flight.
+    """
+    import mcp_registry
+    import time
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+
+    started = time.monotonic()
+    parse_errors: list = []
+    try:
+        srv_obj = mcp_registry.MCPServer.model_validate(server)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": f"schema validation failed: {exc}",
+            "warnings": [],
+        }
+
+    config_dict, env_warnings = mcp_registry.to_mcp_servers_dict([srv_obj])
+    if not config_dict:
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": "server is disabled — enable it before testing",
+            "warnings": [w.model_dump() for w in env_warnings],
+        }
+
+    # Fast-fail check for stdio transport: missing/invalid `command`. The
+    # full diagnostic spawn happens only on real-MCP-client failure below.
+    if srv_obj.transport == "stdio" and not srv_obj.command:
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": "stdio transport requires a `command`",
+            "warnings": [w.model_dump() for w in env_warnings],
+        }
+
+    def _stdio_diagnostic_stderr() -> Optional[str]:
+        """
+        Spawn the stdio MCP ourselves and capture stderr if it crashes.
+        Used only when the real MCP client failed, to translate the
+        SDK's opaque "Connection closed" into the actual reason
+        (missing API key, npm package not found, etc.).
+
+        Returns the formatted error string, or None if the process is
+        still running after the timeout (in which case it's not an
+        immediate-crash failure mode and we should fall back to the
+        upstream message).
+        """
+        if srv_obj.transport != "stdio" or not srv_obj.command:
+            return None
+        import subprocess
+        spawn_env = {**os.environ, **(srv_obj.env or {})}
+        try:
+            proc = subprocess.Popen(
+                [srv_obj.command, *list(srv_obj.args or [])],
+                env=spawn_env,
+                cwd=srv_obj.cwd or None,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except FileNotFoundError:
+            return (
+                f"command not found: '{srv_obj.command}'. Is it installed in "
+                f"the agent container? (e.g. for npx-based MCPs ensure node, "
+                f"for uvx ensure uv)"
+            )
+        except OSError as exc:
+            return f"failed to spawn '{srv_obj.command}': {exc}"
+        # Generous timeout: npx/uvx may need to fetch the package on first
+        # run before the actual MCP server starts up and immediately
+        # crashes on bad config. 25s covers cold cache for typical MCPs.
+        try:
+            stderr_text = proc.communicate(timeout=25.0)[1] or ""
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                pass
+            return None
+        # Pick the most informative slice of stderr. Node.js / Python
+        # tracebacks print the actual `Error: <message>` line ABOVE the
+        # stack trace, so a plain tail loses the message we care about.
+        # Strategy: surface any line that looks like an error message,
+        # then add the last few lines for context. Cap total length.
+        all_lines = [ln for ln in stderr_text.splitlines() if ln.strip()]
+        error_pattern = re.compile(
+            r"^\s*(?:[A-Z][a-zA-Z]*Error|Exception|Traceback|throw\b|"
+            r"FATAL|Cannot find|Missing|Required|environment variable)",
+        )
+        error_lines = [ln for ln in all_lines if error_pattern.search(ln)]
+        # Combine: deduplicated error lines (preserve order) + last 8 lines.
+        chosen: list[str] = []
+        seen: set[str] = set()
+        for ln in error_lines + all_lines[-8:]:
+            stripped = ln.strip()
+            if stripped and stripped not in seen:
+                seen.add(stripped)
+                chosen.append(stripped)
+        if not chosen:
+            chosen_str = "(no stderr output)"
+        else:
+            joined = " | ".join(chosen)
+            chosen_str = joined if len(joined) <= 1500 else joined[:1500] + "…"
+        return (
+            f"stdio MCP exited (code {proc.returncode}) before/during MCP "
+            f"handshake. stderr: {chosen_str}"
+        )
+
+    client = None
+    try:
+        client = MultiServerMCPClient(config_dict)
+
+        # Open an MCP session and call list_tools at the protocol level.
+        # This returns mcp.types.Tool objects with their raw inputSchema
+        # JSON dict, exactly as the server published it — works with any
+        # MCP-spec-compliant server regardless of how langchain happens
+        # to wrap things.
+        async def _fetch_raw_tools():
+            async with client.session(srv_obj.id) as session:
+                resp = await session.list_tools()
+                return resp.tools
+
+        raw_tools = await asyncio.wait_for(_fetch_raw_tools(), timeout=30.0)
+
+        discovered = []
+        declared_names = {t.name for t in srv_obj.tools}
+        seen_names = set()
+        for mcp_tool in raw_tools:
+            name = getattr(mcp_tool, "name", None)
+            if not name:
+                continue
+            seen_names.add(name)
+            # inputSchema is a pydantic-modeled dict per the MCP spec.
+            # model_dump() flattens it back to the canonical JSON Schema dict.
+            schema = getattr(mcp_tool, "inputSchema", None)
+            if hasattr(schema, "model_dump"):
+                schema = schema.model_dump(exclude_none=True)
+            elif not isinstance(schema, dict):
+                schema = None
+            discovered.append({
+                "name": name,
+                "description": getattr(mcp_tool, "description", "") or "",
+                "input_schema": schema,
+            })
+
+        warnings = [w.model_dump() for w in env_warnings]
+        for declared_name in declared_names - seen_names:
+            warnings.append({
+                "server_id": srv_obj.id, "code": "declared_not_live",
+                "message": f"Tool '{declared_name}' declared in form but not returned by server.",
+            })
+
+        return {
+            "ok": True,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": discovered,
+            "error": None,
+            "warnings": warnings,
+        }
+    except asyncio.TimeoutError:
+        diag = _stdio_diagnostic_stderr()
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": diag or "connection timed out after 30s",
+            "warnings": [w.model_dump() for w in env_warnings],
+        }
+    except BaseExceptionGroup as group:  # noqa: F821 — Python 3.11+
+        # langchain_mcp_adapters wraps anyio TaskGroup failures in an
+        # ExceptionGroup whose default str() is "unhandled errors in a
+        # TaskGroup (1 sub-exception)" — useless. Recursively flatten
+        # the leaves so the user sees the real cause (401, DNS error, etc).
+        leaves: list[BaseException] = []
+        def _flatten(g):
+            for sub in g.exceptions:
+                if isinstance(sub, BaseExceptionGroup):
+                    _flatten(sub)
+                else:
+                    leaves.append(sub)
+        _flatten(group)
+        msg = "; ".join(f"{type(e).__name__}: {e}" for e in leaves) or str(group)
+        logger.warning(f"/mcp/test ExceptionGroup unwrapped: {msg}")
+        # For stdio "Connection closed"-style failures, the SDK swallows
+        # the subprocess stderr. Re-spawn ourselves to capture the real
+        # reason (missing API key, npm pkg not found, etc.).
+        if srv_obj.transport == "stdio" and (
+            "Connection closed" in msg or "ClosedResourceError" in msg or "BrokenPipe" in msg
+        ):
+            diag = _stdio_diagnostic_stderr()
+            if diag:
+                msg = diag
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": msg,
+            "warnings": [w.model_dump() for w in env_warnings],
+        }
+    except Exception as exc:
+        msg = f"{type(exc).__name__}: {exc}"
+        if srv_obj.transport == "stdio" and (
+            "Connection closed" in msg or "ClosedResource" in msg or "BrokenPipe" in msg
+        ):
+            diag = _stdio_diagnostic_stderr()
+            if diag:
+                msg = diag
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": msg,
+            "warnings": [w.model_dump() for w in env_warnings],
+        }
+    finally:
+        # Drop the throwaway client; rely on GC + peer SSE half-close.
+        client = None
 
 
 @app.get("/defaults", tags=["System"])
@@ -515,7 +1559,7 @@ async def get_models(providers: str = Query(default="", description="JSON-encode
     When `providers` query param is supplied (JSON list of UserLlmProvider rows),
     uses those configs for discovery. Otherwise falls back to env vars.
     """
-    from model_providers import fetch_all_models
+    from orchestrator_helpers.model_providers import fetch_all_models
 
     provider_list = None
     if providers:
@@ -540,7 +1584,7 @@ async def list_skills():
     Each entry contains: id, name, description, category.
     The frontend uses this to populate the skill selector in Project Settings.
     """
-    from skill_loader import list_skills as _list_skills
+    from orchestrator_helpers.skill_loader import list_skills as _list_skills
     skills = _list_skills()
     return {"skills": skills, "total": len(skills)}
 
@@ -548,7 +1592,7 @@ async def list_skills():
 @app.get("/skills/{skill_id:path}", tags=["System"])
 async def get_skill_content(skill_id: str):
     """Return full content of a specific skill."""
-    from skill_loader import load_skill_content, list_skills as _list_skills
+    from orchestrator_helpers.skill_loader import load_skill_content, list_skills as _list_skills
     content = load_skill_content(skill_id)
     if content is None:
         return JSONResponse({"error": f"Skill not found: {skill_id}"}, status_code=404)
@@ -632,6 +1676,68 @@ async def test_llm_provider(body: LlmProviderTestRequest):
             llm = setup_llm("claude-sonnet-4-20250514", anthropic_api_key=body.apiKey)
         elif ptype == "openrouter":
             llm = setup_llm("openrouter/openai/gpt-4o-mini", openrouter_api_key=body.apiKey)
+        elif ptype == "deepseek":
+            llm = setup_llm("deepseek/deepseek-chat", deepseek_api_key=body.apiKey)
+        elif ptype == "gemini":
+            from orchestrator_helpers.model_providers import fetch_gemini_models
+            available = await fetch_gemini_models(api_key=body.apiKey)
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No Gemini models available for this API key"},
+                    status_code=400,
+                )
+            flash = next((m for m in available if "flash" in m["id"].lower()), available[0])
+            llm = setup_llm(flash["id"], gemini_api_key=body.apiKey)
+        elif ptype == "glm":
+            from orchestrator_helpers.model_providers import fetch_glm_models
+            available = await fetch_glm_models(api_key=body.apiKey)
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No GLM models available for this API key"},
+                    status_code=400,
+                )
+            pick = next((m for m in available if "flash" in m["id"].lower()), available[0])
+            llm = setup_llm(pick["id"], glm_api_key=body.apiKey)
+        elif ptype == "kimi":
+            from orchestrator_helpers.model_providers import fetch_kimi_models
+            available = await fetch_kimi_models(api_key=body.apiKey)
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No Kimi models available for this API key"},
+                    status_code=400,
+                )
+            pick = next((m for m in available if "8k" in m["id"].lower()), available[0])
+            llm = setup_llm(pick["id"], kimi_api_key=body.apiKey)
+        elif ptype == "qwen":
+            from orchestrator_helpers.model_providers import fetch_qwen_models
+            available = await fetch_qwen_models(api_key=body.apiKey)
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No Qwen models available for this API key"},
+                    status_code=400,
+                )
+            pick = next((m for m in available if "turbo" in m["id"].lower()), available[0])
+            llm = setup_llm(pick["id"], qwen_api_key=body.apiKey)
+        elif ptype == "xai":
+            from orchestrator_helpers.model_providers import fetch_xai_models
+            available = await fetch_xai_models(api_key=body.apiKey)
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No xAI models available for this API key"},
+                    status_code=400,
+                )
+            pick = next((m for m in available if "mini" in m["id"].lower() or "fast" in m["id"].lower()), available[0])
+            llm = setup_llm(pick["id"], xai_api_key=body.apiKey)
+        elif ptype == "mistral":
+            from orchestrator_helpers.model_providers import fetch_mistral_models
+            available = await fetch_mistral_models(api_key=body.apiKey)
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No Mistral models available for this API key"},
+                    status_code=400,
+                )
+            pick = next((m for m in available if "small" in m["id"].lower() or "nemo" in m["id"].lower()), available[0])
+            llm = setup_llm(pick["id"], mistral_api_key=body.apiKey)
         elif ptype == "bedrock":
             llm = setup_llm(
                 "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
@@ -945,6 +2051,10 @@ class TextToCypherRequest(BaseModel):
     question: str
     user_id: str
     project_id: str
+    # Default True for backward compatibility with the webapp graph view, which
+    # needs whole nodes/relationships to render. CLI callers (e.g. redagraph)
+    # should send False so the LLM is free to return scalar properties.
+    for_graph_view: bool = True
 
 
 @app.post("/text-to-cypher", tags=["Graph"])
@@ -992,6 +2102,14 @@ async def text_to_cypher(body: TextToCypherRequest):
     openai_p = _resolve_provider_key(user_providers, "openai")
     anthropic_p = _resolve_provider_key(user_providers, "anthropic")
     openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+    bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+    deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+    gemini_p = _resolve_provider_key(user_providers, "gemini")
+    glm_p = _resolve_provider_key(user_providers, "glm")
+    kimi_p = _resolve_provider_key(user_providers, "kimi")
+    qwen_p = _resolve_provider_key(user_providers, "qwen")
+    xai_p = _resolve_provider_key(user_providers, "xai")
+    mistral_p = _resolve_provider_key(user_providers, "mistral")
 
     try:
         # Check if model uses custom provider config
@@ -1017,6 +2135,16 @@ async def text_to_cypher(body: TextToCypherRequest):
                 openai_api_key=(openai_p or {}).get("apiKey"),
                 anthropic_api_key=(anthropic_p or {}).get("apiKey"),
                 openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+                deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+                gemini_api_key=(gemini_p or {}).get("apiKey"),
+                glm_api_key=(glm_p or {}).get("apiKey"),
+                kimi_api_key=(kimi_p or {}).get("apiKey"),
+                qwen_api_key=(qwen_p or {}).get("apiKey"),
+                xai_api_key=(xai_p or {}).get("apiKey"),
+                mistral_api_key=(mistral_p or {}).get("apiKey"),
+                aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
+                aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+                aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
             )
     except Exception as e:
         logger.error(f"text-to-cypher: failed to create LLM: {e}")
@@ -1061,19 +2189,17 @@ async def text_to_cypher(body: TextToCypherRequest):
     for attempt in range(max_retries):
         try:
             if attempt == 0:
-                cypher = await manager._generate_cypher(body.question, for_graph_view=True)
+                cypher = await manager._generate_cypher(body.question, for_graph_view=body.for_graph_view)
             else:
                 cypher = await manager._generate_cypher(
                     body.question,
                     previous_error=last_error,
                     previous_cypher=last_cypher,
-                    for_graph_view=True,
+                    for_graph_view=body.for_graph_view,
                 )
 
             # Reject write operations -- data filters are read-only
-            _upper = cypher.upper()
-            _WRITE_KW = ['CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET ', 'REMOVE', 'DROP', 'CALL']
-            if any(kw in _upper for kw in _WRITE_KW):
+            if manager._find_disallowed_write_operation(cypher):
                 return JSONResponse(
                     content={"error": "Write operations are not allowed in data filters"},
                     status_code=400,

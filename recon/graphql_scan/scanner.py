@@ -70,6 +70,24 @@ def run_graphql_scan(combined_result: dict, settings: dict) -> dict:
     print("\n[*][GraphQL] Starting GraphQL security scan")
     print("=" * 50)
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "GraphQL",
+        settings,
+        keys=[
+            ("GRAPHQL_SECURITY_ENABLED", "Toggle"),
+            ("GRAPHQL_TIMEOUT", "Performance"),
+            ("GRAPHQL_RATE_LIMIT", "Performance"),
+            ("GRAPHQL_CONCURRENCY", "Performance"),
+            ("GRAPHQL_RETRY_COUNT", "Performance"),
+            ("GRAPHQL_RETRY_BACKOFF", "Performance"),
+            ("GRAPHQL_DEPTH_LIMIT", "Behavior"),
+            ("GRAPHQL_INTROSPECTION_TEST", "Behavior"),
+            ("GRAPHQL_VERIFY_SSL", "Behavior"),
+            ("GRAPHQL_COP_ENABLED", "graphql-cop integration"),
+        ],
+    )
+
     start_time = time.time()
 
     # Initialize GraphQL scan results

@@ -4,15 +4,18 @@
 # ============================================
 
 # Stage 1: Dependencies
-FROM node:22-alpine AS deps
-RUN apk add --no-cache libc6-compat
+FROM node:22-slim AS deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production && npm cache clean --force
+COPY prisma ./prisma
+RUN npm ci --no-audit --no-fund && npm cache clean --force
 
 # Stage 2: Builder
-FROM node:22-alpine AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -24,18 +27,23 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 # Dummy DATABASE_URL for Prisma client generation at build time (not used at runtime)
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+ENV NODE_OPTIONS=--max-old-space-size=4096
 
-RUN npm ci && npm run build
+RUN npm run build
 
 # Stage 3: Runner (Production)
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openssl ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system --gid 1001 nodejs
+RUN useradd --system --uid 1001 --gid nodejs --no-create-home nextjs
 
 COPY --from=builder /app/public ./public
 

@@ -21,7 +21,7 @@ interface DrawerHeaderProps {
   showHistory: boolean
   setShowHistory: (v: boolean) => void
   handleNewChat: () => void
-  handleDownloadMarkdown: () => void
+  handleDownloadMarkdown: () => void | Promise<void>
   chatItems: ChatItem[]
   onClose: () => void
   conversations: Conversation[]

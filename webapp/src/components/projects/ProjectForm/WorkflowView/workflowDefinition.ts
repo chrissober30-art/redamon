@@ -46,6 +46,7 @@ export const WORKFLOW_TOOLS: WorkflowToolDef[] = [
   { id: 'Nuclei',             label: 'Nuclei',             enabledField: 'nucleiEnabled',               group: 6, badge: 'active' },
   { id: 'GraphqlScan',        label: 'GraphQL Scan',       enabledField: 'graphqlSecurityEnabled',     group: 6, badge: 'active' },
   { id: 'SubdomainTakeover',  label: 'Subdomain Takeover', enabledField: 'subdomainTakeoverEnabled',   group: 6, badge: 'active' },
+  { id: 'VhostSni',           label: 'VHost & SNI',        enabledField: 'vhostSniEnabled',             group: 6, badge: 'active' },
 
   // Group 7 - CVE & MITRE
   { id: 'CveLookup', label: 'CVE Lookup', enabledField: 'cveLookupEnabled', group: 7 },

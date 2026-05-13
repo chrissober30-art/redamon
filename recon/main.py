@@ -30,11 +30,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import settings from project_settings (fetches from API or falls back to params.py)
-from recon.project_settings import get_settings, apply_stealth_overrides
+from recon.project_settings import get_settings
 
-# Load settings from API (if PROJECT_ID/WEBAPP_API_URL set) or params.py (CLI mode)
+# Load settings from API (if PROJECT_ID/WEBAPP_API_URL set) or params.py (CLI mode).
+# get_settings() now applies stealth + AI cascade overrides internally so every
+# downstream consumer (full pipeline + every partial recon module) gets them.
 _settings = get_settings()
-_settings = apply_stealth_overrides(_settings)
 
 # Extract commonly used settings as module-level variables for compatibility
 TARGET_DOMAIN = _settings['TARGET_DOMAIN']
@@ -1372,6 +1373,9 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
         if _settings.get('SUBDOMAIN_TAKEOVER_ENABLED', False):
             from recon.main_recon_modules.subdomain_takeover import run_subdomain_takeover_isolated
             phase_a_tools['subdomain_takeover'] = run_subdomain_takeover_isolated
+        if _settings.get('VHOST_SNI_ENABLED', False):
+            from recon.main_recon_modules.vhost_sni_enum import run_vhost_sni_enrichment_isolated
+            phase_a_tools['vhost_sni'] = run_vhost_sni_enrichment_isolated
 
         if phase_a_tools:
             print(f"\n[*][Pipeline] GROUP 6 Phase A: Active Vulnerability Scanning (fan-out: {', '.join(phase_a_tools.keys())})")

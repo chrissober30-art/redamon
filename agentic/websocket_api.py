@@ -15,7 +15,7 @@ from enum import Enum
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 from orchestrator_helpers import create_config
-from chat_persistence import save_chat_message, update_conversation
+from orchestrator_helpers.chat_persistence import save_chat_message, update_conversation
 
 
 def serialize_for_json(obj):

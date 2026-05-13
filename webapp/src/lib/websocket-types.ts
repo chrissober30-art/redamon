@@ -93,7 +93,11 @@ export interface FireteamMemberInfo {
   member_id: string
   name: string
   task: string
-  skills: string[]
+  // Agent canonical key is `tools` (the member's primary allowlist). The
+  // legacy `skills` alias is kept optional for back-compat during rollout but
+  // is no longer emitted by the agent.
+  tools?: string[]
+  skills?: string[]
   max_iterations: number
 }
 
@@ -334,7 +338,7 @@ export interface PlanCompletePayload {
 export interface PhaseUpdatePayload {
   current_phase: string
   iteration_count: number
-  attack_path_type?: string  // "cve_exploit", "brute_force_credential_guess", "phishing_social_engineering", "denial_of_service", or "<term>-unclassified"
+  attack_path_type?: string  // "cve_exploit" | "sql_injection" | "xss" | "ssrf" | "rce" | "path_traversal" | "brute_force_credential_guess" | "phishing_social_engineering" | "denial_of_service" | "user_skill:<id>" | "<term>-unclassified"
 }
 
 export interface TodoItem {

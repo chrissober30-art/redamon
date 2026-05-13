@@ -164,6 +164,20 @@ def run_virustotal_enrichment(combined_result: dict, settings: dict) -> dict:
     if not settings.get("VIRUSTOTAL_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "VirusTotal",
+        settings,
+        keys=[
+            ("VIRUSTOTAL_ENABLED", "Toggle"),
+            ("VIRUSTOTAL_RATE_LIMIT", "Performance"),
+            ("VIRUSTOTAL_MAX_TARGETS", "Limits"),
+            ("VIRUSTOTAL_WORKERS", "Performance"),
+            ("VIRUSTOTAL_API_KEY", "API credentials"),
+            ("VIRUSTOTAL_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     api_key = settings.get("VIRUSTOTAL_API_KEY", "")
     key_rotator = settings.get("VIRUSTOTAL_KEY_ROTATOR")
     _rl = settings.get("VIRUSTOTAL_RATE_LIMIT", 4)

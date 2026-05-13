@@ -94,7 +94,11 @@ export function handleFireteamDeployed(
       member_id: m.member_id,
       name: m.name,
       task: m.task,
-      skills: m.skills ?? [],
+      // Agent emits the allowlist as `tools`; UI keeps the field name `skills`
+      // on the view-model because `member.tools` already refers to the array of
+      // EXECUTED tool calls (different concept). Read the new agent key and
+      // fall back to the legacy one for forward/back compat during rollout.
+      skills: m.tools ?? m.skills ?? [],
       status: 'running' as FireteamMemberStatus,
       started_at: now,
       tools: [],

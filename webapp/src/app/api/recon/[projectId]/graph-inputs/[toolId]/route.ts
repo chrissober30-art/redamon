@@ -482,11 +482,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
-             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)-[:HAS_PORT]->(p:Port)
+             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)
+             WITH d, collect(DISTINCT s.name) AS subdomains
+             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(:Subdomain)-[:RESOLVES_TO]->(i:IP)-[:HAS_PORT]->(p:Port)
              OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)-[:HAS_PORT]->(dp:Port)
              OPTIONAL MATCH (p)-[:HAS_SERVICE]->(:Service)-[:SERVES_URL]->(bu:BaseURL)
              OPTIONAL MATCH (dp)-[:HAS_SERVICE]->(:Service)-[:SERVES_URL]->(dbu:BaseURL)
-             WITH d, collect(DISTINCT s.name) AS subdomains,
+             WITH d, subdomains,
                   count(DISTINCT i) + count(DISTINCT di) AS ipCount,
                   count(DISTINCT p) + count(DISTINCT dp) AS portCount,
                   count(DISTINCT bu) + count(DISTINCT dbu) AS baseurlCount
@@ -526,16 +528,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
-             WITH d
+             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)
+             WITH d, count(DISTINCT s) AS subCount
              OPTIONAL MATCH (b:BaseURL {user_id: $uid, project_id: $pid})
-             WITH d, collect(DISTINCT b.url) AS baseurls
+             WITH d, subCount, collect(DISTINCT b.url) AS baseurls
              OPTIONAL MATCH (e:Endpoint {user_id: $uid, project_id: $pid})
-             WITH d, baseurls, count(DISTINCT e) AS endpointCount
-             RETURN d.name AS domain, baseurls, size(baseurls) AS baseurlCount, endpointCount`,
+             WITH d, subCount, baseurls, count(DISTINCT e) AS endpointCount
+             RETURN d.name AS domain, subCount, baseurls, size(baseurls) AS baseurlCount, endpointCount`,
             { uid: project.userId, pid: projectId }
           )
           const record = result.records[0]
           const domain = record?.get('domain') || null
+          const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
           const baseurls: string[] = record?.get('baseurls') || []
           const baseurlCount = record?.get('baseurlCount')?.toNumber?.() ?? record?.get('baseurlCount') ?? 0
           const endpointCount = record?.get('endpointCount')?.toNumber?.() ?? record?.get('endpointCount') ?? 0
@@ -543,7 +547,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           if (domain) {
             return NextResponse.json({
               domain,
-              existing_subdomains_count: 0,
+              existing_subdomains_count: subCount,
               existing_baseurls: baseurls,
               existing_baseurls_count: baseurlCount,
               existing_endpoints_count: endpointCount,
@@ -726,6 +730,56 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
       } catch (err) {
         console.warn('Neo4j query failed for OsintEnrichment graph-inputs, falling back to settings:', err)
+      }
+    }
+
+    else if (toolId === 'VhostSni') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)
+             OPTIONAL MATCH (s)-[:RESOLVES_TO]->(i:IP)
+             OPTIONAL MATCH (i)-[:HAS_PORT]->(p:Port)
+             OPTIONAL MATCH (s)-[:HAS_BASEURL]->(bu:BaseURL)
+             OPTIONAL MATCH (ed:ExternalDomain {user_id: $uid, project_id: $pid})
+             WITH d, collect(DISTINCT s.name) AS subdomains,
+                  count(DISTINCT i) AS ipCount,
+                  count(DISTINCT p) AS portCount,
+                  count(DISTINCT bu) AS baseurlCount,
+                  count(DISTINCT ed) AS externalCount
+             RETURN d.name AS domain, subdomains,
+                    size(subdomains) AS subCount,
+                    ipCount, portCount, baseurlCount, externalCount`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const subdomains: string[] = record?.get('subdomains') || []
+          const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
+          const ipCount = record?.get('ipCount')?.toNumber?.() ?? record?.get('ipCount') ?? 0
+          const portCount = record?.get('portCount')?.toNumber?.() ?? record?.get('portCount') ?? 0
+          const baseurlCount = record?.get('baseurlCount')?.toNumber?.() ?? record?.get('baseurlCount') ?? 0
+          const externalCount = record?.get('externalCount')?.toNumber?.() ?? record?.get('externalCount') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_subdomains: subdomains,
+              existing_subdomains_count: subCount,
+              existing_ips_count: ipCount,
+              existing_ports_count: portCount,
+              existing_baseurls_count: baseurlCount,
+              existing_external_domains_count: externalCount,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for VhostSni graph-inputs, falling back to settings:', err)
       }
     }
 

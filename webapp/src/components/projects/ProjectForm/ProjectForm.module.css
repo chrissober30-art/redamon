@@ -39,6 +39,9 @@
   font-weight: var(--font-semibold);
   color: var(--text-primary);
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .actions {
@@ -971,16 +974,16 @@
 
 /* Node info tooltip */
 .nodeInfoIcon {
-  color: var(--text-tertiary);
+  color: #22c55e;
   cursor: help;
   flex-shrink: 0;
-  opacity: 0.6;
+  opacity: 0.95;
   transition: opacity 0.15s, color 0.15s;
 }
 
 .nodeInfoIcon:hover {
   opacity: 1;
-  color: var(--accent-secondary);
+  color: #4ade80;
 }
 
 .nodeInfoContent {
@@ -1041,4 +1044,120 @@
   color: #4ade80;
   border: 1px solid rgba(34, 197, 94, 0.30);
   white-space: nowrap;
+}
+
+/* =============================================================================
+   File Import Button (multi-value field text-file loader)
+   ============================================================================= */
+
+.fileImportWrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.fileImportWrap > input,
+.fileImportWrap > textarea {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.fileImportButton {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  z-index: 1;
+}
+
+.fileImportButton:hover:not(:disabled) {
+  color: var(--accent-secondary);
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+
+.fileImportButton:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 1px;
+}
+
+.fileImportButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.fileImportButtonInputPos {
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+}
+
+.fileImportButtonTextareaPos {
+  top: 6px;
+  right: 6px;
+}
+
+.fileImportButtonSuccess {
+  color: #22c55e;
+}
+
+.fileImportButtonError {
+  color: #ef4444;
+}
+
+.fileImportTooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.fileImportTooltipTitle {
+  font-weight: 700;
+  color: var(--color-gray-100);
+}
+
+.fileImportTooltipBody {
+  color: var(--color-gray-300);
+}
+
+.fileImportTooltipSection {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fileImportTooltipLabel {
+  font-weight: 600;
+  color: var(--color-gray-200);
+}
+
+.fileImportTooltipList {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--color-gray-300);
+}
+
+.fileImportTooltipList code,
+.fileImportTooltipFooter code {
+  background: rgba(255, 255, 255, 0.10);
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 10px;
+}
+
+.fileImportTooltipFooter {
+  color: var(--color-gray-400);
+  font-size: 10px;
 }

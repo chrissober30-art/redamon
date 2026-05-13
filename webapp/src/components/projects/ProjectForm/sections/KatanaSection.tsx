@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { Bug, ChevronDown, Play } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
 import { TimeEstimate } from '../TimeEstimate'
+import { FileImportButton } from '../FileImportButton'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -26,6 +27,7 @@ export function KatanaSection({ data, updateField, onRun }: KatanaSectionProps) 
           <Bug size={16} />
           Katana Web Crawler (DAST)
           <NodeInfoTooltip section="Katana" />
+          <WikiInfoButton target="Katana" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>
@@ -86,7 +88,7 @@ export function KatanaSection({ data, updateField, onRun }: KatanaSectionProps) 
                 type="number"
                 className="textInput"
                 value={data.katanaMaxUrls}
-                onChange={(e) => updateField('katanaMaxUrls', parseInt(e.target.value) || 300)}
+                onChange={(e) => updateField('katanaMaxUrls', parseInt(e.target.value) || 300000)}
                 min={1}
               />
               <span className={styles.fieldHint}>Maximum number of URLs to collect per domain</span>
@@ -175,13 +177,20 @@ export function KatanaSection({ data, updateField, onRun }: KatanaSectionProps) 
             <h3 className={styles.subSectionTitle}>Exclude Patterns</h3>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>URL Patterns to Exclude</label>
-              <textarea
-                className="textarea"
-                value={(data.katanaExcludePatterns ?? []).join('\n')}
-                onChange={(e) => updateField('katanaExcludePatterns', e.target.value.split('\n').filter(Boolean))}
-                placeholder="/_next/static&#10;.png&#10;.css&#10;/images/"
-                rows={5}
-              />
+              <div className={styles.fileImportWrap}>
+                <textarea
+                  className="textarea"
+                  value={(data.katanaExcludePatterns ?? []).join('\n')}
+                  onChange={(e) => updateField('katanaExcludePatterns', e.target.value.split('\n').filter(Boolean))}
+                  placeholder="/_next/static&#10;.png&#10;.css&#10;/images/"
+                  rows={5}
+                />
+                <FileImportButton
+                  variant="textarea"
+                  fieldName="exclude patterns"
+                  onImport={(values) => updateField('katanaExcludePatterns', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>
                 Skip static assets, images, and CDN URLs. These aren't vulnerable to injection attacks
               </span>
@@ -192,13 +201,20 @@ export function KatanaSection({ data, updateField, onRun }: KatanaSectionProps) 
             <h3 className={styles.subSectionTitle}>Custom Headers</h3>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Request Headers</label>
-              <textarea
-                className="textarea"
-                value={(data.katanaCustomHeaders ?? []).join('\n')}
-                onChange={(e) => updateField('katanaCustomHeaders', e.target.value.split('\n').filter(Boolean))}
-                placeholder="User-Agent: Mozilla/5.0...&#10;Accept: text/html..."
-                rows={3}
-              />
+              <div className={styles.fileImportWrap}>
+                <textarea
+                  className="textarea"
+                  value={(data.katanaCustomHeaders ?? []).join('\n')}
+                  onChange={(e) => updateField('katanaCustomHeaders', e.target.value.split('\n').filter(Boolean))}
+                  placeholder="User-Agent: Mozilla/5.0...&#10;Accept: text/html..."
+                  rows={3}
+                />
+                <FileImportButton
+                  variant="textarea"
+                  fieldName="headers"
+                  onImport={(values) => updateField('katanaCustomHeaders', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Browser-like headers help avoid detection during DAST crawling</span>
             </div>
           </div>

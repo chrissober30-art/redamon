@@ -327,6 +327,109 @@ class TestScoring:
         assert f_off["verdict"] == "manual_review" and f_off["severity"] == "info"
         assert f_on["verdict"] == "manual_review" and f_on["severity"] == "medium"
 
+    def test_cname_alive_demotes_non_auto_exploitable(self):
+        # The sysaid/instatus regression: subjack flags gemfury, CNAME points
+        # at cname.instatus.com which resolves to live IPs. gemfury is NOT in
+        # AUTO_EXPLOITABLE_PROVIDERS, so the cname_alive penalty fires.
+        f = self._base(provider="gemfury", sources=["subjack"])
+        f["cname_alive"] = True
+        score_finding(f, confidence_threshold=60)
+        # 25 (subjack) + 10 (cname) - 30 (cname_alive non-auto) = 5
+        assert f["confidence"] == 5
+        assert f["verdict"] == "manual_review"
+
+    def test_cname_alive_does_not_demote_auto_exploitable(self):
+        # GitHub Pages wildcards every *.github.io to the GH edge even when
+        # the underlying project is dangling, so a live CNAME is normal for
+        # auto-exploitable providers and must not trigger the penalty.
+        f = self._base(provider="github-pages", sources=["subjack"])
+        f["cname_alive"] = True
+        score_finding(f, confidence_threshold=60)
+        # Same as the no-cname-alive baseline: 25 + 20 + 10 = 55
+        assert f["confidence"] == 55
+        assert f["verdict"] == "manual_review"
+
+    def test_provider_mismatch_demotes_finding(self):
+        # Subjack says github-pages but CNAME maps to a different SaaS.
+        # Strong signal of a body-content fingerprint collision.
+        f = self._base(provider="github-pages", sources=["subjack"])
+        f["provider_mismatch"] = True
+        score_finding(f, confidence_threshold=60)
+        # 25 (subjack) + 20 (auto-exploitable) + 10 (cname) - 25 (mismatch) = 30
+        assert f["confidence"] == 30
+        assert f["verdict"] == "manual_review"
+
+    def test_cname_alive_and_mismatch_stack(self):
+        f = self._base(provider="gemfury", sources=["subjack"])
+        f["cname_alive"] = True
+        f["provider_mismatch"] = True
+        score_finding(f, confidence_threshold=60)
+        # 25 (subjack) + 10 (cname) - 25 (mismatch) - 30 (cname_alive non-auto) = -20 → clamped 0
+        assert f["confidence"] == 0
+        assert f["verdict"] == "manual_review"
+
+
+# ---------------------------------------------------------------------------
+# Live-CNAME validation helper
+# ---------------------------------------------------------------------------
+class TestResolveCnameTarget:
+    def test_empty_cname_returns_unresolved(self):
+        from recon.helpers.takeover_helpers import resolve_cname_target
+        result = resolve_cname_target("")
+        assert result["resolves"] is False
+        assert result["nxdomain"] is False
+        assert result["ips"] == ()
+
+    def test_none_cname_handled(self):
+        from recon.helpers.takeover_helpers import resolve_cname_target
+        result = resolve_cname_target(None or "")
+        assert result["resolves"] is False
+
+    def test_result_shape_is_stable(self, monkeypatch):
+        # Don't hit real DNS in CI: patch dnspython to raise NXDOMAIN.
+        import dns.resolver
+        import dns.exception
+        from recon.helpers import takeover_helpers
+
+        class FakeResolver:
+            lifetime = 3.0
+            timeout = 3.0
+            def resolve(self, name, rdtype):
+                raise dns.resolver.NXDOMAIN()
+
+        monkeypatch.setattr(dns.resolver, "Resolver", lambda: FakeResolver())
+        # Bust the lru_cache so the patched resolver is actually consulted.
+        takeover_helpers.resolve_cname_target.cache_clear()
+        result = takeover_helpers.resolve_cname_target("never-existed.invalid.example")
+        assert result["resolves"] is False
+        assert result["nxdomain"] is True
+        assert result["ips"] == ()
+
+    def test_live_cname_marks_resolves(self, monkeypatch):
+        import dns.resolver
+        from recon.helpers import takeover_helpers
+
+        class FakeAnswer:
+            def __init__(self, addrs):
+                self._addrs = addrs
+            def __iter__(self):
+                return iter(self._addrs)
+
+        class FakeResolver:
+            lifetime = 3.0
+            timeout = 3.0
+            def resolve(self, name, rdtype):
+                if rdtype == "A":
+                    return FakeAnswer(["1.2.3.4", "5.6.7.8"])
+                raise dns.resolver.NoAnswer()
+
+        monkeypatch.setattr(dns.resolver, "Resolver", lambda: FakeResolver())
+        takeover_helpers.resolve_cname_target.cache_clear()
+        result = takeover_helpers.resolve_cname_target("cname.instatus.example")
+        assert result["resolves"] is True
+        assert "1.2.3.4" in result["ips"]
+        assert result["nxdomain"] is False
+
 
 # ---------------------------------------------------------------------------
 # Deterministic ID
@@ -907,6 +1010,106 @@ class TestRunner:
         # No leakage into caller
         assert original == before
         assert "subdomain_takeover" not in original
+
+    def test_enrichment_marks_cname_alive_and_demotes_score(self, monkeypatch):
+        """
+        End-to-end regression for the sysaid/instatus false positive.
+
+        Subjack flags status.sysaid.com as Gemfury. The CNAME (cname.instatus.com)
+        resolves to live IPs. Enrichment must mark cname_alive=True and the
+        scorer must drop confidence below the manual_review threshold.
+        """
+        from recon.main_recon_modules import subdomain_takeover as runner
+        from recon.helpers import takeover_helpers
+
+        # Replace subjack execution with a fixed payload (don't shell out).
+        monkeypatch.setattr(
+            runner,
+            "_run_subjack",
+            lambda subdomains, work_dir, settings: [
+                {"subdomain": "status.sysaid.com", "vulnerable": True, "service": "Gemfury"}
+            ],
+        )
+        # resolve_cname_target is imported into runner's namespace, so patch
+        # it there (and clear the lru_cache on the original to avoid leaks).
+        takeover_helpers.resolve_cname_target.cache_clear()
+        monkeypatch.setattr(
+            runner,
+            "resolve_cname_target",
+            lambda cname, timeout=3.0: {"resolves": True, "ips": ("1.2.3.4",), "nxdomain": False},
+        )
+
+        recon = {
+            "domain": "sysaid.com",
+            "dns": {
+                "subdomains": {
+                    "status.sysaid.com": {"records": {"CNAME": "cname.instatus.com."}},
+                }
+            },
+        }
+        out = runner.run_subdomain_takeover(
+            recon,
+            settings={
+                "SUBDOMAIN_TAKEOVER_ENABLED": True,
+                "SUBJACK_ENABLED": True,
+                "NUCLEI_TAKEOVERS_ENABLED": False,  # avoid docker
+                "BADDNS_ENABLED": False,
+                "TAKEOVER_CNAME_VALIDATION_ENABLED": True,
+                "TAKEOVER_CONFIDENCE_THRESHOLD": 60,
+            },
+        )
+        findings = out["subdomain_takeover"]["findings"]
+        assert len(findings) == 1
+        f = findings[0]
+        assert f["hostname"] == "status.sysaid.com"
+        assert f["cname_target"] == "cname.instatus.com"
+        assert f.get("cname_alive") is True
+        # gemfury is NOT auto-exploitable -> -30 penalty fires
+        # 25 (subjack) + 10 (cname) - 30 (cname_alive non-auto) = 5
+        assert f["confidence"] == 5
+        assert f["verdict"] == "manual_review"
+        assert f["severity"] == "info"
+
+    def test_enrichment_disabled_via_setting_leaves_cname_alive_unset(self, monkeypatch):
+        """When TAKEOVER_CNAME_VALIDATION_ENABLED=False, no DNS probe runs."""
+        from recon.main_recon_modules import subdomain_takeover as runner
+        from recon.helpers import takeover_helpers
+
+        monkeypatch.setattr(
+            runner,
+            "_run_subjack",
+            lambda subdomains, work_dir, settings: [
+                {"subdomain": "x.acme.com", "vulnerable": True, "service": "Github"}
+            ],
+        )
+        # If the helper IS called, blow up — we want to prove it isn't.
+        def _should_not_be_called(*a, **kw):
+            raise AssertionError("resolve_cname_target should not be called when validation disabled")
+        takeover_helpers.resolve_cname_target.cache_clear()
+        monkeypatch.setattr(runner, "resolve_cname_target", _should_not_be_called)
+
+        recon = {
+            "domain": "acme.com",
+            "dns": {
+                "subdomains": {
+                    "x.acme.com": {"records": {"CNAME": "x.github.io."}},
+                }
+            },
+        }
+        out = runner.run_subdomain_takeover(
+            recon,
+            settings={
+                "SUBDOMAIN_TAKEOVER_ENABLED": True,
+                "SUBJACK_ENABLED": True,
+                "NUCLEI_TAKEOVERS_ENABLED": False,
+                "BADDNS_ENABLED": False,
+                "TAKEOVER_CNAME_VALIDATION_ENABLED": False,
+            },
+        )
+        findings = out["subdomain_takeover"]["findings"]
+        assert len(findings) == 1
+        # cname_alive must NOT be set when validation is disabled
+        assert "cname_alive" not in findings[0]
 
 
 # ---------------------------------------------------------------------------

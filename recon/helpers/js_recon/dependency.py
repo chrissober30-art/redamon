@@ -9,6 +9,7 @@ import re
 import hashlib
 import threading
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 
@@ -169,23 +170,38 @@ def detect_dependency_confusion(
         if pkg not in package_sources:
             package_sources[pkg] = ['custom_packages_file']
 
-    # Check each scoped package against npm registry
-    findings = []
+    # Build the candidate list (skip well-known public scopes)
+    public_scopes = ('@types', '@babel', '@angular', '@vue', '@react', '@next',
+                     '@nuxt', '@svelte', '@emotion', '@mui', '@chakra-ui',
+                     '@radix-ui', '@headlessui', '@tanstack', '@trpc',
+                     '@prisma', '@nestjs', '@aws-sdk', '@azure', '@google-cloud',
+                     '@stripe', '@sentry', '@datadog', '@testing-library',
+                     '@jest', '@vitest', '@eslint', '@typescript-eslint',
+                     '@rollup', '@vitejs', '@webpack', '@storybook')
 
+    candidates = []
     for package_name, source_urls in package_sources.items():
         scope = package_name.split('/')[0] if '/' in package_name else ''
-
-        # Skip well-known public scopes
-        if scope in ('@types', '@babel', '@angular', '@vue', '@react', '@next',
-                      '@nuxt', '@svelte', '@emotion', '@mui', '@chakra-ui',
-                      '@radix-ui', '@headlessui', '@tanstack', '@trpc',
-                      '@prisma', '@nestjs', '@aws-sdk', '@azure', '@google-cloud',
-                      '@stripe', '@sentry', '@datadog', '@testing-library',
-                      '@jest', '@vitest', '@eslint', '@typescript-eslint',
-                      '@rollup', '@vitejs', '@webpack', '@storybook'):
+        if scope in public_scopes:
             continue
+        candidates.append((package_name, scope, source_urls))
 
-        npm_exists = _check_npm_registry(package_name)
+    # Parallel npm registry lookups. npm rate-limits anonymous traffic, so
+    # cap workers conservatively (<= 10) regardless of JS_RECON_CONCURRENCY.
+    workers = max(1, min(settings.get('JS_RECON_CONCURRENCY', 10), 10))
+    existence = {}
+    if candidates:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for (pkg, _, _), exists in zip(
+                candidates,
+                ex.map(_check_npm_registry, [c[0] for c in candidates]),
+            ):
+                existence[pkg] = exists
+
+    # Build findings sequentially (cheap CPU work)
+    findings = []
+    for package_name, scope, source_urls in candidates:
+        npm_exists = existence.get(package_name, True)
 
         if not npm_exists:
             finding_id = hashlib.sha256(f"depconf:{package_name}".encode()).hexdigest()[:16]

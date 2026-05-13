@@ -13,6 +13,8 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
+
+from recon.helpers.subprocess_helpers import run_with_heartbeat
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -302,11 +304,13 @@ def run_kiterunner_discovery(
 
         try:
             print(f"[*][Kiterunner] Command: {' '.join(cmd[:6])}...")  # Show partial command
-            result = subprocess.run(
+            # Heartbeat every 30s -- Kiterunner brute-forces large wordlists
+            # against API endpoints and can run for several minutes silently.
+            result = run_with_heartbeat(
                 cmd,
-                capture_output=True,
-                text=True,
-                timeout=scan_timeout + 60
+                label="Kiterunner",
+                interval=30,
+                timeout=scan_timeout + 60,
             )
 
             # Parse Kiterunner JSON output from stdout

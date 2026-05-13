@@ -100,7 +100,7 @@
   color: var(--text-secondary, #9ca3af);
 }
 
-.waves, .tools {
+.waves, .tools, .timeline {
   display: flex;
   flex-direction: column;
   gap: 4px;

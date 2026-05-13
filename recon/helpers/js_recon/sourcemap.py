@@ -8,7 +8,9 @@ to extract original source code, file paths, and embedded secrets.
 import re
 import json
 import hashlib
+import threading
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin, urlparse
 from typing import Optional
 
@@ -95,7 +97,7 @@ def _build_probe_urls(js_url: str, custom_paths: Optional[list] = None) -> list:
 
 
 def _fetch_sourcemap(url: str, timeout: int = 10) -> Optional[dict]:
-    """Fetch and parse a source map JSON file."""
+    """Fetch and parse a source map JSON file. Uses HEAD to skip guaranteed misses."""
     if url.startswith('data:'):
         # Inline base64-encoded source map
         try:
@@ -106,8 +108,21 @@ def _fetch_sourcemap(url: str, timeout: int = 10) -> Optional[dict]:
         except Exception:
             return None
 
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    head_timeout = min(timeout, 5)
+
     try:
-        resp = requests.get(url, timeout=timeout, headers={'User-Agent': 'Mozilla/5.0'})
+        head = requests.head(url, timeout=head_timeout, allow_redirects=True, headers=headers)
+        # Skip definite misses without paying for a body download. Other statuses
+        # (200, 403, 405, 5xx) fall through to GET — some servers misreport HEAD.
+        if head.status_code in (404, 410):
+            return None
+    except requests.RequestException:
+        # Connection-level failure on HEAD: GET would fail too.
+        return None
+
+    try:
+        resp = requests.get(url, timeout=timeout, headers=headers)
         if resp.status_code == 200:
             content_type = resp.headers.get('Content-Type', '')
             # Source maps should be JSON
@@ -204,19 +219,27 @@ def discover_and_analyze_sourcemaps(
         except Exception as e:
             print(f"[!][JsRecon] Failed to load custom sourcemap paths: {e}")
 
-    findings = []
     checked_map_urls = set()
+    checked_lock = threading.Lock()
     # Use fraction of overall timeout for each sourcemap fetch, minimum 10s
     timeout = max(settings.get('JS_RECON_TIMEOUT', 900) // 60, 10)
 
-    for js_file in js_files:
+    def _claim(url: str) -> bool:
+        """Atomically reserve a probe URL. Returns False if already claimed."""
+        with checked_lock:
+            if url in checked_map_urls:
+                return False
+            checked_map_urls.add(url)
+            return True
+
+    def _process(js_file: dict) -> list:
         try:
             js_url = js_file.get('url', '')
             content = js_file.get('content', '')
             headers = js_file.get('headers', {})
 
             if not js_url:
-                continue
+                return []
 
             map_url = None
             discovery_method = None
@@ -236,47 +259,47 @@ def discover_and_analyze_sourcemaps(
 
             # Method 3: Probe common paths
             if not map_url:
-                probe_urls = _build_probe_urls(js_url, custom_paths)
-                for probe_url in probe_urls:
-                    if probe_url in checked_map_urls:
+                for probe_url in _build_probe_urls(js_url, custom_paths):
+                    if not _claim(probe_url):
                         continue
-                    checked_map_urls.add(probe_url)
                     map_data = _fetch_sourcemap(probe_url, timeout=timeout)
                     if map_data:
-                        map_url = probe_url
-                        discovery_method = 'probe'
-                        # Analyze directly since we already fetched it
-                        result = analyze_sourcemap(map_data, map_url, js_url, scan_content_func)
-                        result['discovery_method'] = discovery_method
-                        findings.append(result)
-                        break
-                continue  # Skip the fetch below if we already probed
+                        result = analyze_sourcemap(map_data, probe_url, js_url, scan_content_func)
+                        result['discovery_method'] = 'probe'
+                        return [result]
+                return []
 
             # Fetch and analyze the discovered source map
-            if map_url and map_url not in checked_map_urls:
-                checked_map_urls.add(map_url)
-                map_data = _fetch_sourcemap(map_url, timeout=timeout)
-                if map_data:
-                    result = analyze_sourcemap(map_data, map_url, js_url, scan_content_func)
-                    result['discovery_method'] = discovery_method
-                    findings.append(result)
-                else:
-                    # Source map referenced but not accessible
-                    finding_id = hashlib.sha256(f"srcmap-ref:{js_url}:{map_url}".encode()).hexdigest()[:16]
-                    findings.append({
-                        'id': finding_id,
-                        'js_url': js_url,
-                        'map_url': map_url,
-                        'accessible': False,
-                        'discovery_method': discovery_method,
-                        'files_count': 0,
-                        'source_files': [],
-                        'secrets_in_source': 0,
-                        'secrets': [],
-                        'severity': 'info',
-                        'finding_type': 'source_map_reference',
-                    })
+            if not _claim(map_url):
+                return []
+            map_data = _fetch_sourcemap(map_url, timeout=timeout)
+            if map_data:
+                result = analyze_sourcemap(map_data, map_url, js_url, scan_content_func)
+                result['discovery_method'] = discovery_method
+                return [result]
+            # Source map referenced but not accessible
+            finding_id = hashlib.sha256(f"srcmap-ref:{js_url}:{map_url}".encode()).hexdigest()[:16]
+            return [{
+                'id': finding_id,
+                'js_url': js_url,
+                'map_url': map_url,
+                'accessible': False,
+                'discovery_method': discovery_method,
+                'files_count': 0,
+                'source_files': [],
+                'secrets_in_source': 0,
+                'secrets': [],
+                'severity': 'info',
+                'finding_type': 'source_map_reference',
+            }]
         except Exception as e:
             print(f"[!][JsRecon] Error processing sourcemap for {js_file.get('url', '?')}: {e}")
+            return []
+
+    workers = max(1, min(settings.get('JS_RECON_CONCURRENCY', 10), 20))
+    findings = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for fut in as_completed(ex.submit(_process, jf) for jf in js_files):
+            findings.extend(fut.result())
 
     return findings

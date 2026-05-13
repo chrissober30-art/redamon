@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronDown, Shield, Upload, Trash2, Loader2, FileText, Play } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { ChevronDown, Shield, Upload, Trash2, Loader2, FileText, Play, AlertTriangle } from 'lucide-react'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
 import { TimeEstimate } from '../TimeEstimate'
+import { FileImportButton } from '../FileImportButton'
+import { AiToggleLabel } from '../AiToggleLabel'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -119,6 +121,7 @@ export function NucleiSection({ data, updateField, onRun }: NucleiSectionProps) 
           <Shield size={16} />
           Nuclei Vulnerability Scanner
           <NodeInfoTooltip section="Nuclei" />
+          <WikiInfoButton target="Nuclei" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>
@@ -154,7 +157,7 @@ export function NucleiSection({ data, updateField, onRun }: NucleiSectionProps) 
       {isOpen && (
         <div className={styles.sectionContent}>
           <p className={styles.sectionDescription}>
-            Template-based vulnerability scanning using ProjectDiscovery's Nuclei. Runs thousands of security checks against discovered endpoints to identify CVEs, misconfigurations, exposed panels, and other security issues.
+            Template-based vulnerability scanning using ProjectDiscovery&apos;s Nuclei. Runs thousands of security checks against discovered endpoints to identify CVEs, misconfigurations, exposed panels, and other security issues.
           </p>
           {data.nucleiEnabled && (
           <>
@@ -258,35 +261,54 @@ export function NucleiSection({ data, updateField, onRun }: NucleiSectionProps) 
             <h3 className={styles.subSectionTitle}>Template Configuration</h3>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Template Folders</label>
-              <input
-                type="text"
-                className="textInput"
-                value={(data.nucleiTemplates ?? []).join(', ')}
-                onChange={(e) => updateField('nucleiTemplates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                placeholder="cves, vulnerabilities, misconfig (empty = all)"
-              />
+              <div className={styles.fileImportWrap}>
+                <input
+                  type="text"
+                  className="textInput"
+                  value={(data.nucleiTemplates ?? []).join(', ')}
+                  onChange={(e) => updateField('nucleiTemplates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  placeholder="cves, vulnerabilities, misconfig (empty = all)"
+                />
+                <FileImportButton
+                  fieldName="template folders"
+                  onImport={(values) => updateField('nucleiTemplates', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>cves, vulnerabilities, misconfiguration, exposures, technologies, default-logins, takeovers</span>
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Exclude Template Paths</label>
-              <input
-                type="text"
-                className="textInput"
-                value={(data.nucleiExcludeTemplates ?? []).join(', ')}
-                onChange={(e) => updateField('nucleiExcludeTemplates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                placeholder="http/vulnerabilities/generic/"
-              />
+              <div className={styles.fileImportWrap}>
+                <input
+                  type="text"
+                  className="textInput"
+                  value={(data.nucleiExcludeTemplates ?? []).join(', ')}
+                  onChange={(e) => updateField('nucleiExcludeTemplates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  placeholder="http/vulnerabilities/generic/"
+                />
+                <FileImportButton
+                  fieldName="template paths"
+                  onImport={(values) => updateField('nucleiExcludeTemplates', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Exclude specific directories or template files by path</span>
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.fieldLabel}>Custom Template Paths</label>
-              <textarea
-                className="textarea"
-                value={(data.nucleiCustomTemplates ?? []).join('\n')}
-                onChange={(e) => updateField('nucleiCustomTemplates', e.target.value.split('\n').filter(Boolean))}
-                placeholder="/path/to/custom-templates&#10;~/my-nuclei-templates"
-                rows={2}
-              />
+              <div className={styles.fileImportWrap}>
+                <textarea
+                  className="textarea"
+                  value={(data.nucleiCustomTemplates ?? []).join('\n')}
+                  onChange={(e) => updateField('nucleiCustomTemplates', e.target.value.split('\n').filter(Boolean))}
+                  placeholder="/path/to/custom-templates&#10;~/my-nuclei-templates"
+                  rows={2}
+                />
+                <FileImportButton
+                  variant="textarea"
+                  fieldName="template paths"
+                  onImport={(values) => updateField('nucleiCustomTemplates', values)}
+                />
+              </div>
               <span className={styles.fieldHint}>Add your own templates in addition to the official repository</span>
             </div>
           </div>
@@ -294,28 +316,91 @@ export function NucleiSection({ data, updateField, onRun }: NucleiSectionProps) 
           <div className={styles.subSection}>
             <h3 className={styles.subSectionTitle}>Template Tags</h3>
             <p className={styles.fieldHint} style={{ marginBottom: '0.5rem' }}>Filter templates by functionality tags</p>
+            <div className={styles.toggleRow} style={{ marginBottom: 'var(--space-2)', alignItems: 'center' }}>
+              <AiToggleLabel
+                label="Use AI for Tag Selection"
+                tooltip={
+                  'AI prunes the include-tags list per scan based on detected tech stack ' +
+                  '(drops irrelevant tags like wordpress on Node sites, adds tech-specific ' +
+                  'tags like apache when detected). When on, the static Include Tags list ' +
+                  'below is ignored. Same toggle as in the Target tab AI panel: flipping it ' +
+                  'here flips it there. Candidate tag pool is built from the live ' +
+                  'nuclei-templates volume (count >= 50, ~125 broad-category tags). ' +
+                  (!data.aiInPipeline ? 'Enable "AI in Pipeline" in the Target tab to use this.' : '')
+                }
+              />
+              <Toggle
+                checked={data.nucleiAiTags}
+                disabled={!data.aiInPipeline}
+                onChange={(checked) => updateField('nucleiAiTags', checked)}
+              />
+            </div>
+            <div className={styles.toggleRow} style={{ alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
+              <AiToggleLabel
+                label="Use AI to Filter False-Positive Block Pages"
+                tooltip={
+                  "Augments Nuclei's keyword-based WAF/rate-limit detection. " +
+                  "When a finding's response carries a suspicious status code " +
+                  '(403/406/418/429/503) but no keyword matched, the LLM classifies ' +
+                  'the body as a block page or real hit. Catches rebranded WAF ' +
+                  'blocks (AWS WAF JSON, custom Imperva, Fortinet) that the static ' +
+                  'list misses, and avoids false positives where legitimate pages ' +
+                  'contain words like "WAF" or "Access Denied". ' +
+                  (!data.aiInPipeline ? 'Enable "AI in Pipeline" in the Target tab to use this.' : '')
+                }
+              />
+              <Toggle
+                checked={data.nucleiAiResponseFilter}
+                disabled={!data.aiInPipeline}
+                onChange={(checked) => updateField('nucleiAiResponseFilter', checked)}
+              />
+            </div>
             <div className={styles.fieldRow}>
               <div className={styles.fieldGroup}>
                 <label className={styles.fieldLabel}>Include Tags</label>
-                <input
-                  type="text"
-                  className="textInput"
-                  value={(data.nucleiTags ?? []).join(', ')}
-                  onChange={(e) => updateField('nucleiTags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                  placeholder="cve, xss, sqli, rce (empty = all)"
-                />
-                <span className={styles.fieldHint}>Popular: cve, xss, sqli, rce, lfi, ssrf, xxe, ssti</span>
+                <div className={styles.fileImportWrap}>
+                  <input
+                    type="text"
+                    className="textInput"
+                    value={(data.nucleiTags ?? []).join(', ')}
+                    onChange={(e) => updateField('nucleiTags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                    placeholder="cve, xss, sqli, rce (empty = custom templates only)"
+                    disabled={data.nucleiAiTags}
+                    style={data.nucleiAiTags ? { opacity: 0.5 } : undefined}
+                  />
+                  <FileImportButton
+                    fieldName="tags"
+                    onImport={(values) => updateField('nucleiTags', values)}
+                  />
+                </div>
+                <span className={styles.fieldHint}>
+                  {data.nucleiAiTags ? (
+                    <>Tags chosen by AI per scan based on tech fingerprint. The static list above is ignored.</>
+                  ) : (
+                    <>
+                      Popular: cve, xss, sqli, rce, lfi, ssrf, xxe, ssti.
+                      <strong> Empty</strong> means the built-in 8000-template pool will <em>not</em> run &mdash;
+                      only the custom templates you select below. If both are empty, the detection pass is skipped.
+                    </>
+                  )}
+                </span>
               </div>
               <div className={styles.fieldGroup}>
                 <label className={styles.fieldLabel}>Exclude Tags</label>
-                <input
-                  type="text"
-                  className="textInput"
-                  value={(data.nucleiExcludeTags ?? []).join(', ')}
-                  onChange={(e) => updateField('nucleiExcludeTags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                  placeholder="dos, fuzz"
-                />
-                <span className={styles.fieldHint}>Exclude dos, fuzz for production</span>
+                <div className={styles.fileImportWrap}>
+                  <input
+                    type="text"
+                    className="textInput"
+                    value={(data.nucleiExcludeTags ?? []).join(', ')}
+                    onChange={(e) => updateField('nucleiExcludeTags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                    placeholder="dos, fuzz"
+                  />
+                  <FileImportButton
+                    fieldName="tags"
+                    onImport={(values) => updateField('nucleiExcludeTags', values)}
+                  />
+                </div>
+                <span className={styles.fieldHint}>Excluding dos, fuzz is recommended for production scans</span>
               </div>
             </div>
           </div>
@@ -464,15 +549,29 @@ export function NucleiSection({ data, updateField, onRun }: NucleiSectionProps) 
             </div>
             <div className={styles.toggleRow}>
               <div>
-                <span className={styles.toggleLabel}>DAST Mode</span>
-                <p className={styles.toggleDescription}>Active fuzzing for XSS, SQLi, RCE. More aggressive, may trigger alerts. Requires URLs with parameters</p>
-                <TimeEstimate estimate="+50-100% scan time (active fuzzing)" />
+                <span className={styles.toggleLabel}>Add DAST Pass</span>
+                <p className={styles.toggleDescription}>Runs a second nuclei pass with <code>-dast</code> on URLs with parameters (XSS, SQLi, SSTI, RCE fuzzing). Additive: your detection pass (CVEs, exposures, custom templates, tags) still runs first.</p>
+                <TimeEstimate estimate="+50-100% scan time (extra DAST pass)" />
               </div>
               <Toggle
                 checked={data.nucleiDastMode}
                 onChange={(checked) => updateField('nucleiDastMode', checked)}
               />
             </div>
+            {data.nucleiDastMode && (
+              <div className={styles.shodanWarning}>
+                <AlertTriangle size={14} />
+                <div>
+                  <strong>How the two passes work.</strong> Pass 1 (detection) runs your full configuration: severities, tags, custom templates, the whole ~8000-template corpus minus what you exclude. Pass 2 (DAST) runs only the ~250 templates under <code>dast/</code> with <code>-dast</code> forced on, and ignores tag/template filters because those filters would empty-intersect with the DAST set and fatal with <em>&ldquo;no templates provided for scan.&rdquo;</em>
+                  <br /><br />
+                  <strong>DAST pass needs parameterized URLs.</strong> Built-in DAST templates fuzz query parameters (path/header/cookie/body fuzzing exists since v3.2 but is rare in stock templates). If <code>resource_enum</code> hasn&rsquo;t produced any URLs containing <code>?param=value</code>, the DAST pass is skipped automatically and only the detection pass runs. Run Katana / Hakrawler first if you want DAST coverage.
+                  <br /><br />
+                  <strong>Tag and template filters apply to the detection pass only.</strong> Want to bias the detection pass toward GraphQL? Set Include Tags <code>graphql,apollo,hasura</code> as usual: it filters pass 1 only, the DAST pass still runs unfiltered against your parameterized URLs.
+                  <br /><br />
+                  <strong>Cost:</strong> roughly 2x scan time when DAST is on (the two passes can&rsquo;t share work). Findings from both passes are merged into a single report.
+                </div>
+              </div>
+            )}
           </div>
 
           <div className={styles.subSection}>

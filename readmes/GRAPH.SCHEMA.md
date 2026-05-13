@@ -604,7 +604,7 @@ FOR (t:Technology) REQUIRE (t.name, t.version, t.user_id, t.project_id) IS UNIQU
 ---
 
 ### 10. Vulnerability
-Discovered vulnerabilities. Six sources produce Vulnerability nodes, each with different property sets.
+Discovered vulnerabilities. Seven sources produce Vulnerability nodes, each with different property sets.
 
 **Common properties (all sources):**
 ```cypher
@@ -612,7 +612,7 @@ Discovered vulnerabilities. Six sources produce Vulnerability nodes, each with d
     id: String,                              // Unique identifier
     user_id: String,                         // Multi-tenant isolation
     project_id: String,                      // Multi-tenant isolation
-    source: "nuclei" | "gvm" | "security_check" | "netlas" | "nmap_nse" | "graphql_scan" | "takeover_scan",  // Scanner source
+    source: "nuclei" | "gvm" | "security_check" | "netlas" | "nmap_nse" | "graphql_scan" | "takeover_scan" | "vhost_sni_enum",  // Scanner source
     name: String,                            // Vulnerability name
     description: String,                     // Description
     severity: "critical" | "high" | "medium" | "low" | "info",  // Always lowercase
@@ -812,6 +812,63 @@ Deterministic ID pattern: `graphql_{vulnerability_type}_{baseurl}_{path}` (colon
 ```
 
 Layered scanner: **Subjack** (DNS-first, Apache-2.0 Go binary baked into the recon image) + **Nuclei** with `-t http/takeovers/ -t dns/` against alive URLs. Findings are deduplicated by `(hostname, takeover_provider, takeover_method)`, then scored. A `verdict` of `manual_review` implies `severity="info"` to keep low-confidence findings out of the main alert stream unless the project's `takeoverManualReviewAutoPublish` setting is true. Relationship: `(:Subdomain)-[:HAS_VULNERABILITY]->(:Vulnerability)`; falls back to `(:Domain)` for the apex.
+
+**VHost & SNI properties (source = "vhost_sni_enum"):**
+```cypher
+(:Vulnerability {
+    id: "vhost_sni_{hostname}_{ip}_{port}_{layer}",  // Deterministic
+    source: "vhost_sni_enum",
+    type: "hidden_vhost" | "hidden_sni_route" | "host_header_bypass",
+    name: "Hidden Virtual Host: admin.acme.com",
+    severity: "high" | "medium" | "low" | "info",
+
+    // VHost/SNI specific
+    hostname: "admin.acme.com",                // Discovered hidden FQDN
+    ip: "1.2.3.4",                              // Target IP that hosts it
+    port: 443,
+    scheme: "https" | "http",
+    layer: "L7" | "L4" | "both",                // L7=Host header trick, L4=SNI trick, both=disagreement
+    baseline_status: 403,                       // Status when curling raw IP (no Host)
+    baseline_size: 548,                         // Body bytes for baseline
+    observed_status: 200,                       // Status when host/SNI lie applied
+    observed_size: 4823,                        // Body bytes for observed response
+    size_delta: 4275,                           // observed_size - baseline_size
+    internal_pattern_match: "admin",            // matched internal-keyword (admin/jenkins/k8s/...) or null
+    matched_at: "https://admin.acme.com",
+    first_seen: "2026-04-25T14:30:00Z",
+    last_seen:  "2026-04-25T14:30:00Z",
+})
+```
+
+**Subdomain enrichment (set by VHost/SNI on existing Subdomain nodes):**
+```cypher
+(:Subdomain {
+    vhost_tested: true,
+    vhost_hidden: true,                        // Confirmed hidden vhost
+    vhost_routing_layer: "L7" | "L4" | "both",
+    vhost_status_code: 200,
+    vhost_size_delta: 4275,
+    sni_routed: true,                          // Proxy decided routing at TLS SNI
+    vhost_tested_at: "2026-04-25T14:30:00Z",
+})
+```
+
+**IP enrichment (set by VHost/SNI on existing IP nodes):**
+```cypher
+(:IP {
+    vhost_sni_tested: true,
+    vhost_baseline_status: 403,
+    vhost_baseline_size: 548,
+    vhost_candidates_tested: 247,              // total candidate hostnames probed against this IP
+    vhost_ports_tested: 2,                     // number of (port, scheme) pairs with a usable baseline
+    hosts_hidden_vhosts: true,
+    hidden_vhost_count: 3,
+    is_reverse_proxy: true,                    // SNI routing differs from default → likely k8s ingress / NGINX / Cloudflare
+    vhost_sni_tested_at: "2026-04-25T14:30:00Z",
+})
+```
+
+VHost/SNI also creates a **BaseURL** node for each newly discovered hidden vhost (so Katana / Nuclei can scan it via partial recon follow-up). Relationships used: `(:Subdomain)-[:HAS_VULNERABILITY]->(:Vulnerability)`, `(:IP)-[:HAS_VULNERABILITY]->(:Vulnerability)` (for `host_header_bypass` only), `(:Subdomain)-[:HAS_BASEURL]->(:BaseURL)`. No new node labels, no new relationship types.
 
 **Constraints:**
 ```cypher

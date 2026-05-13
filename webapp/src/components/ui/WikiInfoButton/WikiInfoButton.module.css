@@ -1,0 +1,35 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background-color: rgba(99, 102, 241, 0.1);
+  color: #a5b4fc;
+  cursor: pointer;
+  text-decoration: none;
+  transition: var(--transition-all, all 0.15s ease);
+  line-height: 1;
+}
+
+.button:hover {
+  background-color: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #c7d2fe;
+}
+
+.button:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 1px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.iconOnly {
+  padding: 3px;
+}

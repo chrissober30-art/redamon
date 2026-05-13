@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ExternalLink } from '@/components/ui'
+import { capecToUrl, cveToUrl, cweToUrl } from '@/lib/url-utils'
 import { severityColor } from '../utils/chartTheme'
 import { ChartCard } from './ChartCard'
 import styles from './DataTable.module.css'
@@ -77,7 +79,7 @@ export function CveChainTable({ data, isLoading }: CveChainTableProps) {
                 </td>
                 <td className="tableCell tableCellMono" style={{ fontSize: '10px' }}>
                   <span style={{ color: severityColor(row.cveSeverity || 'unknown') }}>
-                    {row.cveId}
+                    <ExternalLink href={cveToUrl(row.cveId)}>{row.cveId}</ExternalLink>
                   </span>
                 </td>
                 <td className="tableCell tableCellMono">
@@ -88,10 +90,15 @@ export function CveChainTable({ data, isLoading }: CveChainTableProps) {
                   ) : '-'}
                 </td>
                 <td className="tableCell tableCellTruncate" title={row.cweName || ''} style={{ fontSize: '10px' }}>
-                  {row.cweId ? `${row.cweId}` : '-'}
+                  {row.cweId ? <ExternalLink href={cweToUrl(row.cweId)}>{row.cweId}</ExternalLink> : '-'}
                 </td>
                 <td className="tableCell tableCellTruncate" title={row.capecName || ''} style={{ fontSize: '10px' }}>
-                  {row.capecId ? `${row.capecId}: ${row.capecName}` : '-'}
+                  {row.capecId ? (
+                    <>
+                      <ExternalLink href={capecToUrl(row.capecId)}>{row.capecId}</ExternalLink>
+                      {row.capecName ? `: ${row.capecName}` : ''}
+                    </>
+                  ) : '-'}
                 </td>
               </tr>
             ))}

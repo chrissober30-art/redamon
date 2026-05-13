@@ -25,7 +25,8 @@ describe('buildTemplate', () => {
     expect(keyFields).toContain('tavilyApiKey')
     expect(keyFields).toContain('driftnetApiKey')
     expect(keyFields).toContain('wpscanApiToken')
-    expect(keyFields.length).toBe(24)
+    expect(keyFields).toContain('pdcpApiKey')
+    expect(keyFields.length).toBe(25)
   })
 
   test('generates a template with all tunneling fields', () => {
@@ -41,7 +42,8 @@ describe('buildTemplate', () => {
     expect(tools).toContain('shodan')
     expect(tools).toContain('tavily')
     expect(tools).toContain('wpscan')
-    expect(tools.length).toBe(19)
+    expect(tools).toContain('pdcp')
+    expect(tools.length).toBe(20)
   })
 
   test('uses current key values when provided', () => {
@@ -455,6 +457,7 @@ describe('full round-trip: download → fill → import', () => {
       googleApiCx: 'FAKE_GOOGLE_CX',
       onypheApiKey: 'FAKE_ONYPHE_KEY',
       driftnetApiKey: 'FAKE_DRIFTNET_KEY',
+      pdcpApiKey: 'FAKE_PDCP_KEY',
     }
     for (const [k, v] of Object.entries(fakeKeys)) {
       filled.keys[k] = v
@@ -470,7 +473,7 @@ describe('full round-trip: download → fill → import', () => {
     expect(isValidationError(result)).toBe(false)
     if (isValidationError(result)) return
 
-    expect(result.keyCount).toBe(24)
+    expect(result.keyCount).toBe(25)
     expect(result.tunnelingCount).toBe(3)
     for (const [k, v] of Object.entries(fakeKeys)) {
       expect(result.keys[k]).toBe(v)
@@ -971,7 +974,7 @@ describe('buildTemplate — edge cases', () => {
     const t = buildTemplate({ shodanApiKey: 'val', unknownThing: 'ignored' }, {})
     expect(t.keys.shodanApiKey).toBe('val')
     expect(t.keys).not.toHaveProperty('unknownThing')
-    expect(Object.keys(t.keys).length).toBe(24)
+    expect(Object.keys(t.keys).length).toBe(25)
   })
 
   test('ignores unknown fields in currentTunneling input', () => {

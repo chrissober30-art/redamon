@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { ChevronDown, Play, Radio } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
 import { TimeEstimate } from '../TimeEstimate'
+import { FileImportButton } from '../FileImportButton'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -26,6 +27,7 @@ export function NaabuSection({ data, updateField, onRun }: NaabuSectionProps) {
           <Radio size={16} />
           Naabu Port Scanner
           <NodeInfoTooltip section="Naabu" />
+          <WikiInfoButton target="Naabu" />
           <span className={styles.badgeActive}>Active</span>
           {data.naabuPassiveMode && <span className={styles.badgePassive}>Passive</span>}
         </h2>
@@ -82,13 +84,19 @@ export function NaabuSection({ data, updateField, onRun }: NaabuSectionProps) {
                 </div>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Custom Ports</label>
-                  <input
-                    type="text"
-                    className="textInput"
-                    value={data.naabuCustomPorts}
-                    onChange={(e) => updateField('naabuCustomPorts', e.target.value)}
-                    placeholder="80,443,8080-8090"
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <input
+                      type="text"
+                      className="textInput"
+                      value={data.naabuCustomPorts}
+                      onChange={(e) => updateField('naabuCustomPorts', e.target.value)}
+                      placeholder="80,443,8080-8090"
+                    />
+                    <FileImportButton
+                      fieldName="custom ports"
+                      onImport={(values) => updateField('naabuCustomPorts', values.join(','))}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>Overrides Top Ports if set. Use ranges: 8080-8090</span>
                 </div>
               </div>

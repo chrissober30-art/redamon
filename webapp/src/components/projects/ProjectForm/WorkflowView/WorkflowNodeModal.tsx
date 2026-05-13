@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import type { Project } from '@prisma/client'
 import { Save, Loader2 } from 'lucide-react'
-import { Modal } from '@/components/ui'
+import { Modal, WikiInfoButton } from '@/components/ui'
 import { WORKFLOW_TOOLS } from './workflowDefinition'
 
 // Section component imports
@@ -27,6 +27,7 @@ import { JsReconSection } from '../sections/JsReconSection'
 import { NucleiSection } from '../sections/NucleiSection'
 import { GraphqlScanSection } from '../sections/GraphqlScanSection'
 import { TakeoverSection } from '../sections/TakeoverSection'
+import { VhostSniSection } from '../sections/VhostSniSection'
 import { CveLookupSection } from '../sections/CveLookupSection'
 import { MitreSection } from '../sections/MitreSection'
 import { SecurityChecksSection } from '../sections/SecurityChecksSection'
@@ -99,6 +100,7 @@ export function WorkflowNodeModal({
       case 'Nuclei':            return <NucleiSection {...baseProps} />
       case 'GraphqlScan':       return <GraphqlScanSection {...extendedProps} />
       case 'SubdomainTakeover': return <TakeoverSection {...baseProps} />
+      case 'VhostSni':          return <VhostSniSection {...baseProps} />
       case 'CveLookup':         return <CveLookupSection {...baseProps} />
       case 'Mitre':             return <MitreSection {...baseProps} />
       case 'SecurityChecks':    return <SecurityChecksSection {...baseProps} />
@@ -116,17 +118,27 @@ export function WorkflowNodeModal({
       size="large"
       closeOnOverlayClick={false}
       closeOnEscape={false}
-      headerActions={onSave && (
-        <button
-          type="button"
-          className="primaryButton"
-          onClick={handleSave}
-          disabled={isSaving}
-          style={{ fontSize: '12px', padding: '4px 12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-        >
-          {isSaving ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={12} />}
-          {isSaving ? 'Saving...' : 'Update Settings'}
-        </button>
+      headerActions={(
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+          {toolId && (
+            <WikiInfoButton
+              target={toolId}
+              title={`Open ${title} wiki page`}
+            />
+          )}
+          {onSave && (
+            <button
+              type="button"
+              className="primaryButton"
+              onClick={handleSave}
+              disabled={isSaving}
+              style={{ fontSize: '12px', padding: '4px 12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            >
+              {isSaving ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={12} />}
+              {isSaving ? 'Saving...' : 'Update Settings'}
+            </button>
+          )}
+        </div>
       )}
     >
       {renderSection()}

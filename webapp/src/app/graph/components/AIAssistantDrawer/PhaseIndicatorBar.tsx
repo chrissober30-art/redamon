@@ -1,17 +1,28 @@
 'use client'
 
-import React from 'react'
-import { Wrench, Swords, Check, Settings, Lightbulb } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Wrench, Swords, Check, Settings, Lightbulb, Server } from 'lucide-react'
 import { StealthIcon } from '@/components/icons/StealthIcon'
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip'
+import { useProject } from '@/providers/ProjectProvider'
 import { PHASE_CONFIG, getAttackPathConfig, formatModelDisplay } from './phaseConfig'
 import type { Phase } from './types'
 import styles from './AIAssistantDrawer.module.css'
+
+const ALL_PHASES = ['informational', 'exploitation', 'post_exploitation'] as const
 
 interface SkillData {
   builtIn: Array<{ id: string; name: string }>
   user: Array<{ id: string; name: string }>
   config: { builtIn: Record<string, boolean>; user: Record<string, boolean> }
+}
+
+interface UserMcpServer {
+  id: string
+  name?: string
+  enabled?: boolean
+  default_phases?: string[]
+  tools?: Array<{ name: string; default_phases?: string[] | null }>
 }
 
 interface PhaseIndicatorBarProps {
@@ -50,6 +61,24 @@ export function PhaseIndicatorBar({
   setShowModelModal,
 }: PhaseIndicatorBarProps) {
   const PhaseIcon = PHASE_CONFIG[currentPhase].icon
+  const { userId } = useProject()
+  const [userMcpServers, setUserMcpServers] = useState<UserMcpServer[]>([])
+
+  // Pull the user's saved MCP servers from the DB so MCP tools always
+  // appear in the wrench tooltip — even when the user hasn't explicitly
+  // toggled their phase checkboxes (in which case they're not in
+  // toolPhaseMap and would otherwise be invisible).
+  useEffect(() => {
+    if (!userId) return
+    fetch(`/api/users/${userId}/mcp`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { servers?: UserMcpServer[] } | null) => {
+        if (d?.servers && Array.isArray(d.servers)) {
+          setUserMcpServers(d.servers)
+        }
+      })
+      .catch(() => {})
+  }, [userId])
 
   return (
     <div className={styles.phaseIndicator}>
@@ -66,25 +95,64 @@ export function PhaseIndicatorBar({
         </span>
       </div>
 
-      {toolPhaseMap && (() => {
-        const phaseTools = Object.entries(toolPhaseMap)
-          .filter(([, phases]) => phases.includes(currentPhase))
-          .map(([name]) => name)
-        return phaseTools.length > 0 ? (
+      {(() => {
+        // Built-in (and explicitly toggled) tools — same logic as before.
+        const builtInTools: string[] = toolPhaseMap
+          ? Object.entries(toolPhaseMap)
+              .filter(([, phases]) => phases.includes(currentPhase))
+              .map(([name]) => name)
+          : []
+
+        // User MCP tools whose default_phases (with per-tool override) include
+        // the current phase AND are NOT already in toolPhaseMap (which would
+        // mean the user explicitly toggled them — project override wins).
+        const explicitlyToggled = new Set(Object.keys(toolPhaseMap || {}))
+        const mcpTools: Array<{ name: string; serverName: string }> = []
+        for (const srv of userMcpServers) {
+          if (srv.enabled === false) continue
+          const serverDefault = srv.default_phases ?? [...ALL_PHASES]
+          for (const t of (srv.tools || [])) {
+            if (explicitlyToggled.has(t.name)) continue  // shown above
+            const phases = (t.default_phases && t.default_phases.length > 0)
+              ? t.default_phases
+              : serverDefault
+            if (phases.includes(currentPhase)) {
+              mcpTools.push({ name: t.name, serverName: srv.name || srv.id })
+            }
+          }
+        }
+
+        if (builtInTools.length === 0 && mcpTools.length === 0) return null
+
+        return (
           <Tooltip
             position="bottom"
+            interactive
             content={
               <div className={styles.phaseToolsTooltip}>
                 <div className={styles.phaseToolsHeader}>Phase Tools</div>
-                {phaseTools.map(t => (
+                {builtInTools.map(t => (
                   <div key={t} className={styles.phaseToolsItem}>{t}</div>
                 ))}
+                {mcpTools.length > 0 && (
+                  <>
+                    <div className={styles.phaseToolsHeader} style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Server size={10} /> MCP Tool Plugins
+                    </div>
+                    {mcpTools.map(t => (
+                      <div key={t.name} className={styles.phaseToolsItem}>
+                        {t.name}
+                        <span style={{ marginLeft: 6, opacity: 0.55, fontSize: '10px' }}>{t.serverName}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             }
           >
             <Wrench size={13} className={styles.phaseToolsIcon} />
           </Tooltip>
-        ) : null
+        )
       })()}
 
       {attackPathType && (currentPhase === 'informational' || currentPhase === 'exploitation' || currentPhase === 'post_exploitation') && (

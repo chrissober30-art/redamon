@@ -31,7 +31,7 @@ def test_default_settings_have_new_fields():
         'HAKRAWLER_PARALLELISM': 5,
         'GAU_WORKERS': 10,
         'PARAMSPIDER_WORKERS': 8,
-        'FFUF_PARALLELISM': 4,
+        'FFUF_PARALLELISM': 20,
         'KITERUNNER_PARALLELISM': 3,
         'JSLUICE_PARALLELISM': 5,
         'SHODAN_WORKERS': 5,

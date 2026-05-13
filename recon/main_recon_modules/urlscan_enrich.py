@@ -137,6 +137,18 @@ def run_urlscan_enrichment(combined_result: dict, settings: dict[str, Any]) -> d
     if not settings.get("URLSCAN_ENABLED", False):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "URLScan",
+        settings,
+        keys=[
+            ("URLSCAN_ENABLED", "Toggle"),
+            ("URLSCAN_MAX_RESULTS", "Limits"),
+            ("URLSCAN_API_KEY", "API credentials"),
+            ("URLSCAN_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     domain = combined_result.get("domain", "")
     is_ip_mode = combined_result.get("metadata", {}).get("ip_mode", False)
 

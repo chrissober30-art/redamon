@@ -190,8 +190,28 @@ def _execute_content_mode(url: str, selector: str, format: str) -> str:
     return _run_playwright_script(script, timeout=45)
 
 
+_FORBIDDEN_ASYNC_PATTERNS = [
+    (re.compile(r'(?<![A-Za-z0-9_])await\s'), 'await'),
+    (re.compile(r'(?<![A-Za-z0-9_])asyncio\.run\b'), 'asyncio.run()'),
+    (re.compile(r'(?<![A-Za-z0-9_])async\s+def\b'), 'async def'),
+    (re.compile(r'(?m)^\s*import\s+asyncio\b'), 'import asyncio'),
+    (re.compile(r'(?<![A-Za-z0-9_])async_playwright\b'), 'async_playwright'),
+]
+
+
 def _execute_script_mode(user_script: str) -> str:
     """Mode 2: Run arbitrary Playwright Python script with pre-initialized browser."""
+    for pattern, name in _FORBIDDEN_ASYNC_PATTERNS:
+        if pattern.search(user_script):
+            return (
+                f"[ERROR] execute_playwright uses Playwright SYNC API. "
+                f"Found '{name}' in your script -- remove it. "
+                f"Replace 'await page.X(...)' with 'page.X(...)'. "
+                f"Replace 'asyncio.sleep(s)' with 'page.wait_for_timeout(s*1000)'. "
+                f"Do NOT wrap your code in 'async def' or 'asyncio.run()' -- "
+                f"the wrapper already runs inside `with sync_playwright() as p:`."
+            )
+
     # Build wrapper script with correct indentation
     lines = [
         "from playwright.sync_api import sync_playwright",

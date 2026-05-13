@@ -19,9 +19,10 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from state import LLMDecision, FireteamMemberState, TargetInfo
+from state import LLMDecision, FireteamMemberState, TargetInfo, format_chain_context
 from orchestrator_helpers.parsing import try_parse_llm_decision
 from orchestrator_helpers.json_utils import normalize_content, json_dumps_safe
+from orchestrator_helpers.llm_retry import retry_llm_call
 import orchestrator_helpers.chain_graph_writer as chain_graph
 from project_settings import get_setting, get_allowed_tools_for_phase, DANGEROUS_TOOLS
 from tools import set_tenant_context, set_phase_context, set_graph_view_context
@@ -193,6 +194,63 @@ def _strip_forbidden_actions(decision: LLMDecision, member_id: str) -> LLMDecisi
     return decision
 
 
+# ---------- Soft skill allowlist helpers ----------
+
+def _collect_called_tools(decision: LLMDecision) -> list[str]:
+    """Return the tool names this decision intends to invoke.
+
+    use_tool  -> [tool_name]
+    plan_tools -> [step.tool_name for step in tool_plan.steps]
+    other actions -> []
+    """
+    if decision.action == "use_tool":
+        return [decision.tool_name] if decision.tool_name else []
+    if decision.action == "plan_tools" and decision.tool_plan:
+        return [s.tool_name for s in (decision.tool_plan.steps or []) if s.tool_name]
+    return []
+
+
+def _validate_tool_expansion(
+    decision: LLMDecision,
+    declared_tools: set,
+) -> Optional[str]:
+    """Return None when the decision is consistent with the soft-allowlist
+    contract, or a one-paragraph correction message that should be re-injected
+    into the LLM conversation.
+
+    Contract: if any called tool is OUTSIDE `declared_tools` (after the
+    query_graph anchor is added), the decision MUST carry a non-empty
+    `tool_expansion_reason`. Members with no declared tools (tools=[]) bypass
+    this check — they are operating without a soft allowlist, same as the
+    root agent.
+    """
+    if not declared_tools:
+        return None
+    if decision.action not in ("use_tool", "plan_tools"):
+        return None
+    called = _collect_called_tools(decision)
+    if not called:
+        return None
+    allowed = set(declared_tools) | {"query_graph"}
+    expanded = [t for t in called if t not in allowed]
+    if not expanded:
+        return None
+    reason = (decision.tool_expansion_reason or "").strip()
+    if reason:
+        return None
+    return (
+        f"[system] You are reaching for fallback tools: {expanded}. "
+        f"Your declared primary tools are {sorted(allowed - {'query_graph'})}. "
+        "You MUST add a `tool_expansion_reason` field at the top level of your "
+        "decision JSON explaining (in one sentence) why your primary tools "
+        "cannot accomplish this step. If your primary tools CAN do the job, "
+        "switch to one. If they CAN'T because the task was mis-scoped, consider "
+        "emitting `action=complete` with current findings so the root planner "
+        "can re-deploy with the right tools. Re-emit your full LLMDecision JSON "
+        "with the new field."
+    )
+
+
 def _plan_has_dangerous_tool(decision: LLMDecision) -> bool:
     plan = decision.tool_plan
     if not plan or not plan.steps:
@@ -229,7 +287,7 @@ _MEMBER_SYSTEM_PROMPT = """You are a Fireteam member agent specializing in a foc
 
 ## Your mission
 {task}
-
+{peer_block}
 ## Constraints (hard-locked)
 - Current phase: {phase}  (IMMUTABLE; you cannot request transition)
 - You CANNOT deploy sub-fireteams. Stay focused on your assigned task.
@@ -240,10 +298,17 @@ _MEMBER_SYSTEM_PROMPT = """You are a Fireteam member agent specializing in a foc
 ## Target context (inherited from parent, snapshot)
 {target_info}
 
-## Your execution trace so far
-{trace_summary}
+## Engagement state (from the root agent and prior fireteam members)
+This is everything the engagement already knows at the moment you were dispatched.
+Findings carry source attribution (`from <agent>`); do NOT re-discover what is listed here.
+Tools, payloads, captured artifacts (tokens, credentials, endpoints) and prior failures
+are all surfaced — read this first before planning your own actions.
+{parent_chain_context}
 
-## Available tools (filtered by your skills and current phase)
+## Your local progress in this run
+{local_chain_context}
+
+## Available tools (filtered by your declared tools and current phase)
 {tool_list}
 
 ## Tool argument schemas
@@ -256,13 +321,39 @@ Emit EXACTLY ONE JSON object matching LLMDecision. ALL of these fields are REQUI
   - `action`     : one of "use_tool" | "plan_tools" | "complete"
 
 Action-specific required fields:
-  - action="use_tool"   -> `tool_name` (string) + `tool_args` (OBJECT, never a CLI string)
+  - action="use_tool"   -> `tool_name` (string) + `tool_args` (JSON object — shape depends on the tool, see below)
   - action="plan_tools" -> `tool_plan` = {{"steps": [{{"tool_name": "...", "tool_args": {{...}}, "rationale": "..."}}, ...], "plan_rationale": "..."}}
   - action="complete"   -> `completion_reason` (string)
 
-CRITICAL: `tool_args` is ALWAYS a JSON object keyed by argument name — NEVER a raw flag string.
-  WRONG: "tool_args": "-w wordlist.txt -u https://example.com"
-  RIGHT: "tool_args": {{"wordlist": "wordlist.txt", "url": "https://example.com"}}
+CRITICAL: `tool_args` shape is per-tool. The `## Tool argument schemas` section above
+(rendered from the live tool registry) is the source of truth — copy its keys exactly.
+Tools fall into FOUR shape buckets — pick the right one per tool name:
+
+  Shape A — `{{"args": "<full CLI flag string, binary name stripped>"}}`
+  Tools: cve_intel, execute_nuclei, execute_curl, execute_httpx, execute_naabu, execute_jsluice, execute_katana, execute_subfinder, execute_gau, execute_nmap, execute_amass, execute_hydra, execute_wpscan, execute_arjun, execute_ffuf.
+  Examples: `{{"args": "-sV -p 22 10.0.0.1"}}` (nmap), `{{"args": "-u http://x -d 3 -jc -silent"}}` (katana), `{{"args": "-u http://x -sc -title -td -j -silent"}}` (httpx).
+
+  Shape B — `{{"command": "<full shell command>"}}`
+  Tools: kali_shell, metasploit_console.
+
+  Shape C — typed kwargs declared per tool (multi-key JSON object). Use the EXACT keys shown in `## Tool argument schemas`.
+    query_graph        -> {{"question": "..."}}
+    web_search         -> {{"query": "...", "include_sources": ["nvd"], "min_cvss": 9.0}}
+    google_dork        -> {{"query": "..."}}
+    shodan             -> {{"action": "host"|"search"|"dns_reverse"|"dns_domain"|"count", "query": "...", "ip": "...", "domain": "..."}}
+    execute_code       -> {{"code": "...", "language": "python", "filename": "exploit"}}
+    execute_playwright -> {{"url": "...", "selector": "...", "format": "text"|"html"}}  OR  {{"script": "..."}}
+    tradecraft_lookup  -> {{"resource_id": "...", "query": "..."}}
+
+  Shape D — no args: msf_restart -> {{}}
+
+  WRONG (Pydantic rejects every one of these with "Unexpected keyword argument"):
+    {{"url": "...", "depth": 3, "jc": true}} on execute_katana
+    {{"target": "...", "ports": "22", "flags": "-sV"}} on execute_nmap
+    {{"targets": ["..."]}} on execute_httpx
+    {{"host": "...", "ports": "1-1000"}} on execute_naabu
+    "-w wordlist -u https://x" (raw string) on ANY tool
+  RIGHT: Shape A — `{{"args": "<CLI flag string>"}}`. Never invent kwargs like url/target/host/port/depth/flags on Shape A tools.
 
 Example use_tool:
 ```json
@@ -271,25 +362,52 @@ Example use_tool:
   "reasoning": "Version banner reveals CVE-applicable versions quickly.",
   "action": "use_tool",
   "tool_name": "execute_nmap",
-  "tool_args": {{"target": "10.0.0.1", "ports": "22", "flags": "-sV"}}
+  "tool_args": {{"args": "-sV -p 22 10.0.0.1"}}
 }}
 ```
 
 Example plan_tools:
 ```json
 {{
-  "thought": "Three independent endpoints to probe.",
+  "thought": "Three independent probes on the same host.",
   "reasoning": "Fan out in one wave for speed.",
   "action": "plan_tools",
   "tool_plan": {{
     "steps": [
-      {{"tool_name": "execute_ffuf", "tool_args": {{"url": "https://x/FUZZ", "wordlist": "/usr/share/seclists/Discovery/Web-Content/common.txt"}}, "rationale": "path fuzz"}},
-      {{"tool_name": "execute_httpx", "tool_args": {{"targets": ["https://x"]}}, "rationale": "fingerprint"}}
+      {{"tool_name": "execute_ffuf", "tool_args": {{"args": "-u https://x/FUZZ -w /usr/share/seclists/Discovery/Web-Content/common.txt -mc 200,403"}}, "rationale": "path fuzz"}},
+      {{"tool_name": "execute_httpx", "tool_args": {{"args": "-u https://x -sc -title -server -td -fr -silent -j"}}, "rationale": "fingerprint"}},
+      {{"tool_name": "query_graph", "tool_args": {{"question": "What endpoints are known on x?"}}, "rationale": "graph cross-check"}}
     ],
     "plan_rationale": "parallel recon"
   }}
 }}
 ```
+
+## Self-Check Before Each Decision (read this every iteration)
+
+Before emitting your next tool call, look at "Your local progress in this run":
+
+1. **Find-rate test.** Compare your findings count NOW vs ~3 iterations ago.
+   If your tool count grew by 5 or more but findings count stayed flat — you
+   are looping. Emit `action=complete` with what you have. Do NOT keep probing.
+
+2. **Duplicate-target test.** Is your next planned tool call essentially the
+   same as something already in your trace? Same URL + same method + same
+   payload class (introspection / GET param fuzz / directory fuzz / known-path
+   probe) counts as duplicate even if flags differ slightly. If yes — DO NOT
+   re-run it. Pivot to a different surface or complete.
+
+3. **Negative-result test.** Did a previous probe return a known-negative
+   result (404 catch-all, identical baseline timing, generic 200 with no
+   reflection / no error / no signal)? Do not retry the same probe with a
+   minor flag tweak. Emit a `cleared_endpoint` finding so siblings know it's
+   dead, then pivot or complete.
+
+4. **Findings-emission rule.** When you complete, EVERY distinct discovery in
+   your trace MUST appear as a `chain_findings` entry in `output_analysis`
+   (e.g. one per service version, endpoint, technology, credential, cleared
+   surface). Findings flow to siblings via chain context; `completion_reason`
+   text is mostly discarded. A 0-finding completion is almost always wrong.
 
 When you have completed your task or can go no further, emit action="complete" with a `completion_reason`.
 Keep thought/reasoning concise. Prefer plan_tools when you can fire several independent tools at once.
@@ -435,48 +553,94 @@ def _build_pending_output_section(state: FireteamMemberState) -> str:
 
 def _build_member_prompt(state: FireteamMemberState) -> str:
     from prompts import get_phase_tools
-    from prompts.base import build_tool_args_section
+    from prompts.base import build_tool_args_section, build_compact_tool_list
 
     phase = state.get("current_phase", "informational")
 
-    # Tools filtered to the ones available in this phase. `get_phase_tools`
-    # returns an already-formatted multi-section STRING (tool names, args,
-    # phase guidance, stealth rules). Do NOT `", ".join` it — that splits
-    # the string character-by-character and triples the prompt size.
-    #
-    # Pass `attack_path_type` through so the member prompt also picks up
-    # active chat/user skills (e.g. "user_skill:<id>") and built-in skill
-    # workflows (e.g. "brute_force_credential_guess"). The parent state's
-    # attack_path_type is inherited at deploy time in _build_member_state,
-    # so members and the root agent see the same skill content.
-    phase_tools = get_phase_tools(
-        phase,
-        attack_path_type=state.get("attack_path_type", ""),
-        execution_trace=state.get("execution_trace") or None,
-    )
-    skills = state.get("skills") or []
-    if skills:
-        # Skills currently filter implicitly via the prompt; we also surface the skills
-        # so the LLM picks the right tools. We do NOT hard-restrict the tool list here
-        # because execute_tool_node already enforces phase allowlists and RoE.
-        tool_list = f"{phase_tools}\n\n(prioritize skills: {', '.join(skills)})"
-    else:
-        tool_list = phase_tools
+    declared_tools = state.get("tools") or []
+    phase_allowed = get_allowed_tools_for_phase(phase)
 
-    # Structured per-tool argument schemas so the LLM emits tool_args as an
-    # object (not a raw CLI flag string). Uses the same builder the root
-    # think_node uses.
-    allowed_tools = get_allowed_tools_for_phase(phase)
-    tool_args_section = build_tool_args_section(allowed_tools)
+    if declared_tools:
+        # Soft allowlist. The member CAN call any phase-allowed tool, but the
+        # prompt presents "primary tools" (the declared tools, full descriptions
+        # + flag examples) and "fallback toolbox" (everything else, compact
+        # bullet list with name + purpose only). Reaching for fallback requires
+        # a `tool_expansion_reason` field on the decision (enforced post-parse).
+        #
+        # query_graph is always in the primary set as a read-only anchor —
+        # members commonly need it to cross-check sibling findings.
+        primary_set = set(declared_tools) | {"query_graph"}
+        fallback_tools = [t for t in phase_allowed if t not in primary_set]
 
-    trace = state.get("execution_trace") or []
-    if trace:
-        trace_summary = "\n".join(
-            f"  {i+1}. {s.get('tool_name', '?')} -> {str(s.get('output_analysis') or s.get('output_summary') or '')[:200]}"
-            for i, s in enumerate(trace[-10:])
+        # Primary block: full phase-context rendering (kali rules, custom
+        # instructions, attack-path skill workflow, etc.) but with the tool
+        # registry filtered to the declared tools only.
+        primary_phase_tools = get_phase_tools(
+            phase,
+            attack_path_type=state.get("attack_path_type", ""),
+            execution_trace=state.get("execution_trace") or None,
+            tool_filter=primary_set,
         )
+        primary_block = (
+            "## Primary tools (your assigned toolbox — use these by default)\n\n"
+            f"{primary_phase_tools}"
+        )
+
+        # Fallback block: compact name+purpose only. The model knows these
+        # tools exist; reaching for them requires explicit justification.
+        fallback_block = ""
+        if fallback_tools:
+            fallback_block = (
+                "\n## Fallback toolbox (use ONLY when your primary tools cannot make progress)\n\n"
+                "If you reach for a fallback tool, you MUST include a `tool_expansion_reason` "
+                "field in your decision JSON explaining why your primary tools were insufficient. "
+                "Repeated reaches into the fallback toolbox signal that your task was mis-scoped — "
+                "consider emitting `action=complete` with current findings so the root planner can "
+                "re-deploy with the right tools.\n\n"
+            )
+            fallback_block += build_compact_tool_list(fallback_tools)
+
+        tool_list = primary_block + fallback_block
     else:
-        trace_summary = "  (no steps yet)"
+        # No declared tools: legacy unrestricted rendering (root-agent-equivalent).
+        tool_list = get_phase_tools(
+            phase,
+            attack_path_type=state.get("attack_path_type", ""),
+            execution_trace=state.get("execution_trace") or None,
+        )
+
+    # Structured per-tool argument schemas. Always render schemas for the FULL
+    # phase-allowed set (not just primary) so that if the model legitimately
+    # reaches into the fallback toolbox with a justification, it still has the
+    # correct args shape and doesn't hallucinate kwargs.
+    tool_args_section = build_tool_args_section(phase_allowed)
+
+    # Engagement-state snapshot from the parent at deploy time. Rendered with
+    # the same format_chain_context() the root agent uses in its own system
+    # prompt — gives the member every finding (with source_agent attribution),
+    # failed attempt, decision, and recent tool output the engagement already
+    # produced. Replaces the old 200-char-per-step trace summary which omitted
+    # captured artifacts (JWTs, credentials, cleared endpoints) and forced
+    # members to re-discover them.
+    parent_chain_context = format_chain_context(
+        state.get("_parent_chain_findings") or [],
+        state.get("_parent_chain_failures") or [],
+        state.get("_parent_chain_decisions") or [],
+        state.get("_parent_execution_trace") or [],
+        recent_iterations=20,
+    )
+
+    # Member-local progress in this run, rendered in the same format. Findings
+    # and failures the member has produced so far in its own iterations,
+    # surfaced separately so the LLM can distinguish "what the engagement
+    # already knew" from "what I have done in this turn".
+    local_chain_context = format_chain_context(
+        state.get("chain_findings_memory") or [],
+        state.get("chain_failures_memory") or [],
+        [],  # members cannot make phase decisions
+        state.get("execution_trace") or [],
+        recent_iterations=10,
+    )
 
     # Prefer the live (merged) target_info over the parent snapshot once the
     # member has started accumulating its own discoveries. Falls back to parent
@@ -489,18 +653,75 @@ def _build_member_prompt(state: FireteamMemberState) -> str:
             target_lines.append(f"  {key}: {v}")
     target_str = "\n".join(target_lines) if target_lines else "  (no target info)"
 
+    # Sibling-scope block: lists what each peer member is covering in this wave
+    # so the LLM doesn't pivot into their surface when its own runs dry. Placed
+    # right after the mission so it weights heavily in instruction-following.
+    # Empty string when this is a single-member wave or peer list is missing.
+    peers = state.get("_peer_tasks") or []
+    if peers:
+        peer_lines = [
+            "",
+            "## Sibling members in this wave (OUT OF SCOPE for you)",
+            "Each surface below is owned by another member. Do NOT probe these — their findings",
+            "will reach you via the engagement state on later iterations. If your own surface is",
+            "exhausted, emit `action=complete` with current findings. Do NOT pivot into a sibling's",
+            "scope; the root planner will deploy a focused follow-up wave if more work is needed.",
+            "",
+        ]
+        for p in peers:
+            name = p.get("name") or "(unnamed)"
+            summary = (p.get("task_summary") or "").strip()
+            peer_lines.append(f"- **{name}**: {summary}")
+        peer_block = "\n".join(peer_lines) + "\n"
+    else:
+        peer_block = ""
+
     pending_output_section = _build_pending_output_section(state)
 
-    return _MEMBER_SYSTEM_PROMPT.format(
+    # Soft tool-expansion budget (Change C). Surfaces a graduated warning when
+    # the member has reached into the fallback toolbox without producing new
+    # findings, nudging the LLM toward `action=complete` so the root planner
+    # can re-deploy with better-matched tools. Empty string until thresholds
+    # cross — costs zero tokens for productive members.
+    fallback_uses = int(state.get("fallback_uses_this_run", 0) or 0)
+    stall = int(state.get("iterations_since_new_finding", 0) or 0)
+    declared_for_warning = (
+        sorted((set(declared_tools) - {"query_graph"})) if declared_tools else []
+    )
+    budget_prefix = ""
+    if fallback_uses >= 4 and stall >= 2:
+        budget_prefix = (
+            "## Recommendation: complete\n\n"
+            f"You have used {fallback_uses} fallback tools and produced no new findings "
+            f"in your last {stall} iterations. Strongly recommend emitting `action=complete` "
+            "with your current findings so the root planner can re-deploy with better-matched "
+            "tools. Continuing to reach into the fallback toolbox is unlikely to yield new "
+            "results.\n\n"
+        )
+    elif fallback_uses >= 2:
+        budget_prefix = (
+            "## Tool expansion budget\n\n"
+            f"You have used {fallback_uses} fallback tool(s) so far. Each fallback use is a "
+            f"signal that your declared primary tools ({declared_for_warning}) may not match "
+            "the task. Two more fallback calls without a new `chain_findings` entry and the "
+            "orchestrator will recommend you complete and let the root re-deploy.\n\n"
+        )
+
+    rendered = _MEMBER_SYSTEM_PROMPT.format(
         task=state.get("task", "(no task specified)"),
+        peer_block=peer_block,
         phase=phase,
         max_iterations=state.get("max_iterations", 15),
         target_info=target_str,
-        trace_summary=trace_summary,
+        parent_chain_context=parent_chain_context,
+        local_chain_context=local_chain_context,
         tool_list=tool_list,
         tool_args_section=tool_args_section,
         pending_output_section=pending_output_section,
     )
+    # Prepend the budget prefix (if any). Sits ABOVE the mission header so the
+    # LLM reads it before anything else.
+    return budget_prefix + rendered
 
 
 def _merge_extracted_info_into_target(state: FireteamMemberState, analysis) -> dict:
@@ -674,30 +895,50 @@ async def fireteam_member_think_node(
     max_retries = get_setting('LLM_PARSE_MAX_RETRIES', 3)
     decision = None
     parse_error: Optional[str] = None
+    # Tracks WHICH kind of error fired in the previous attempt so the retry
+    # prep can pick the right correction wrapper: "json" (JSON/Pydantic shape
+    # error from try_parse_llm_decision) or "semantic" (skill-expansion gate
+    # rejected an otherwise-valid decision). Without this, semantic errors
+    # would be wrapped as "Your previous JSON failed validation" — confusing
+    # the model into rewriting tool_name instead of adding tool_expansion_reason.
+    last_error_kind: Optional[str] = None
     raw_content = ""
     input_tokens_this_turn = 0
     output_tokens_this_turn = 0
+    declared_tools_set = set(state.get("tools") or [])
 
     for attempt in range(max_retries):
         if attempt > 0:
             logger.info(
-                "[%s] member %s parse attempt %d/%d after error: %s",
-                session_id, member_id, attempt + 1, max_retries, parse_error,
+                "[%s] member %s parse attempt %d/%d after %s error: %s",
+                session_id, member_id, attempt + 1, max_retries,
+                last_error_kind or "unknown", parse_error,
             )
             llm_messages.append(AIMessage(content=raw_content))
-            llm_messages.append(HumanMessage(
-                content=(
-                    f"Your previous JSON failed validation:\n{parse_error}\n\n"
-                    "Fix the error and emit ONE valid LLMDecision JSON. "
-                    "Remember: top-level `thought`, `reasoning`, `action` are REQUIRED. "
-                    "`tool_args` must be a JSON object, NEVER a CLI string."
-                )
-            ))
+            if last_error_kind == "semantic":
+                # Embedded message already explains the contract; do NOT wrap
+                # in "JSON failed validation" — that would mislead the model
+                # into rewriting tool_name or restructuring the JSON instead
+                # of adding the missing tool_expansion_reason field.
+                llm_messages.append(HumanMessage(content=parse_error))
+            else:
+                llm_messages.append(HumanMessage(
+                    content=(
+                        f"Your previous JSON failed validation:\n{parse_error}\n\n"
+                        "Fix the error and emit ONE valid LLMDecision JSON. "
+                        "Remember: top-level `thought`, `reasoning`, `action` are REQUIRED. "
+                        "`tool_args` must be a JSON object, NEVER a CLI string."
+                    )
+                ))
 
         try:
-            response = await llm.ainvoke(llm_messages)
+            response = await retry_llm_call(
+                llm, llm_messages, label=f"{session_id} member {member_id}",
+            )
         except Exception as exc:
-            logger.error("[%s] member %s LLM call failed: %s", session_id, member_id, exc)
+            logger.error(
+                "[%s] member %s LLM call failed: %s", session_id, member_id, exc,
+            )
             return {
                 "task_complete": True,
                 "completion_reason": f"llm_error: {exc}",
@@ -710,8 +951,27 @@ async def fireteam_member_think_node(
         output_tokens_this_turn += int(_usage.get("output_tokens", 0) or 0)
 
         decision, parse_error = try_parse_llm_decision(raw_content)
-        if decision is not None:
-            break
+        if decision is None:
+            # JSON / Pydantic shape error: loop and retry.
+            last_error_kind = "json"
+            continue
+
+        # Semantic gate: reaching for a fallback tool requires a
+        # `tool_expansion_reason` field. We give the LLM ONE retry to fix it;
+        # after that we accept the decision (the friction is real even when
+        # the field is missing — the request to add it has already cost a
+        # round-trip). Only fires when the member has declared tools.
+        sem_err = _validate_tool_expansion(decision, declared_tools_set)
+        if sem_err and attempt < max_retries - 1:
+            logger.info(
+                "[%s] member %s tool-expansion gate triggered on attempt %d/%d",
+                session_id, member_id, attempt + 1, max_retries,
+            )
+            parse_error = sem_err
+            last_error_kind = "semantic"
+            decision = None
+            continue
+        break
 
     if decision is None:
         logger.warning(
@@ -786,6 +1046,51 @@ async def fireteam_member_think_node(
         "messages": [AIMessage(content=raw_content)],
     }
 
+    # ---- Soft tool-allowlist counters (Change C) ----
+    # Count how many fallback tools this decision references. Increment the
+    # per-run counter so the next iteration's prompt sees an accurate budget
+    # number. Counts tools, not iterations: a 4-step plan with 2 fallback
+    # tools adds 2.
+    if declared_tools_set:
+        called = _collect_called_tools(decision)
+        primary_for_counter = declared_tools_set | {"query_graph"}
+        expanded_now = [t for t in called if t and t not in primary_for_counter]
+        if expanded_now:
+            prev_fallback = int(state.get("fallback_uses_this_run", 0) or 0)
+            update["fallback_uses_this_run"] = prev_fallback + len(expanded_now)
+            logger.info(
+                "[%s] member %s fallback expansion: tools=%s reason=%r total=%d",
+                session_id, member_id, expanded_now,
+                (decision.tool_expansion_reason or "")[:120],
+                update["fallback_uses_this_run"],
+            )
+
+    # Stall detection: compare the engagement-visible findings count NOW vs the
+    # snapshot from end-of-previous iteration. No new findings -> bump
+    # iterations_since_new_finding; new findings -> reset to 0. Used by the
+    # prompt's `budget_prefix` to escalate the "Recommendation: complete"
+    # nudge once the member is burning fallback calls without yield.
+    #
+    # SKIP the stall update on the first think call: at that point no tool
+    # has executed yet (execution_trace is empty and no step is pending), so
+    # "no new findings this iteration" is a vacuous truth — counting it as a
+    # stall would falsely push the budget warning ahead by one iteration.
+    has_done_work = bool(
+        state.get("execution_trace")
+        or state.get("_completed_step")
+        or state.get("_current_step")
+        or state.get("_current_plan")
+    )
+    if has_done_work:
+        current_findings = len(state.get("chain_findings_memory") or [])
+        last_findings = int(state.get("last_findings_count", 0) or 0)
+        if current_findings > last_findings:
+            update["iterations_since_new_finding"] = 0
+        else:
+            prev_stall = int(state.get("iterations_since_new_finding", 0) or 0)
+            update["iterations_since_new_finding"] = prev_stall + 1
+        update["last_findings_count"] = current_findings
+
     # Merge chain-step update from PREVIOUS tool (so follow-on steps link correctly).
     update.update(step_chain_update)
 
@@ -798,6 +1103,22 @@ async def fireteam_member_think_node(
     if is_dangerous:
         pending = _build_pending_confirmation(decision, state)
         update["_pending_confirmation"] = pending
+        # FIX: Populate _current_plan / _current_step now so they survive
+        # the await round-trip. Without this, the await node returns to
+        # the router with these fields unset and the router falls back to
+        # fireteam_think -> infinite plan/approve loop, no tool execution.
+        if decision.action == "plan_tools" and decision.tool_plan:
+            update["_current_plan"] = decision.tool_plan.model_dump()
+        elif decision.action == "use_tool":
+            update["_current_step"] = {
+                "step_id": uuid4().hex,
+                "iteration": current_iter + 1,
+                "phase": state.get("current_phase"),
+                "tool_name": decision.tool_name,
+                "tool_args": decision.tool_args or {},
+                "thought": decision.thought,
+                "reasoning": decision.reasoning,
+            }
         # Even though we're escalating the NEW decision, the PREVIOUS
         # single-tool step (if any) is now completed — its output was the
         # input to this think call. Signal it to the streaming layer so the
@@ -900,7 +1221,7 @@ async def fireteam_member_think_node(
                         target_port=details.get("target_port"),
                         cve_ids=details.get("cve_ids", []),
                         session_id=details.get("session_id"),
-                        evidence=details.get("evidence", "")[:500],
+                        evidence=details.get("evidence", "")[:10000],
                     )
                 except Exception as e:
                     logger.warning("member exploit_success write failed: %s", e)
@@ -1123,7 +1444,7 @@ async def fireteam_member_think_node(
                         target_port=details.get("target_port"),
                         cve_ids=details.get("cve_ids", []),
                         session_id=details.get("session_id"),
-                        evidence=details.get("evidence", "")[:500],
+                        evidence=details.get("evidence", "")[:10000],
                     )
                 except Exception as e:
                     logger.warning("member wave exploit_success write failed: %s", e)

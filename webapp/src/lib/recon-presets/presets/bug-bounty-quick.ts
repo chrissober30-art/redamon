@@ -102,6 +102,15 @@ Bug bounty hunters triaging a new target. You want to know if there are quick wi
     // --- DISABLE Wappalyzer (httpx tech detect is enough) ---
     wappalyzerEnabled: false,
 
+    // --- VHost & SNI: graph-only (skip 2300-prefix wordlist for speed) ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: false,        // skip the 2300-entry default for speed
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,
+    vhostSniConcurrency: 30,
+
     // --- DISABLE banner grabbing ---
     bannerGrabEnabled: false,
 

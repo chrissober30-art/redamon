@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { ChevronDown, Play, Zap } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
 import { TimeEstimate } from '../TimeEstimate'
+import { FileImportButton } from '../FileImportButton'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -26,6 +27,7 @@ export function KiterunnerSection({ data, updateField, onRun }: KiterunnerSectio
           <Zap size={16} />
           Kiterunner API Discovery
           <NodeInfoTooltip section="Kiterunner" />
+          <WikiInfoButton target="Kiterunner" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>
@@ -174,24 +176,38 @@ export function KiterunnerSection({ data, updateField, onRun }: KiterunnerSectio
                 <h3 className={styles.subSectionTitle}>Status Code Filters</h3>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Ignore Status Codes</label>
-                  <input
-                    type="text"
-                    className="textInput"
-                    value={(data.kiterunnerIgnoreStatus ?? []).join(', ')}
-                    onChange={(e) => updateField('kiterunnerIgnoreStatus', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
-                    placeholder="(empty = use whitelist only)"
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <input
+                      type="text"
+                      className="textInput"
+                      value={(data.kiterunnerIgnoreStatus ?? []).join(', ')}
+                      onChange={(e) => updateField('kiterunnerIgnoreStatus', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
+                      placeholder="(empty = use whitelist only)"
+                    />
+                    <FileImportButton
+                      fieldName="status codes"
+                      validator={(t) => /^\d+$/.test(t)}
+                      onImport={(values) => updateField('kiterunnerIgnoreStatus', values.map(v => parseInt(v)).filter(n => !isNaN(n)))}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>Blacklist: filter out noise from common errors</span>
                 </div>
                 <div className={styles.fieldGroup} style={{ marginTop: '1rem' }}>
                   <label className={styles.fieldLabel}>Match Status Codes</label>
-                  <input
-                    type="text"
-                    className="textInput"
-                    value={(data.kiterunnerMatchStatus ?? []).join(', ')}
-                    onChange={(e) => updateField('kiterunnerMatchStatus', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
-                    placeholder="200, 201, 204, 301, 302, 401, 403, 405"
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <input
+                      type="text"
+                      className="textInput"
+                      value={(data.kiterunnerMatchStatus ?? []).join(', ')}
+                      onChange={(e) => updateField('kiterunnerMatchStatus', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
+                      placeholder="200, 201, 204, 301, 302, 401, 403, 405"
+                    />
+                    <FileImportButton
+                      fieldName="status codes"
+                      validator={(t) => /^\d+$/.test(t)}
+                      onImport={(values) => updateField('kiterunnerMatchStatus', values.map(v => parseInt(v)).filter(n => !isNaN(n)))}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>Whitelist: only show endpoints with these status codes (includes auth-protected)</span>
                 </div>
               </div>
@@ -200,13 +216,20 @@ export function KiterunnerSection({ data, updateField, onRun }: KiterunnerSectio
                 <h3 className={styles.subSectionTitle}>Custom Headers</h3>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Request Headers</label>
-                  <textarea
-                    className="textarea"
-                    value={(data.kiterunnerHeaders ?? []).join('\n')}
-                    onChange={(e) => updateField('kiterunnerHeaders', e.target.value.split('\n').filter(Boolean))}
-                    placeholder="Authorization: Bearer token123&#10;X-API-Key: key123"
-                    rows={3}
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <textarea
+                      className="textarea"
+                      value={(data.kiterunnerHeaders ?? []).join('\n')}
+                      onChange={(e) => updateField('kiterunnerHeaders', e.target.value.split('\n').filter(Boolean))}
+                      placeholder="Authorization: Bearer token123&#10;X-API-Key: key123"
+                      rows={3}
+                    />
+                    <FileImportButton
+                      variant="textarea"
+                      fieldName="headers"
+                      onImport={(values) => updateField('kiterunnerHeaders', values)}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>Add auth tokens for authenticated API scanning</span>
                 </div>
               </div>

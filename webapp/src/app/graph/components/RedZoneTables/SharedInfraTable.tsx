@@ -1,9 +1,11 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
+import { ExternalLink } from '@/components/ui'
+import { resolveLinkable } from '@/lib/url-utils'
 import {
   Mono,
   Truncated,
@@ -60,15 +62,17 @@ export const SharedInfraTable = memo(function SharedInfraTable({ projectId }: Pr
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() => {
+    if (rows.length === 0) return undefined
     const flat = filtered.map(r => ({
       ...r,
       daysToExpiry: daysToExpiry(r.certNotAfter),
     }))
-    exportRedZoneXlsx(
-      flat,
-      'Shared-Infra',
-      [
+    return {
+      rows: flat,
+      sheetName: 'Shared-Infra',
+      fileSlug: 'redzone-shared-infra',
+      columns: [
         { key: 'clusterType', header: 'Type' },
         { key: 'clusterKey', header: 'Cluster Key' },
         { key: 'hostCount', header: 'Host Count' },
@@ -84,9 +88,8 @@ export const SharedInfraTable = memo(function SharedInfraTable({ projectId }: Pr
         { key: 'country', header: 'Country' },
         { key: 'ipAddress', header: 'IP' },
       ],
-      'redzone-shared-infra',
-    )
-  }, [filtered])
+    }
+  }, [filtered, rows.length])
 
   const m = data?.meta as any
   const meta =
@@ -101,7 +104,7 @@ export const SharedInfraTable = memo(function SharedInfraTable({ projectId }: Pr
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search CN, ASN, IP, hostname..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}
@@ -128,7 +131,10 @@ export const SharedInfraTable = memo(function SharedInfraTable({ projectId }: Pr
             return (
               <tr key={`${r.clusterType}-${r.clusterKey}-${i}`}>
                 <td><TypeChip t={r.clusterType} /></td>
-                <td><Mono>{r.clusterKey}</Mono></td>
+                <td><Mono>{(() => {
+                  const href = resolveLinkable(r.clusterKey)
+                  return href ? <ExternalLink href={href}>{r.clusterKey}</ExternalLink> : r.clusterKey
+                })()}</Mono></td>
                 <td><NumCell value={r.hostCount} /></td>
                 <td><ListCell items={r.hosts} max={4} /></td>
                 <td>

@@ -22,6 +22,7 @@ from .base import (
     # Dynamic prompt builders
     build_tool_availability_table,
     build_informational_tool_descriptions,
+    build_compact_tool_list,
     build_informational_guidance,
     build_attack_path_behavior,
     build_tool_args_section,
@@ -78,6 +79,36 @@ from .xss_prompts import (
     XSS_PAYLOAD_REFERENCE,
 )
 
+# Re-export from SSRF prompts
+from .ssrf_prompts import (
+    SSRF_TOOLS,
+    SSRF_OOB_WORKFLOW,
+    SSRF_GOPHER_CHAINS,
+    SSRF_DNS_REBINDING,
+    SSRF_PAYLOAD_REFERENCE,
+    SSRF_CLOUD_PROVIDER_BLOCKS,
+    SSRF_CLOUD_DISABLED_STUB,
+)
+
+# Re-export from RCE prompts
+from .rce_prompts import (
+    RCE_TOOLS,
+    RCE_AGGRESSIVE_DISABLED,
+    RCE_AGGRESSIVE_ENABLED,
+    RCE_OOB_WORKFLOW,
+    RCE_DESERIALIZATION_WORKFLOW,
+    RCE_PAYLOAD_REFERENCE,
+)
+
+# Re-export from Path Traversal / LFI / RFI prompts
+from .path_traversal_prompts import (
+    PATH_TRAVERSAL_TOOLS,
+    PATH_TRAVERSAL_PHP_WRAPPERS,
+    PATH_TRAVERSAL_OOB_WORKFLOW,
+    PATH_TRAVERSAL_ARCHIVE_EXTRACTION,
+    PATH_TRAVERSAL_PAYLOAD_REFERENCE,
+)
+
 # Re-export from unclassified attack path prompts
 from .unclassified_prompts import UNCLASSIFIED_EXPLOIT_TOOLS
 
@@ -119,6 +150,7 @@ def get_phase_tools(
     post_expl_type: str = "stateless",
     attack_path_type: str = "",
     execution_trace: list = None,
+    tool_filter: set = None,
 ) -> str:
     """Get tool descriptions for the current phase with attack path-specific guidance.
 
@@ -132,6 +164,10 @@ def get_phase_tools(
         post_expl_type: "statefull" for Meterpreter sessions, "stateless" for single commands.
         attack_path_type: Type of attack path ("cve_exploit", "brute_force_credential_guess", "phishing_social_engineering", "denial_of_service", "sql_injection")
         execution_trace: List of execution steps (used to detect MSF search failures).
+        tool_filter: Optional whitelist of tool names. When set, the rendered output is
+                     restricted to the intersection of phase-allowed tools and this set.
+                     Used by fireteam members to render a "primary tools" view limited
+                     to their declared skills. None means no filtering (full phase view).
 
     Returns:
         Concatenated tool descriptions appropriate for the phase, mode, and attack path.
@@ -160,16 +196,39 @@ def get_phase_tools(
         parts.append(f"## Custom Instructions\n\n{post_expl_prompt}\n")
 
     # Determine allowed tools for current phase (dynamic from TOOL_PHASE_MAP in DB)
-    allowed_tools = get_allowed_tools_for_phase(phase)
+    phase_allowed_unfiltered = get_allowed_tools_for_phase(phase)
+    # Optional fireteam-member filter: render only the intersection with the
+    # member's declared skills, so the "primary tools" view stays focused.
+    # Phase-allowlisting still applies — filter is a SUBSET operation, never a
+    # superset.
+    if tool_filter is not None:
+        allowed_tools = [t for t in phase_allowed_unfiltered if t in tool_filter]
+    else:
+        allowed_tools = phase_allowed_unfiltered
 
-    # Kali shell library installation rules (prompt-based control)
-    if "kali_shell" in allowed_tools:
+    # Kali shell library installation rules (prompt-based control).
+    # IMPORTANT: check the UNFILTERED phase allowlist. A fireteam member may
+    # render the "primary tools" view without kali_shell in its declared
+    # skills, but kali_shell still appears in the member's fallback toolbox
+    # and is callable. The install constraints must be communicated regardless
+    # of which view we're rendering — otherwise the model may try `apt install`
+    # via a fallback kali_shell call without seeing the warning.
+    if "kali_shell" in phase_allowed_unfiltered:
         parts.append(build_kali_install_prompt())
 
-    # Dynamic tool availability table — skip in informational phase where
-    # build_informational_tool_descriptions() already provides full details
-    if phase != "informational":
-        parts.append(build_tool_availability_table(phase, allowed_tools))
+    # Dynamic tool availability table — render in EVERY phase so the LLM
+    # always sees the same purpose + when_to_use columns for any allowed
+    # tool. Phase toggles control whether a tool appears at all (via
+    # allowed_tools), not which fields render.
+    #
+    # When a tool_filter is active (fireteam member primary view), suppress
+    # the "Current phase allows: ..." summary line — the filtered list is
+    # NOT what the phase fully allows, and emitting it as such would lie to
+    # the model and could discourage legitimate fallback-tool calls.
+    parts.append(build_tool_availability_table(
+        phase, allowed_tools,
+        show_phase_allows_line=(tool_filter is None),
+    ))
 
     # Add mode decision matrix for exploitation only (not needed in post-expl, mode already determined)
     if phase == "exploitation" and attack_path_type == "cve_exploit":
@@ -289,6 +348,109 @@ def get_phase_tools(
                 parts.append(XSS_BLIND_WORKFLOW)
             parts.append(XSS_PAYLOAD_REFERENCE)
             return True
+        elif (attack_path_type == "ssrf"
+                and "ssrf" in enabled_builtins
+                and "execute_curl" in allowed_tools):
+            ssrf_oob_enabled = get_setting('SSRF_OOB_CALLBACK_ENABLED', True)
+            ssrf_cloud_enabled = get_setting('SSRF_CLOUD_METADATA_ENABLED', True)
+            ssrf_gopher_enabled = get_setting('SSRF_GOPHER_ENABLED', True)
+            ssrf_rebind_enabled = get_setting('SSRF_DNS_REBINDING_ENABLED', True)
+            ssrf_payref_enabled = get_setting('SSRF_PAYLOAD_REFERENCE_ENABLED', True)
+
+            # Build cloud section: filter SSRF_CLOUD_PROVIDER_BLOCKS by enabled
+            # providers if cloud-metadata is on, else inject the disabled stub.
+            if ssrf_cloud_enabled:
+                providers_csv = get_setting('SSRF_CLOUD_PROVIDERS', 'aws,gcp,azure,digitalocean,alibaba')
+                requested = [p.strip().lower() for p in providers_csv.split(',') if p.strip()]
+                cloud_blocks = [SSRF_CLOUD_PROVIDER_BLOCKS[p] for p in requested if p in SSRF_CLOUD_PROVIDER_BLOCKS]
+                ssrf_cloud_section = "\n".join(cloud_blocks) if cloud_blocks else SSRF_CLOUD_DISABLED_STUB
+            else:
+                ssrf_cloud_section = SSRF_CLOUD_DISABLED_STUB
+
+            # Build custom-targets section from free-text setting
+            custom_targets = (get_setting('SSRF_CUSTOM_INTERNAL_TARGETS', '') or '').strip()
+            if custom_targets:
+                ssrf_custom_targets_section = (
+                    "## SITE-SPECIFIC INTERNAL TARGETS\n\n"
+                    "The operator has flagged these internal hosts/IPs for prioritized probing:\n\n"
+                    f"```\n{custom_targets}\n```\n\n"
+                    "Probe these alongside the generic loopback / RFC1918 sweep in Step 3."
+                )
+            else:
+                ssrf_custom_targets_section = ""
+
+            ssrf_settings = {
+                'ssrf_oob_callback_enabled': ssrf_oob_enabled,
+                'ssrf_cloud_metadata_enabled': ssrf_cloud_enabled,
+                'ssrf_gopher_enabled': ssrf_gopher_enabled,
+                'ssrf_dns_rebinding_enabled': ssrf_rebind_enabled,
+                'ssrf_payload_reference_enabled': ssrf_payref_enabled,
+                'ssrf_request_timeout': get_setting('SSRF_REQUEST_TIMEOUT', 10),
+                'ssrf_port_scan_ports': get_setting('SSRF_PORT_SCAN_PORTS',
+                    '22,80,443,2375,3306,5432,6379,8080,8500,9200,27017'),
+                'ssrf_internal_ranges': get_setting('SSRF_INTERNAL_RANGES',
+                    '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16'),
+                'ssrf_oob_provider': get_setting('SSRF_OOB_PROVIDER', 'oast.fun'),
+                'ssrf_cloud_providers': get_setting('SSRF_CLOUD_PROVIDERS',
+                    'aws,gcp,azure,digitalocean,alibaba') if ssrf_cloud_enabled else 'disabled',
+                'ssrf_cloud_section': ssrf_cloud_section,
+                'ssrf_custom_targets_section': ssrf_custom_targets_section,
+            }
+            parts.append(SSRF_TOOLS.format(**ssrf_settings))
+            if ssrf_oob_enabled and "kali_shell" in allowed_tools:
+                parts.append(SSRF_OOB_WORKFLOW)
+            if ssrf_gopher_enabled:
+                parts.append(SSRF_GOPHER_CHAINS)
+            if ssrf_rebind_enabled:
+                parts.append(SSRF_DNS_REBINDING)
+            if ssrf_payref_enabled:
+                parts.append(SSRF_PAYLOAD_REFERENCE)
+            return True
+        elif (attack_path_type == "path_traversal"
+                and "path_traversal" in enabled_builtins
+                and "execute_curl" in allowed_tools):
+            pt_oob_enabled = get_setting('PATH_TRAVERSAL_OOB_CALLBACK_ENABLED', True)
+            pt_php_enabled = get_setting('PATH_TRAVERSAL_PHP_WRAPPERS_ENABLED', True)
+            pt_archive_enabled = get_setting('PATH_TRAVERSAL_ARCHIVE_EXTRACTION_ENABLED', False)
+            pt_payref_enabled = get_setting('PATH_TRAVERSAL_PAYLOAD_REFERENCE_ENABLED', True)
+            pt_settings = {
+                'path_traversal_oob_callback_enabled': pt_oob_enabled,
+                'path_traversal_php_wrappers_enabled': pt_php_enabled,
+                'path_traversal_archive_extraction_enabled': pt_archive_enabled,
+                'path_traversal_payload_reference_enabled': pt_payref_enabled,
+                'path_traversal_request_timeout': get_setting('PATH_TRAVERSAL_REQUEST_TIMEOUT', 10),
+                'path_traversal_oob_provider': get_setting('PATH_TRAVERSAL_OOB_PROVIDER', 'oast.fun'),
+            }
+            parts.append(PATH_TRAVERSAL_TOOLS.format(**pt_settings))
+            if pt_php_enabled:
+                parts.append(PATH_TRAVERSAL_PHP_WRAPPERS)
+            if pt_oob_enabled and "kali_shell" in allowed_tools:
+                parts.append(PATH_TRAVERSAL_OOB_WORKFLOW)
+            if pt_archive_enabled and "execute_code" in allowed_tools:
+                parts.append(PATH_TRAVERSAL_ARCHIVE_EXTRACTION)
+            if pt_payref_enabled:
+                parts.append(PATH_TRAVERSAL_PAYLOAD_REFERENCE)
+            return True
+        elif (attack_path_type == "rce"
+                and "rce" in enabled_builtins
+                and "kali_shell" in allowed_tools):
+            rce_oob_enabled = get_setting('RCE_OOB_CALLBACK_ENABLED', True)
+            rce_deser_enabled = get_setting('RCE_DESERIALIZATION_ENABLED', True)
+            rce_aggressive = get_setting('RCE_AGGRESSIVE_PAYLOADS', False)
+            rce_aggressive_block = RCE_AGGRESSIVE_ENABLED if rce_aggressive else RCE_AGGRESSIVE_DISABLED
+            rce_settings = {
+                'rce_oob_callback_enabled': rce_oob_enabled,
+                'rce_deserialization_enabled': rce_deser_enabled,
+                'rce_aggressive_payloads': rce_aggressive,
+                'rce_aggressive_block': rce_aggressive_block,
+            }
+            parts.append(RCE_TOOLS.format(**rce_settings))
+            if rce_oob_enabled:
+                parts.append(RCE_OOB_WORKFLOW)
+            if rce_deser_enabled:
+                parts.append(RCE_DESERIALIZATION_WORKFLOW)
+            parts.append(RCE_PAYLOAD_REFERENCE)
+            return True
         elif ("cve_exploit" == attack_path_type
                 and "cve_exploit" in enabled_builtins
                 and "metasploit_console" in allowed_tools):
@@ -303,13 +465,17 @@ def get_phase_tools(
             return True
         return False
 
-    # Add phase and ATTACK PATH specific workflow guidance
-    if phase == "informational":
-        # Dynamic tool descriptions (only shows allowed tools)
-        parts.append(build_informational_tool_descriptions(allowed_tools))
+    # Tool descriptions: render in EVERY phase for every allowed tool.
+    # Phase toggle = enable/disable per phase, NOT field selection. If a
+    # tool is in allowed_tools for the current phase, the LLM sees all
+    # four fields (purpose, when_to_use, args_format, description) — same
+    # contract across the three phases.
+    parts.append(build_informational_tool_descriptions(allowed_tools))
 
-        # Inject skill workflow — built-in skills get their full prompt from the start,
-        # just like user skills. The workflow itself contains recon steps (Step 1: Target Analysis etc.)
+    # Skill workflows are now ADDITIVE on top of the descriptions, not
+    # replacements. The descriptions teach the LLM what each tool does;
+    # the skill workflow tells it the playbook for the current attack.
+    if phase == "informational":
         user_skill_content = _resolve_user_skill()
         if user_skill_content:
             parts.append(
@@ -321,9 +487,10 @@ def get_phase_tools(
             _inject_builtin_skill_workflow()
 
     elif phase == "exploitation":
-        # SELECT WORKFLOW BASED ON ATTACK SKILL TYPE
+        # Built-in skill workflows have curated tool playbooks for known
+        # attack paths (CVE exploit, brute force, etc.). They append to
+        # — not replace — the generic tool descriptions above.
         if not _inject_builtin_skill_workflow():
-            # No built-in skill matched — check user skills and unclassified
             if attack_path_type.startswith("user_skill:"):
                 user_skill_content = _resolve_user_skill()
                 if user_skill_content:
@@ -332,15 +499,12 @@ def get_phase_tools(
                     parts.append(UNCLASSIFIED_EXPLOIT_TOOLS)
             elif attack_path_type.endswith("-unclassified"):
                 parts.append(UNCLASSIFIED_EXPLOIT_TOOLS)
-            else:
-                parts.append(build_informational_tool_descriptions(allowed_tools))
+            # else: descriptions above are sufficient
 
-        # Add note about post-exploitation availability
         if not activate_post_expl:
             parts.append("\n**NOTE:** Post-exploitation phase is DISABLED. Complete exploitation and use action='complete'.\n")
 
     elif phase == "post_exploitation":
-        # User skills define their own post-exploitation workflow
         user_skill_content = _resolve_user_skill()
         if user_skill_content:
             parts.append(
@@ -353,9 +517,7 @@ def get_phase_tools(
                 parts.append(POST_EXPLOITATION_TOOLS_STATEFULL)
             else:
                 parts.append(POST_EXPLOITATION_TOOLS_STATELESS)
-        else:
-            # metasploit_console disabled — show only informational tool descriptions
-            parts.append(build_informational_tool_descriptions(allowed_tools))
+        # else: descriptions above are sufficient
 
     return "\n".join(parts)
 
@@ -366,6 +528,7 @@ __all__ = [
     "TOOL_REGISTRY",
     "build_tool_availability_table",
     "build_informational_tool_descriptions",
+    "build_compact_tool_list",
     "build_informational_guidance",
     "build_attack_path_behavior",
     "build_tool_args_section",
@@ -406,6 +569,31 @@ __all__ = [
     "SQLI_TOOLS",
     "SQLI_OOB_WORKFLOW",
     "SQLI_PAYLOAD_REFERENCE",
+    # XSS
+    "XSS_TOOLS",
+    "XSS_BLIND_WORKFLOW",
+    "XSS_PAYLOAD_REFERENCE",
+    # SSRF
+    "SSRF_TOOLS",
+    "SSRF_OOB_WORKFLOW",
+    "SSRF_GOPHER_CHAINS",
+    "SSRF_DNS_REBINDING",
+    "SSRF_PAYLOAD_REFERENCE",
+    "SSRF_CLOUD_PROVIDER_BLOCKS",
+    "SSRF_CLOUD_DISABLED_STUB",
+    # RCE
+    "RCE_TOOLS",
+    "RCE_AGGRESSIVE_DISABLED",
+    "RCE_AGGRESSIVE_ENABLED",
+    "RCE_OOB_WORKFLOW",
+    "RCE_DESERIALIZATION_WORKFLOW",
+    "RCE_PAYLOAD_REFERENCE",
+    # Path Traversal / LFI / RFI
+    "PATH_TRAVERSAL_TOOLS",
+    "PATH_TRAVERSAL_PHP_WRAPPERS",
+    "PATH_TRAVERSAL_OOB_WORKFLOW",
+    "PATH_TRAVERSAL_ARCHIVE_EXTRACTION",
+    "PATH_TRAVERSAL_PAYLOAD_REFERENCE",
     # Unclassified attack path
     "UNCLASSIFIED_EXPLOIT_TOOLS",
     # Post-exploitation

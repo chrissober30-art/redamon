@@ -49,9 +49,9 @@ export const DataTableToolbar = memo(function DataTableToolbar({
         />
       </div>
 
-      <button className={styles.exportBtn} onClick={onExport} aria-label="Export to Excel">
+      <button className={styles.exportBtn} onClick={onExport} aria-label="Export to CSV">
         <Download size={14} />
-        <span>XLSX</span>
+        <span>CSV</span>
       </button>
 
       <div className={styles.chipActions}>

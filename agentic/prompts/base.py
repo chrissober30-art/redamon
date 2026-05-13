@@ -23,8 +23,19 @@ def _get_visible_tools(allowed_tools):
     ]
 
 
-def build_tool_availability_table(phase, allowed_tools):
-    """Build the tool availability table showing only tools allowed in the current phase."""
+def build_tool_availability_table(phase, allowed_tools, *, show_phase_allows_line=True):
+    """Build the tool availability table showing only tools allowed in the current phase.
+
+    Args:
+        phase: Current phase name (rendered in the table header).
+        allowed_tools: List of tool names to render.
+        show_phase_allows_line: When True (default), append a
+            "**Current phase allows:** ..." summary line listing the rendered
+            tools. Suppress this when rendering a FILTERED view (e.g. the
+            "Primary tools" block in fireteam member prompts) — the line would
+            otherwise misleadingly imply that other phase-allowed tools are
+            forbidden.
+    """
     visible = _get_visible_tools(allowed_tools)
 
     if not visible:
@@ -38,7 +49,8 @@ def build_tool_availability_table(phase, allowed_tools):
     for name, info in visible:
         lines.append(f"| **{name}** | {info['purpose']} | {info['when_to_use']} |")
 
-    lines.append(f"\n**Current phase allows:** {', '.join(t[0] for t in visible)}")
+    if show_phase_allows_line:
+        lines.append(f"\n**Current phase allows:** {', '.join(t[0] for t in visible)}")
     return "\n".join(lines) + "\n"
 
 
@@ -71,6 +83,27 @@ def build_tool_args_section(allowed_tools):
     return "\n".join(lines)
 
 
+def build_compact_tool_list(allowed_tools):
+    """Render a minimal "name: purpose" bullet list for the given tools.
+
+    Used by fireteam members to surface FALLBACK tools (the ones outside their
+    declared `tools` allowlist) without flooding the prompt with full
+    descriptions and flag examples. The model knows these tools exist and can
+    call them, but has to reason explicitly about why a primary tool can't do
+    the job — that friction is the point.
+
+    Returns an empty string when allowed_tools is empty.
+    """
+    visible = _get_visible_tools(allowed_tools)
+    if not visible:
+        return ""
+    lines = []
+    for name, info in visible:
+        purpose = info.get("purpose") or ""
+        lines.append(f"- **{name}**: {purpose}")
+    return "\n".join(lines) + "\n"
+
+
 _FIRETEAM_PROMPT_BLOCK = """deploy_fireteam (2 to {max_members} specialists, fork-join on INDEPENDENT subtasks).
 
 Fireteam = parallel REASONING (each specialist runs its own ReAct loop), not just parallel tool calls (that's plan_tools). Works in all phases.
@@ -100,13 +133,26 @@ Hard limits: max {max_members} members per wave, dangerous tools escalate to ope
 
 After a wave returns: findings show `(from <specialist>)` and matching TODOs auto-complete. DO NOT redeploy the same plan. Either emit action=complete with a consolidated report, OR deploy a DIFFERENT plan if findings reveal a genuinely new surface. If user asked "deploy a fireteam to do X" and it did, the task is done.
 
-Example (exploitation fan-out against a mapped surface):
+## `tools` field contract
+
+Each member spec carries `tools`: a list of canonical tool names (the exact
+identifiers from the Available Tools table, e.g. `execute_httpx`, `execute_curl`,
+`kali_shell`, `query_graph`). These become the member's "primary toolbox".
+Anything outside `tools` is reachable as "fallback" but requires the member to
+justify each call.
+
+- RIGHT: `"tools": ["execute_httpx", "execute_curl"]`
+- WRONG: `"tools": ["httpx", "curl"]` (short forms break the split)
+- WRONG: `"tools": ["nmap scan"]` (descriptions, not tool names)
+- 2-5 tools per member is typical. Include every tool the member actually needs.
+- `query_graph` is always implicitly primary.
+
+Example:
 ```json
 {{"action": "deploy_fireteam", "fireteam_plan": {{"members": [
-  {{"name": "SQLi Operator", "task": "Exploit SQLi on /api/users?id= via UNION/blind; extract users table.", "skills": ["sqlmap", "curl"]}},
-  {{"name": "SSRF Operator", "task": "Exploit SSRF on /api/fetch?url= to cloud metadata and internal services.", "skills": ["curl", "nuclei"]}},
-  {{"name": "Auth Bypass", "task": "Test /admin for JWT alg-confusion, missing sig checks, and IDOR.", "skills": ["curl"]}}
-], "plan_rationale": "Three independent vuln classes, no cross-dependency, no shared session"}}, ...}}
+  {{"name": "SQLi Op", "task": "...", "tools": ["kali_shell", "execute_curl"]}},
+  {{"name": "SSRF Op", "task": "...", "tools": ["execute_curl", "execute_nuclei"]}}
+], "plan_rationale": "..."}}, ...}}
 ```
 
 """
@@ -586,9 +632,37 @@ ask_user:
 
 plan_tools (run multiple INDEPENDENT tools as a wave — use when 2+ tools have NO dependencies):
 ```json
-{{"action": "plan_tools", "tool_plan": {{"steps": [{{"tool_name": "execute_nmap", "tool_args": {{"target": "10.0.0.1", "args": "-sV"}}, "rationale": "Port discovery"}}, {{"tool_name": "query_graph", "tool_args": {{"question": "What is known about 10.0.0.1?"}}, "rationale": "Check existing intel"}}], "plan_rationale": "Independent tools, no dependency between them"}}, ...}}
+{{"action": "plan_tools", "tool_plan": {{"steps": [{{"tool_name": "execute_nmap", "tool_args": {{"args": "-sV 10.0.0.1"}}, "rationale": "Port discovery"}}, {{"tool_name": "query_graph", "tool_args": {{"question": "What is known about 10.0.0.1?"}}, "rationale": "Check existing intel"}}], "plan_rationale": "Independent tools, no dependency between them"}}, ...}}
 ```
 Do NOT include tools that depend on another tool's output — plan those in the NEXT iteration after seeing results.
+
+**tool_args shape (CRITICAL — per the `## Tool Arguments` section below)**. Tools fall into FOUR shape buckets — pick the right one per tool name:
+
+  Shape A — `{{"args": "<full CLI flag string, binary name stripped>"}}`
+  Tools: cve_intel, execute_nuclei, execute_curl, execute_httpx, execute_naabu, execute_jsluice, execute_katana, execute_subfinder, execute_gau, execute_nmap, execute_amass, execute_hydra, execute_wpscan, execute_arjun, execute_ffuf.
+  Examples: `{{"args": "-sV -p 22 10.0.0.1"}}` (nmap), `{{"args": "-u http://x -d 3 -jc -silent"}}` (katana), `{{"args": "-u http://x -sc -title -td -j -silent"}}` (httpx).
+
+  Shape B — `{{"command": "<full shell command>"}}`
+  Tools: kali_shell, metasploit_console.
+
+  Shape C — typed kwargs declared per tool (multi-key JSON object). Use the EXACT keys shown in `## Tool Arguments`.
+    query_graph        -> {{"question": "..."}}
+    web_search         -> {{"query": "...", "include_sources": ["nvd"], "min_cvss": 9.0}}
+    google_dork        -> {{"query": "..."}}
+    shodan             -> {{"action": "host"|"search"|"dns_reverse"|"dns_domain"|"count", "query": "...", "ip": "...", "domain": "..."}}
+    execute_code       -> {{"code": "...", "language": "python", "filename": "exploit"}}
+    execute_playwright -> {{"url": "...", "selector": "...", "format": "text"|"html"}}  OR  {{"script": "..."}}
+    tradecraft_lookup  -> {{"resource_id": "...", "query": "..."}}
+
+  Shape D — no args: msf_restart -> {{}}
+
+  WRONG (Pydantic rejects every one of these with "Unexpected keyword argument"):
+    {{"url": "...", "depth": 3, "jc": true}} on execute_katana
+    {{"target": "...", "ports": "22", "flags": "-sV"}} on execute_nmap
+    {{"targets": ["..."]}} on execute_httpx
+    {{"host": "...", "ports": "1-1000"}} on execute_naabu
+    "-w wordlist -u https://x" (raw string) on ANY tool
+  RIGHT: Shape A — `{{"args": "<CLI flag string>"}}`. Never invent kwargs like url/target/host/port/depth/flags on Shape A tools.
 
 {fireteam_example_section}complete: `{{"action": "complete", "completion_reason": "Successfully exploited target", ...}}`
 
@@ -1199,7 +1273,7 @@ Common properties (all sources):
 - id (string): unique identifier
 - name (string): vulnerability name
 - severity (string): "critical", "high", "medium", "low", "info" (lowercase!)
-- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), or **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates)
+- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), or **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl)
 - description (string): vulnerability description
 - cvss_score (float): 0.0 to 10.0
 
@@ -1269,6 +1343,26 @@ Subdomain-takeover properties (source="takeover_scan"):
 - first_seen / last_seen (strings): ISO timestamps
 - id pattern: `takeover_<sha1-hex16>` where the hash is over `hostname+takeover_provider+takeover_method` — deterministic, MERGE-safe across re-scans
 - Typical query: "list confirmed Heroku takeovers" → `MATCH (s:Subdomain)-[:HAS_VULNERABILITY]->(v:Vulnerability {source: 'takeover_scan'}) WHERE v.takeover_provider = 'heroku' AND v.verdict = 'confirmed' RETURN s.name AS subdomain, v.cname_target, v.confidence, v.sources`
+
+VHost & SNI properties (source="vhost_sni_enum"):
+- type (string): "hidden_vhost" (L7 anomaly only), "hidden_sni_route" (L4/SNI anomaly only), or "host_header_bypass" (L7 vs L4 disagreement — proxy bypass primitive)
+- hostname (string): the hidden virtual host FQDN that was discovered (e.g. "admin.acme.com")
+- ip (string): the IP address that hosts the hidden vhost
+- port (integer): TCP port tested (commonly 443, also 80, 8443, 8080, etc.)
+- scheme (string): "http" | "https"
+- layer (string): "L7" (HTTP Host header trick caught it), "L4" (TLS SNI trick caught it), or "both" (both layers anomalous)
+- baseline_status (integer): HTTP status code returned by the raw IP request (no Host override) used as comparison baseline
+- baseline_size (integer): body size in bytes for the baseline response
+- observed_status (integer): HTTP status code returned when the host/SNI lie was applied
+- observed_size (integer): body size in bytes for the observed response
+- size_delta (integer): observed_size - baseline_size (signed)
+- internal_pattern_match (string, nullable): matched internal-keyword in hostname (e.g. "admin", "jenkins", "k8s") that triggered severity escalation, or null
+- severity (string): "high" (L7 vs L4 disagreement, proxy bypass), "medium" (hidden vhost matching internal-keyword), "low" (different status code), "info" (size delta only)
+- description (string): human-readable explanation
+- id pattern: `vhost_sni_{hostname}_{ip}_{port}_{layer}` — deterministic, MERGE-safe
+- Subdomain enrichment (set on (:Subdomain) nodes flagged as hidden vhosts): vhost_tested (bool), vhost_hidden (bool), vhost_routing_layer ("L7"|"L4"|"both"), vhost_status_code (int), vhost_size_delta (int), sni_routed (bool), vhost_tested_at (ISO ts)
+- IP enrichment (set on (:IP) nodes that have been probed): vhost_sni_tested (bool), vhost_baseline_status (int), vhost_baseline_size (int), vhost_candidates_tested (int — total candidate hostnames probed against this IP), vhost_ports_tested (int — number of (port, scheme) pairs that produced a usable baseline), hosts_hidden_vhosts (bool), hidden_vhost_count (int), is_reverse_proxy (bool), vhost_sni_tested_at (ISO ts)
+- Typical query: "list hidden admin panels uncovered by vhost enumeration" → `MATCH (s:Subdomain)-[:HAS_VULNERABILITY]->(v:Vulnerability {source: 'vhost_sni_enum'}) WHERE v.internal_pattern_match IS NOT NULL RETURN s.name AS hostname, v.ip, v.port, v.layer, v.severity, v.internal_pattern_match`
 
 **CVE** - Known CVE entries (linked to Technologies)
 - id (string): "CVE-2021-41773", "CVE-2021-44228"
@@ -1593,7 +1687,7 @@ RETURN 'Vulnerability' as type, v.id as id, v.name as name, v.severity as severi
 UNION ALL
 MATCH (c:CVE)
 RETURN 'CVE' as type, c.id as id, c.id as name, c.severity as severity, c.source as source
-LIMIT 50
+LIMIT 500
 ```
 
 ### Finding Scanner Vulnerabilities (Vulnerability nodes only)
@@ -1602,7 +1696,7 @@ LIMIT 50
 MATCH (v:Vulnerability)
 WHERE v.severity = "critical"
 RETURN v.name, v.source, v.cvss_score
-LIMIT 20
+LIMIT 500
 
 // Web vulnerabilities on specific subdomain (via Service chain or direct HAS_BASE_URL)
 MATCH (s:Subdomain {{name: "api.example.com"}})-[:RESOLVES_TO]->(:IP)-[:HAS_PORT]->(:Port)-[:RUNS_SERVICE]->(:Service)-[:SERVES_URL]->(b:BaseURL)
@@ -1621,13 +1715,13 @@ RETURN i.address, v.name, v.cvss_score
 // All CVEs in the system
 MATCH (c:CVE)
 RETURN c.id, c.severity, c.cvss, c.description
-LIMIT 20
+LIMIT 500
 
 // High severity CVEs
 MATCH (c:CVE)
 WHERE c.severity IN ["HIGH", "CRITICAL"] OR c.cvss >= 7.0
 RETURN c.id, c.severity, c.cvss
-LIMIT 20
+LIMIT 500
 
 // CVEs linked to detected technologies
 MATCH (t:Technology)-[:HAS_KNOWN_CVE]->(c:CVE)
@@ -1719,7 +1813,7 @@ ORDER BY secret_count DESC
 MATCH (d:Domain)-[:HAS_TRUFFLEHOG_SCAN]->(ts:TrufflehogScan)-[:HAS_REPOSITORY]->(tr:TrufflehogRepository)-[:HAS_FINDING]->(tf:TrufflehogFinding)
 WHERE tf.verified = true
 RETURN tr.name AS repository, tf.detector_name, tf.file, tf.line, tf.redacted
-LIMIT 50
+LIMIT 500
 
 // TruffleHog scan summary
 MATCH (ts:TrufflehogScan)
@@ -1777,7 +1871,7 @@ UNION ALL
 MATCH (jf:JsReconFinding)
 WHERE jf.finding_type IN ['dependency_confusion', 'source_map_exposure', 'dom_sink']
 RETURN 'JS Analysis' as source, jf.finding_type as type, 'js_recon' as tool, jf.source_url as location, jf.severity as severity
-LIMIT 50
+LIMIT 500
 ```
 
 ### CISA KEV (Known Weaponized Vulnerabilities)
@@ -1811,7 +1905,7 @@ RETURN 'Agent' as source, f.target_ip, f.cve_ids, f.evidence
 MATCH (ac:AttackChain)
 RETURN ac.chain_id, ac.title, ac.status, ac.attack_path_type, ac.total_steps, ac.created_at
 ORDER BY ac.created_at DESC
-LIMIT 10
+LIMIT 500
 
 // Steps in a specific chain (ordered)
 MATCH (ac:AttackChain {{chain_id: "session-123"}})-[:HAS_STEP]->(s:ChainStep)
@@ -1823,18 +1917,18 @@ MATCH (f:ChainFinding)
 WHERE f.severity IN ["critical", "high"]
 RETURN f.finding_type, f.title, f.severity, f.evidence, f.chain_id
 ORDER BY f.created_at DESC
-LIMIT 20
+LIMIT 500
 
 // Findings and exploit successes 
 MATCH (f:ChainFinding {{finding_type: "exploit_success"}})
 RETURN f.target_ip, f.target_port, f.cve_ids, f.metasploit_module, f.evidence
-LIMIT 20
+LIMIT 500
 
 // Failed attempts with lessons learned
 MATCH (fl:ChainFailure)
 RETURN fl.failure_type, fl.tool_name, fl.error_message, fl.lesson_learned, fl.chain_id
 ORDER BY fl.created_at DESC
-LIMIT 20
+LIMIT 500
 
 // Cross-session: what was tried against a specific IP
 MATCH (s:ChainStep)-[:STEP_TARGETED]->(i:IP {{address: "10.0.0.5"}})
@@ -1876,6 +1970,46 @@ MATCH (s:Subdomain)-[:USES_TECHNOLOGY]->(t:Technology)
 RETURN s.name, collect(t.name) as technologies
 ```
 
+### Recurring Lookups
+```cypher
+// Asset hierarchy: hosts/IPs/ports/services/technologies/vulnerabilities/CVEs in one query
+MATCH (d:Domain)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(ip:IP)
+OPTIONAL MATCH (ip)-[:HAS_PORT]->(p:Port)
+OPTIONAL MATCH (p)-[:RUNS_SERVICE]->(svc:Service)
+OPTIONAL MATCH (p)-[:HAS_TECHNOLOGY]->(tech:Technology)
+OPTIONAL MATCH (ip)-[:HAS_VULNERABILITY]->(v:Vulnerability)-[:HAS_CVE]->(cve:CVE)
+OPTIONAL MATCH (tech)-[:HAS_KNOWN_CVE]->(tech_cve:CVE)
+RETURN d.name AS domain, s.name AS subdomain, ip.address AS ip,
+       p.number AS port, svc.name AS service, svc.product AS product,
+       svc.version AS version, tech.name AS technology,
+       collect(DISTINCT v.name) AS vulnerabilities,
+       collect(DISTINCT cve.id) + collect(DISTINCT tech_cve.id) AS cves
+ORDER BY ip.address, p.number
+LIMIT 100
+
+// Secrets/credentials/tokens for a host (live web resources via JS recon).
+// Subdomain backlink is optional (some BaseURLs aren't linked to a Subdomain).
+// For repository-scanned secrets, also query TrufflehogFinding (see sections above).
+MATCH (b:BaseURL)
+OPTIONAL MATCH (b)-[:HAS_JS_FILE]->(js:JsReconFinding)-[:HAS_SECRET]->(sec:Secret)
+OPTIONAL MATCH (b)<-[:HAS_BASE_URL|HAS_BASEURL]-(s:Subdomain)
+WHERE sec IS NOT NULL
+RETURN s.name AS host, b.url AS base_url, js.source_url AS js_file,
+       sec.secret_type AS kind, sec.severity AS severity, sec.value AS value, sec.source AS source
+LIMIT 50
+
+// Endpoints + parameters + headers for a base URL (web app surface)
+MATCH (b:BaseURL) WHERE b.url CONTAINS 'example.com'
+OPTIONAL MATCH (b)-[:HAS_ENDPOINT]->(e:Endpoint)
+OPTIONAL MATCH (e)-[:HAS_PARAMETER]->(p:Parameter)
+OPTIONAL MATCH (b)-[:HAS_HEADER]->(h:Header)
+RETURN b.url AS base_url, e.path AS path, e.method AS method, e.status_code AS status,
+       p.name AS param_name, p.position AS param_position, p.is_injectable AS param_injectable,
+       h.name AS header_name, h.value AS header_value
+ORDER BY b.url, e.path
+LIMIT 500
+```
+
 ## Query Rules
 
 1. **CRITICAL - Query BOTH Vulnerability AND CVE nodes** when user asks about "vulnerabilities":
@@ -1887,7 +2021,7 @@ RETURN s.name, collect(t.name) as technologies
    - TrufflehogFinding nodes = secrets found in git repositories via TruffleHog
    - JsReconFinding nodes = non-secret JS findings (dependency confusion, source maps, DOM sinks, frameworks)
    - Use UNION ALL to combine results from all node types
-3. **Always use LIMIT** to restrict results (default: 20-50)
+3. **Always use LIMIT** to restrict results (default: 500), increase for special cases.
 4. **Relationship direction matters** - follow the arrows exactly as documented
 5. **Use property filters** in WHERE clauses, not relationship traversals for filtering
 6. **Check vulnerability source** when querying Vulnerability nodes:

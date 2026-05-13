@@ -20,6 +20,7 @@ const TOOL_KEY_LABEL: Record<string, string> = {
   google_dork: 'SerpAPI',
   execute_wpscan: 'WPScan',
   execute_gau: 'URLScan',
+  cve_intel: 'PDCP',
 }
 
 interface ToolExecutionCardProps {
@@ -30,14 +31,13 @@ interface ToolExecutionCardProps {
   onAddApiKey?: () => void
   onApprove?: () => void
   onReject?: () => void
-  confirmationDisabled?: boolean
   /** Cancel just this running tool (same semantics as the global Stop
    *  button, scoped to one card). Shown in the card header only while
    *  status === 'running'. */
   onStop?: () => void
 }
 
-export function ToolExecutionCard({ item, isExpanded, onToggleExpand, missingApiKey, onAddApiKey, onApprove, onReject, confirmationDisabled, onStop }: ToolExecutionCardProps) {
+export function ToolExecutionCard({ item, isExpanded, onToggleExpand, missingApiKey, onAddApiKey, onApprove, onReject, onStop }: ToolExecutionCardProps) {
   const [copied, setCopied] = useState(false)
   const [duration, setDuration] = useState(0)
 
@@ -160,8 +160,8 @@ export function ToolExecutionCard({ item, isExpanded, onToggleExpand, missingApi
             </div>
             {item.status === 'pending_approval' && onApprove && (
               <div className={styles.confirmActions}>
-                <button className={styles.allowBtn} onClick={(e) => { e.stopPropagation(); onApprove() }} disabled={confirmationDisabled}>Allow</button>
-                <button className={styles.denyBtn} onClick={(e) => { e.stopPropagation(); onReject?.() }} disabled={confirmationDisabled}>Deny</button>
+                <button className={styles.allowBtn} onClick={(e) => { e.stopPropagation(); onApprove() }}>Allow</button>
+                <button className={styles.denyBtn} onClick={(e) => { e.stopPropagation(); onReject?.() }}>Deny</button>
               </div>
             )}
             {item.status === 'running' && onStop && (

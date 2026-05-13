@@ -5,6 +5,7 @@ Functions for extracting and building target URLs from reconnaissance data.
 """
 
 from typing import Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 
 # =============================================================================
@@ -14,33 +15,40 @@ from typing import Dict, List, Optional, Set, Tuple
 def extract_targets_from_recon(recon_data: dict) -> Tuple[Set[str], Set[str], Dict[str, List[str]]]:
     """
     Extract all unique IPs, hostnames, and build IP-to-hostname mapping.
-    
-    Args:
-        recon_data: The domain reconnaissance JSON data
-        
+
+    Honors recon_data["metadata"]["include_root_domain"]: when explicitly
+    False, the apex/root domain is NOT added to the hostname set, even when
+    dns.domain is populated. The full pipeline sets this flag in main.py
+    (parse_target + GROUP-2/3 branches); partial-recon graph builders set
+    it from project settings. Default (flag missing) is True, preserving
+    legacy behavior where the apex is always included.
+
     Returns:
         Tuple of (unique_ips, unique_hostnames, ip_to_hostnames_mapping)
     """
     ips = set()
     hostnames = set()
     ip_to_hostnames = {}
-    
+
     dns_data = recon_data.get("dns", {})
     if not dns_data:
         return ips, hostnames, ip_to_hostnames
-    
+
+    metadata = recon_data.get("metadata") or {}
+    include_root_domain = metadata.get("include_root_domain", True)
+
     # Extract from root domain
-    domain = recon_data.get("domain", "") or recon_data.get("metadata", {}).get("target", "")
+    domain = recon_data.get("domain", "") or metadata.get("target", "")
     domain_dns = dns_data.get("domain", {})
     if domain_dns:
         domain_ips = domain_dns.get("ips", {})
         ipv4_list = domain_ips.get("ipv4", [])
         ipv6_list = domain_ips.get("ipv6", [])
-        
+
         ips.update(ipv4_list)
         ips.update(ipv6_list)
-        
-        if domain:
+
+        if domain and include_root_domain:
             hostnames.add(domain)
             for ip in ipv4_list + ipv6_list:
                 if ip:
@@ -160,56 +168,126 @@ def build_target_urls_from_resource_enum(resource_enum_data: Optional[dict]) -> 
 # Combined URL Building
 # =============================================================================
 
+def _hosts_in_urls(urls: Set[str]) -> Set[str]:
+    """Extract the set of lowercased hostnames present in a URL set."""
+    hosts: Set[str] = set()
+    for u in urls:
+        try:
+            host = urlparse(u).hostname
+        except (ValueError, TypeError):
+            continue
+        if host:
+            hosts.add(host.lower())
+    return hosts
+
+
 def build_target_urls(
-    hostnames: Set[str], 
-    ips: Set[str], 
+    hostnames: Set[str],
+    ips: Set[str],
     recon_data: Optional[dict] = None,
-    scan_all_ips: bool = False
+    scan_all_ips: bool = False,
 ) -> List[str]:
     """
-    Build list of target URLs for nuclei scanning.
-    Prefers resource_enum endpoints, then httpx data (live URLs), falls back to default URLs.
+    Build the list of target URLs for nuclei scanning as the UNION of every
+    available source, deduplicated.
+
+    Sources (all merged, none shadowed):
+      1. Endpoint URLs from resource_enum (parameterized URLs, e.g. /api?q=1).
+      2. BaseURL nodes from httpx (live URLs, e.g. https://A.com).
+      3. http(s)://{hostname} for every hostname/subdomain whose host is NOT
+         already represented by sources 1 or 2 (so newly-discovered subdomains
+         that haven't been probed yet still get scanned).
+      4. http(s)://{ip} for IPs not already covered, only if scan_all_ips=True.
+
+    A hostname is "already covered" iff some URL in sources 1+2 has that exact
+    hostname (httpx already picked the working scheme; re-scanning the other
+    scheme would just waste rate-limit budget).
 
     Args:
-        hostnames: Set of hostnames to scan
-        ips: Set of IPs to scan (if scan_all_ips is True)
-        recon_data: Full recon data containing httpx/resource_enum results
-        scan_all_ips: Whether to include IP addresses in URL list
+        hostnames: Set of hostnames/subdomains discovered via DNS.
+        ips: Set of IPs discovered via DNS.
+        recon_data: Full recon data dict with optional 'resource_enum' and
+                    'http_probe' keys.
+        scan_all_ips: Whether to include IP addresses (default False).
 
     Returns:
-        List of URLs to scan
+        Sorted, deduplicated list of URLs to scan.
     """
-    urls = []
+    url_set: Set[str] = set()
+    counts = {
+        "resource_enum_base": 0,
+        "resource_enum_endpoint": 0,
+        "httpx": 0,
+        "fallback_subdomain": 0,
+        "fallback_ip": 0,
+    }
 
-    # Priority 1: Use resource_enum endpoints if available (most comprehensive)
+    # Source 1: resource_enum (BaseURLs + parameterized endpoint URLs)
     resource_enum_data = recon_data.get("resource_enum") if recon_data else None
     if resource_enum_data:
         base_urls, endpoint_urls = build_target_urls_from_resource_enum(resource_enum_data)
-        if base_urls:
-            # Combine base URLs with endpoint URLs for comprehensive coverage
-            urls = list(set(base_urls + endpoint_urls))
-            print(f"[*][Targets] Using {len(base_urls)} base URLs + {len(endpoint_urls)} endpoint URLs from resource_enum")
-            return sorted(urls)
+        for u in base_urls:
+            if u not in url_set:
+                url_set.add(u)
+                counts["resource_enum_base"] += 1
+        for u in endpoint_urls:
+            if u not in url_set:
+                url_set.add(u)
+                counts["resource_enum_endpoint"] += 1
 
-    # Priority 2: Use live URLs from httpx (fallback if resource_enum not run)
+    # Source 2: httpx live URLs (BaseURLs verified by httpx)
     httpx_data = recon_data.get("http_probe") if recon_data else None
     if httpx_data:
-        urls = build_target_urls_from_httpx(httpx_data)
-        if urls:
-            print(f"[*][Targets] Using {len(urls)} live URLs from httpx probe")
-            return urls
+        for u in build_target_urls_from_httpx(httpx_data):
+            if u not in url_set:
+                url_set.add(u)
+                counts["httpx"] += 1
 
-    # Priority 3: Fallback to default ports for all hostnames
+    # Compute which hostnames sources 1+2 already cover (host-only match,
+    # ignoring scheme/port/path) so we don't re-add them as fallback URLs.
+    covered_hosts = _hosts_in_urls(url_set)
+
+    # Source 3: hostnames not covered by httpx/resource_enum → both schemes.
+    # This catches newly discovered subdomains that haven't been probed yet.
     for hostname in sorted(hostnames):
-        urls.append(f"http://{hostname}")
-        urls.append(f"https://{hostname}")
+        if not hostname or hostname.lower() in covered_hosts:
+            continue
+        before = len(url_set)
+        url_set.add(f"http://{hostname}")
+        url_set.add(f"https://{hostname}")
+        if len(url_set) > before:
+            counts["fallback_subdomain"] += 1
 
-    # Optionally add IPs
+    # Source 4: IPs not covered (opt-in)
     if scan_all_ips:
         for ip in sorted(ips):
-            urls.append(f"http://{ip}")
-            urls.append(f"https://{ip}")
+            if not ip or ip in covered_hosts:
+                continue
+            # IPv6 literals need brackets in URLs: http://[::1]/ not http://::1/.
+            # An IPv6 contains ':' (IPv4 does not).
+            ip_for_url = f"[{ip}]" if ":" in ip else ip
+            before = len(url_set)
+            url_set.add(f"http://{ip_for_url}")
+            url_set.add(f"https://{ip_for_url}")
+            if len(url_set) > before:
+                counts["fallback_ip"] += 1
 
-    print(f"[*][Targets] Using {len(urls)} default URLs (no httpx data)")
-    return sorted(list(set(urls)))
+    parts = []
+    if counts["resource_enum_base"]:
+        parts.append(f"{counts['resource_enum_base']} resource_enum base URLs")
+    if counts["resource_enum_endpoint"]:
+        parts.append(f"{counts['resource_enum_endpoint']} parameterized endpoints")
+    if counts["httpx"]:
+        parts.append(f"{counts['httpx']} additional httpx URLs")
+    if counts["fallback_subdomain"]:
+        parts.append(f"{counts['fallback_subdomain']} unprobed subdomains")
+    if counts["fallback_ip"]:
+        parts.append(f"{counts['fallback_ip']} unprobed IPs")
+
+    if parts:
+        print(f"[*][Targets] Merged {len(url_set)} URLs: " + " + ".join(parts))
+    else:
+        print(f"[*][Targets] No targets available")
+
+    return sorted(url_set)
 

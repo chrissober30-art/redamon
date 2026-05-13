@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Play, Loader2, ArrowRight, Upload, FileText, Trash2 } from 'lucide-react'
-import { Modal } from '@/components/ui'
+import { Play, Loader2, ArrowRight, Upload, FileText, Trash2, Info } from 'lucide-react'
+import { Modal, Tooltip, WikiInfoButton } from '@/components/ui'
 import type { GraphInputs, PartialReconParams, UserTargets } from '@/lib/recon-types'
 import { SECTION_INPUT_MAP, SECTION_NODE_MAP, SECTION_ENRICH_MAP } from '../nodeMapping'
 import { WORKFLOW_TOOLS } from './workflowDefinition'
+import { INPUT_LOGIC_TOOLTIPS } from './inputLogicTooltips'
 
 interface PartialReconModalProps {
   isOpen: boolean
@@ -137,7 +138,8 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
     'Secret, Endpoint, and JsReconFinding nodes are merged into the existing graph.',
   Nuclei:
     'Template-based vulnerability scanner detecting CVEs, misconfigurations, exposed panels, and web application vulnerabilities (SQLi, XSS, RCE). ' +
-    'Targets are loaded from the graph (BaseURLs + Endpoints from prior phases). ' +
+    'Targets are built as the UNION of every available source in the graph (deduplicated): Endpoints with parameters from resource_enum, BaseURLs verified by httpx, and http(s)://<sub> for any Subdomain whose host is not already covered by the first two sources — so newly discovered subdomains get scanned even before httpx has probed them. IPs are excluded by default (toggle "Scan All IPs" to include). ' +
+    'DAST mode is a filter, not an add-on: when enabled it loads ONLY templates with a fuzz: directive (~300 of ~8000) and SKIPS detection templates and custom detection templates. Use DAST-native tags (sqli, xss, ssrf) — detection-class tags (graphql, apollo, hasura, exposure) produce an empty set and the scan fatals. Most production scans should leave DAST off. ' +
     'You can also provide custom URLs below. ' +
     'Vulnerability, CVE, Endpoint, Parameter, MitreData, and Capec nodes are merged into the existing graph.',
   SubdomainTakeover:
@@ -146,6 +148,13 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
     'Findings are deduplicated across tools, scored (confirmed / likely / manual_review), and written as Vulnerability nodes ' +
     'with source="takeover_scan". Targets are loaded from the graph (Subdomains + alive URLs). ' +
     'You can also provide custom subdomains below.',
+  VhostSni:
+    'Discovers hidden virtual hosts on every target IP using two crafted curl probes per candidate hostname: ' +
+    'L7 (overrides the HTTP Host header) catches classic vhosts, L4 (uses --resolve to force the TLS SNI) catches ingress / k8s / Cloudflare routing. ' +
+    'Each response is compared to a baseline (raw IP request) and anomalies become Vulnerability nodes with source="vhost_sni_enum". ' +
+    'Candidate hostnames come from the graph (Subdomains, ExternalDomains, TLS SANs, CNAMEs, PTR records resolving to the target IP) ' +
+    'plus the bundled vhost-common.txt wordlist (~2,300 prefixes) and any custom wordlist set in the project. ' +
+    'You can also provide custom subdomains (added as candidate hostnames) and IPs (added as extra targets) below.',
   GraphqlScan:
     'Active GraphQL security scanner. Discovers GraphQL endpoints from crawled BaseURLs + Endpoints + JS findings, ' +
     'tests for exposed introspection, extracts schema, detects sensitive field exposure, and flags mutation / proxy ' +
@@ -404,9 +413,10 @@ export function PartialReconModal({
   const isShodan = toolId === 'Shodan'
   const isOsintEnrichment = toolId === 'OsintEnrichment'
   const isSubdomainTakeover = toolId === 'SubdomainTakeover'
-  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum || isArjun || isGau || isParamSpider || isSecurityChecks || isShodan || isOsintEnrichment || isGraphql || isSubdomainTakeover
-  const hasIpInput = isPortScanner || isNmap || isHttpx || isSecurityChecks || isShodan || isOsintEnrichment
-  const hasSubdomainInput = toolId === 'Naabu' || isHttpx || isGau || isParamSpider || isSecurityChecks || isSubdomainTakeover
+  const isVhostSni = toolId === 'VhostSni'
+  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum || isArjun || isGau || isParamSpider || isSecurityChecks || isShodan || isOsintEnrichment || isGraphql || isSubdomainTakeover || isVhostSni
+  const hasIpInput = isPortScanner || isNmap || isHttpx || isSecurityChecks || isShodan || isOsintEnrichment || isVhostSni
+  const hasSubdomainInput = toolId === 'Naabu' || isHttpx || isGau || isParamSpider || isSecurityChecks || isSubdomainTakeover || isVhostSni
   const hasPortInput = isNmap || isHttpx
   // GraphqlScan's SECTION_INPUT_MAP = [BaseURL, Endpoint]. Per PROMPT.ADD_PARTIAL_RECON.md,
   // BaseURL-accepting tools get a URL textarea; Endpoint is graph-only (never manually entered).
@@ -550,7 +560,7 @@ export function PartialReconModal({
     || (isNmap && !loadingInputs && (graphInputs?.existing_ports_count ?? 0) === 0)
     || (isHttpx && !loadingInputs && (graphInputs?.existing_ports_count ?? 0) === 0 && (graphInputs?.existing_subdomains_count ?? 0) === 0)
     || (toolId === 'JsRecon' && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0 && uploadedJsFiles.length === 0)
-    || (isNuclei && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
+    || (isNuclei && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0 && (graphInputs?.existing_subdomains_count ?? 0) === 0)
     || (isGraphql && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
     || (isResourceEnum && !isNuclei && toolId !== 'JsRecon' && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0)
     || (isArjun && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
@@ -576,6 +586,12 @@ export function PartialReconModal({
       size="default"
       closeOnOverlayClick={false}
       closeOnEscape={false}
+      headerActions={toolId ? (
+        <WikiInfoButton
+          target={toolId}
+          title={`Open ${WORKFLOW_TOOLS.find(t => t.id === toolId)?.label || toolId} wiki page`}
+        />
+      ) : null}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {/* Input / Output flow */}
@@ -586,8 +602,13 @@ export function PartialReconModal({
             backgroundColor: 'var(--bg-secondary, #1e293b)',
             border: '1px solid var(--border-color, #334155)',
           }}>
-            <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3b82f6', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#3b82f6', marginBottom: '8px' }}>
               Input
+              {INPUT_LOGIC_TOOLTIPS[toolId] && (
+                <Tooltip content={INPUT_LOGIC_TOOLTIPS[toolId]} position="bottom" delay={150} maxWidth={900}>
+                  <Info size={16} style={{ cursor: 'help', color: '#22c55e', transform: 'translateY(-1px)' }} />
+                </Tooltip>
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' }}>
               {inputNodeTypes.map(nt => (
@@ -602,7 +623,7 @@ export function PartialReconModal({
                 : toolId === 'JsRecon'
                 ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints${uploadedJsFiles.length ? `, ${uploadedJsFiles.length} uploaded` : ''})`
                 : isNuclei
-                ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints)`
+                ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints, ${graphInputs?.existing_subdomains_count ?? 0} Subdomains)`
                 : isGraphql
                 ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints${graphInputs?.existing_graphql_endpoints_count ? `, ${graphInputs.existing_graphql_endpoints_count} already-flagged GraphQL` : ''})`
                 : isResourceEnum
@@ -764,7 +785,7 @@ export function PartialReconModal({
               : toolId === 'JsRecon'
               ? 'JS Recon requires URLs to analyze for JavaScript files. Provide custom URLs below or enable graph targets (which include existing BaseURLs + Endpoints).'
               : isNuclei
-              ? 'Nuclei requires URLs to scan. Provide custom URLs below or enable graph targets (which include existing BaseURLs + Endpoints from prior phases).'
+              ? 'Nuclei works best with BaseURLs/Endpoints from prior phases. With only Subdomains it falls back to scanning http:// and https:// on default ports. Provide custom URLs below or enable graph targets.'
               : `${toolId} requires URLs to crawl. Provide custom URLs below or enable graph targets (which include existing BaseURLs from Httpx).`}
           </div>
         )}

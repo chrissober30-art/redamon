@@ -69,7 +69,7 @@ def _make_parent_state(n_members: int = 3, phase: str = "informational") -> dict
         "_current_fireteam_plan": {
             "plan_rationale": "test plan",
             "members": [
-                {"name": f"M{i}", "task": f"do task {i}", "skills": [], "max_iterations": 10}
+                {"name": f"M{i}", "task": f"do task {i}", "tools": [], "max_iterations": 10}
                 for i in range(n_members)
             ],
         },
@@ -230,8 +230,8 @@ class DeployNodeMutexRejectionTests(unittest.IsolatedAsyncioTestCase):
             state["_current_fireteam_plan"] = {
                 "plan_rationale": "test",
                 "members": [
-                    {"name": "M1", "task": "x", "skills": ["metasploit"], "max_iterations": 10},
-                    {"name": "M2", "task": "y", "skills": ["metasploit"], "max_iterations": 10},
+                    {"name": "M1", "task": "x", "tools": ["metasploit"], "max_iterations": 10},
+                    {"name": "M2", "task": "y", "tools": ["metasploit"], "max_iterations": 10},
                 ],
             }
             graph = MagicMock()

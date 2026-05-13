@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, Layers } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 
@@ -79,6 +79,7 @@ export function ScanModulesSection({ data, updateField }: ScanModulesSectionProp
         <h2 className={styles.sectionTitle}>
           <Layers size={16} />
           Scan Modules
+          <WikiInfoButton target="ScanModules" />
         </h2>
         <ChevronDown
           size={16}

@@ -19,6 +19,10 @@ from langchain_neo4j import Neo4jGraph
 
 from project_settings import get_setting, is_tool_allowed_in_phase
 from prompts import TEXT_TO_CYPHER_SYSTEM
+from graph_db.tenant_filter import (
+    find_disallowed_write_operation as _shared_find_disallowed_write_operation,
+    inject_tenant_filter as _shared_inject_tenant_filter,
+)
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -63,25 +67,101 @@ def get_phase_context() -> str:
 
 
 # =============================================================================
+# SYSTEM MCP SERVERS (baseline — shipped with the product, not user-managed)
+# =============================================================================
+
+# These five servers run inside kali-sandbox and provide the core pentest tools.
+# Their tool wrappers are registered in prompts/tool_registry.py as built-ins
+# (execute_nmap, execute_nuclei, kali_shell, etc.). The MCPServer entries below
+# carry only transport config; tools=[] because TOOL_REGISTRY already owns the
+# rendering metadata for them.
+def _build_system_mcp_servers():
+    """Lazy import — mcp_registry imports tool_registry which imports tools."""
+    from mcp_registry import MCPServer
+    return [
+        MCPServer(
+            id="network_recon",
+            name="Network Recon (kali-sandbox)",
+            description="curl, naabu, hydra, command exec",
+            transport="sse",
+            url=os.environ.get("MCP_NETWORK_RECON_URL", "http://host.docker.internal:8000/sse"),
+            connect_timeout=60,
+            read_timeout=1800,
+            tools=[],
+        ),
+        MCPServer(
+            id="nmap",
+            name="Nmap (kali-sandbox)",
+            description="Network mapper",
+            transport="sse",
+            url=os.environ.get("MCP_NMAP_URL", "http://host.docker.internal:8004/sse"),
+            connect_timeout=60,
+            read_timeout=600,
+            tools=[],
+        ),
+        MCPServer(
+            id="metasploit",
+            name="Metasploit (kali-sandbox)",
+            description="Exploitation framework",
+            transport="sse",
+            url=os.environ.get("MCP_METASPLOIT_URL", "http://host.docker.internal:8003/sse"),
+            connect_timeout=60,
+            read_timeout=1800,
+            tools=[],
+        ),
+        MCPServer(
+            id="nuclei",
+            name="Nuclei (kali-sandbox)",
+            description="Template-based vulnerability scanner",
+            transport="sse",
+            url=os.environ.get("MCP_NUCLEI_URL", "http://host.docker.internal:8002/sse"),
+            connect_timeout=60,
+            read_timeout=600,
+            tools=[],
+        ),
+        MCPServer(
+            id="playwright",
+            name="Playwright (kali-sandbox)",
+            description="Browser automation",
+            transport="sse",
+            url=os.environ.get("MCP_PLAYWRIGHT_URL", "http://host.docker.internal:8005/sse"),
+            connect_timeout=60,
+            read_timeout=120,
+            tools=[],
+        ),
+    ]
+
+
+# Tool names backed by the system MCP servers. These pass through any
+# declared-tool-name filter applied to register_mcp_tools(). Includes every
+# tool name the kali-sandbox MCP servers expose (whether or not it has a
+# TOOL_REGISTRY entry — phantom tools are simply unused by the LLM but
+# their registration shouldn't be filtered as if they were a stray user
+# manifest entry).
+SYSTEM_MCP_TOOL_NAMES = frozenset({
+    "execute_curl", "execute_naabu", "execute_httpx", "execute_subfinder",
+    "execute_amass", "execute_arjun", "execute_ffuf", "execute_gau",
+    "execute_jsluice", "execute_katana", "execute_wpscan",
+    "execute_nmap", "execute_nuclei", "kali_shell", "execute_playwright",
+    "execute_hydra", "metasploit_console", "msf_restart",
+    "execute_code", "cve_intel", "execute_masscan",
+})
+
+
+# =============================================================================
 # MCP TOOLS MANAGER
 # =============================================================================
 
 class MCPToolsManager:
-    """Manages MCP (Model Context Protocol) tool connections."""
+    """Manages MCP (Model Context Protocol) tool connections.
 
-    def __init__(
-        self,
-        network_recon_url: str = None,
-        nmap_url: str = None,
-        metasploit_url: str = None,
-        nuclei_url: str = None,
-        playwright_url: str = None,
-    ):
-        self.network_recon_url = network_recon_url or os.environ.get('MCP_NETWORK_RECON_URL', 'http://host.docker.internal:8000/sse')
-        self.nmap_url = nmap_url or os.environ.get('MCP_NMAP_URL', 'http://host.docker.internal:8004/sse')
-        self.metasploit_url = metasploit_url or os.environ.get('MCP_METASPLOIT_URL', 'http://host.docker.internal:8003/sse')
-        self.nuclei_url = nuclei_url or os.environ.get('MCP_NUCLEI_URL', 'http://host.docker.internal:8002/sse')
-        self.playwright_url = playwright_url or os.environ.get('MCP_PLAYWRIGHT_URL', 'http://host.docker.internal:8005/sse')
+    Constructor takes a pre-built ``server_configs`` dict in the shape consumed
+    by ``MultiServerMCPClient`` (one entry per server, keyed by id). Build it
+    via ``mcp_registry.to_mcp_servers_dict([*system, *user])``.
+    """
+
+    def __init__(self, server_configs: Optional[Dict[str, Dict[str, any]]] = None):
+        self._server_configs: Dict[str, Dict[str, any]] = dict(server_configs or {})
         self.client: Optional[MultiServerMCPClient] = None
         self._tools_cache: Dict[str, any] = {}
         # Monotonic counter of how many times the MCP client has been (re)built.
@@ -91,6 +171,11 @@ class MCPToolsManager:
         self._generation: int = 0
         # Serialises reconnects across concurrent fireteam tool calls.
         self._reconnect_lock: asyncio.Lock = asyncio.Lock()
+
+    def replace_server_configs(self, server_configs: Dict[str, Dict[str, any]]) -> None:
+        """Swap the server config dict. Caller is expected to call get_tools()
+        next to bind a fresh MultiServerMCPClient with the new configs."""
+        self._server_configs = dict(server_configs or {})
 
     async def get_tools(self, max_retries: int = 5, retry_delay: float = 10.0) -> List:
         """
@@ -104,35 +189,17 @@ class MCPToolsManager:
         """
         logger.info("Connecting to MCP servers...")
 
-        mcp_servers = {}
-
-        # Timeout settings (in seconds):
-        # - timeout: HTTP connection timeout (default 5s)
-        # - sse_read_timeout: How long to wait for SSE events (default 300s = 5 min)
-        # Metasploit needs longer timeouts for brute force attacks (30 min for large wordlists)
-        server_configs = [
-            ("network_recon", self.network_recon_url, 60, 1800),  # curl+naabu+hydra+command, 30 min read (hydra needs up to 30 min)
-            ("nmap", self.nmap_url, 60, 600),                     # 10 min read
-            ("metasploit", self.metasploit_url, 60, 1800),        # 30 min read
-            ("nuclei", self.nuclei_url, 60, 600),                 # 10 min read
-            ("playwright", self.playwright_url, 60, 120),            # 2 min read
-        ]
-
-        for server_name, url, timeout, sse_read_timeout in server_configs:
-            try:
-                logger.info(f"Connecting to MCP {server_name} server at {url}")
-                mcp_servers[server_name] = {
-                    "url": url,
-                    "transport": "sse",
-                    "timeout": timeout,
-                    "sse_read_timeout": sse_read_timeout,
-                }
-            except Exception as e:
-                logger.warning(f"Failed to configure MCP server {server_name}: {e}")
+        mcp_servers = dict(self._server_configs)
 
         if not mcp_servers:
             logger.warning("No MCP servers configured")
             return []
+
+        # Log per-server transport target for debug visibility
+        for sid, cfg in mcp_servers.items():
+            transport = cfg.get("transport", "?")
+            target = cfg.get("url") or cfg.get("command") or "?"
+            logger.info(f"Connecting to MCP {sid} ({transport}) -> {target}")
 
         # Retry connection with backoff — MCP servers may still be starting
         for attempt in range(1, max_retries + 1):
@@ -240,6 +307,13 @@ class MCPToolsManager:
 class Neo4jToolManager:
     """Manages Neo4j graph query tool with tenant filtering."""
 
+    _CYPHER_START_RE = re.compile(
+        r'\b(MATCH|OPTIONAL\s+MATCH|WITH|UNWIND|RETURN|CALL|SHOW)\b',
+        re.IGNORECASE,
+    )
+    # Write-clause and write-procedure regexes live in graph_db.tenant_filter so
+    # the kali-sandbox CLI (redagraph) can share the same enforcement.
+
     def __init__(self, uri: str, user: str, password: str, llm: "BaseChatModel"):
         self.uri = uri
         self.user = user
@@ -247,59 +321,48 @@ class Neo4jToolManager:
         self.llm = llm
         self.graph: Optional[Neo4jGraph] = None
 
+    @classmethod
+    def _extract_cypher_from_response(cls, content: str) -> str:
+        """Extract the executable Cypher query from model output."""
+        cypher = (content or "").strip()
+
+        fence_match = re.search(
+            r'```(?:cypher|cql)?\s*\n(.*?)```',
+            cypher,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if fence_match:
+            cypher = fence_match.group(1).strip()
+
+        cypher = re.sub(r'<think>.*?</think>', '', cypher, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        start_match = cls._CYPHER_START_RE.search(cypher)
+        if start_match:
+            cypher = cypher[start_match.start():].strip()
+
+        cypher = re.sub(r'^(?:Cypher\s+Query|Query)\s*:\s*', '', cypher, flags=re.IGNORECASE).strip()
+
+        if cypher.startswith("```"):
+            lines = cypher.split("\n")
+            cypher = "\n".join(lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:])
+
+        return cls._truncate_at_first_return(cypher.strip().rstrip(";").strip())
+
+    @classmethod
+    def _truncate_at_first_return(cls, cypher: str) -> str:
+        """If the model emitted multiple top-level RETURN clauses, keep only the first."""
+        return_positions = [m.start() for m in re.finditer(r'\bRETURN\b', cypher, re.IGNORECASE)]
+        if len(return_positions) < 2:
+            return cypher
+        # Cut at the start of the second RETURN, then trim trailing whitespace/newlines.
+        return cypher[:return_positions[1]].rstrip().rstrip(";").rstrip()
+
+    @classmethod
+    def _find_disallowed_write_operation(cls, cypher: str) -> Optional[str]:
+        return _shared_find_disallowed_write_operation(cypher)
+
     def _inject_tenant_filter(self, cypher: str, user_id: str, project_id: str) -> str:
-        """
-        Inject mandatory user_id and project_id filters into a Cypher query.
-
-        This ensures all queries are scoped to the current user's project,
-        preventing cross-tenant data access.
-
-        Strategy: Add tenant properties directly into each node pattern as inline
-        property filters. This ensures filters are always in scope regardless of
-        WITH clauses or query structure.
-
-        Example:
-            MATCH (d:Domain {name: "example.com"})
-        becomes:
-            MATCH (d:Domain {name: "example.com", user_id: $tenant_user_id, project_id: $tenant_project_id})
-
-        Args:
-            cypher: The AI-generated Cypher query
-            user_id: Current user's ID
-            project_id: Current project's ID
-
-        Returns:
-            Modified Cypher query with tenant filters applied
-        """
-        tenant_props = "user_id: $tenant_user_id, project_id: $tenant_project_id"
-
-        def add_tenant_to_node(match: re.Match) -> str:
-            """Add tenant properties to a node pattern."""
-            var_name = match.group(1)
-            label = match.group(2)
-            existing_props_content = match.group(3)  # Content INSIDE braces (without braces), or None
-
-            if existing_props_content is not None:
-                # Has existing properties - merge with tenant props
-                existing_props_content = existing_props_content.strip()
-                if existing_props_content:
-                    # Append tenant props after existing ones
-                    new_props = f"{{{existing_props_content}, {tenant_props}}}"
-                else:
-                    new_props = f"{{{tenant_props}}}"
-                return f"({var_name}:{label} {new_props})"
-            else:
-                # No existing properties, add them
-                return f"({var_name}:{label} {{{tenant_props}}})"
-
-        # Pattern matches: (variable:Label) or (variable:Label {props})
-        # Captures: 1=variable, 2=label, 3=optional content INSIDE braces (without braces)
-        # Uses a non-greedy match for the props content
-        node_pattern = r'\((\w+):(\w+)(?:\s*\{([^}]*)\})?\)'
-
-        result = re.sub(node_pattern, add_tenant_to_node, cypher)
-
-        return result
+        return _shared_inject_tenant_filter(cypher, user_id, project_id)
 
     async def _generate_cypher(
         self,
@@ -380,7 +443,16 @@ Incorporate the filter pattern into your MATCH clauses so results are scoped app
 - Do NOT include user_id or project_id filters - they will be added automatically
 - Do NOT use any parameters (like $target, $domain, etc.) - use literal values or no filters
 - If the question doesn't specify a target, query ALL matching data
-- Always use LIMIT to restrict results{graph_view_rules}
+- Always use LIMIT to restrict results
+- CRITICAL: Generate a SINGLE Cypher query with ONE RETURN statement at the end
+- For comprehensive requests, use multiple MATCH clauses or OPTIONAL MATCH, then return all data in ONE RETURN
+- NEVER create multiple queries or multiple RETURN statements
+- Example structure for comprehensive queries:
+  MATCH (d:Domain {{name: 'example.com'}})
+  OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)
+  OPTIONAL MATCH (s)-[:RESOLVES_TO]->(i:IP)
+  OPTIONAL MATCH (i)-[:HAS_PORT]->(p:Port)
+  RETURN d, s, i, p LIMIT 100{graph_view_rules}
 
 User Question: {question}
 
@@ -388,14 +460,7 @@ Cypher Query:"""
 
         response = await self.llm.ainvoke(prompt)
         from orchestrator_helpers.json_utils import normalize_content
-        cypher = normalize_content(response.content).strip()
-
-        # Clean up the response - remove markdown code blocks if present
-        if cypher.startswith("```"):
-            lines = cypher.split("\n")
-            cypher = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-
-        return cypher.strip()
+        return self._extract_cypher_from_response(normalize_content(response.content))
 
     def get_tool(self) -> Optional[callable]:
         """
@@ -471,9 +536,7 @@ Cypher Query:"""
                         logger.info(f"[{user_id}/{project_id}] Generated Cypher (attempt {attempt + 1}): {cypher}")
 
                         # Reject write operations -- query_graph is read-only
-                        _upper = cypher.upper()
-                        _WRITE_KW = ['CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET ', 'REMOVE', 'DROP', 'CALL']
-                        _found = next((kw for kw in _WRITE_KW if kw in _upper), None)
+                        _found = manager._find_disallowed_write_operation(cypher)
                         if _found:
                             return f"Error: Write operations are not allowed in graph queries (found: {_found.strip()})"
 
@@ -1515,15 +1578,16 @@ class PhaseAwareToolExecutor:
         web_search_tool: Optional[callable] = None,
         shodan_tool: Optional[callable] = None,
         google_dork_tool: Optional[callable] = None,
+        tradecraft_tool: Optional[callable] = None,
     ):
         self.mcp_manager = mcp_manager
         self.graph_tool = graph_tool
         self.web_search_tool = web_search_tool
         self._all_tools: Dict[str, callable] = {}
         # Names of tools backed by MCP servers; only these trigger a reconnect
-        # on transport errors. Graph / web_search / shodan / google_dork run
-        # in-process and must not trigger MCP rebuilds if they happen to raise
-        # a look-alike error.
+        # on transport errors. Graph / web_search / shodan / google_dork /
+        # tradecraft_lookup run in-process and must not trigger MCP rebuilds
+        # if they happen to raise a look-alike error.
         self._mcp_tool_names: set = set()
 
         # Register graph tool
@@ -1542,22 +1606,62 @@ class PhaseAwareToolExecutor:
         if google_dork_tool:
             self._all_tools["google_dork"] = google_dork_tool
 
-    def register_mcp_tools(self, tools: List) -> None:
+        # Register Tradecraft Lookup tool (conditional on enabled resources)
+        if tradecraft_tool:
+            self._all_tools["tradecraft_lookup"] = tradecraft_tool
+
+    def register_mcp_tools(
+        self,
+        tools: List,
+        declared_tool_names: Optional[set] = None,
+    ) -> None:
         """
         Register MCP tools after they're (re)loaded.
 
         Called once at startup and again after every successful mcp_manager
         reconnect. Drops previously-registered MCP tool references first so
         stale objects bound to a dead client don't linger in _all_tools.
+
+        Args:
+            tools: list of MCP tool objects from MultiServerMCPClient.get_tools().
+            declared_tool_names: when provided, only tools whose name is in this
+                set are registered. Used to hide undeclared user-MCP-server tools
+                from the agent. System MCP tools (SYSTEM_MCP_TOOL_NAMES) always
+                pass through regardless of this set. When ``None``, no filter is
+                applied (legacy behavior — used by reconnect path which already
+                trusts the manager's tool set).
         """
         for name in self._mcp_tool_names:
             self._all_tools.pop(name, None)
         self._mcp_tool_names.clear()
+
+        skipped: List[str] = []
         for tool in tools:
             tool_name = getattr(tool, 'name', None)
-            if tool_name:
-                self._all_tools[tool_name] = tool
-                self._mcp_tool_names.add(tool_name)
+            if not tool_name:
+                continue
+            if declared_tool_names is not None:
+                if tool_name not in declared_tool_names and tool_name not in SYSTEM_MCP_TOOL_NAMES:
+                    skipped.append(tool_name)
+                    continue
+            self._all_tools[tool_name] = tool
+            self._mcp_tool_names.add(tool_name)
+
+        if skipped:
+            logger.warning(
+                f"Skipped registering {len(skipped)} MCP tool(s) not declared in any "
+                f"manifest: {sorted(skipped)}"
+            )
+
+        if declared_tool_names is not None:
+            missing = sorted(
+                n for n in declared_tool_names
+                if n not in self._mcp_tool_names and n not in SYSTEM_MCP_TOOL_NAMES
+            )
+            if missing:
+                logger.warning(
+                    f"Manifest declared tools that the live MCP servers did not expose: {missing}"
+                )
 
     def update_web_search_tool(self, tool: callable) -> None:
         """Replace the web search tool (e.g. when Tavily key changes)."""
@@ -1578,6 +1682,18 @@ class PhaseAwareToolExecutor:
         else:
             self._all_tools.pop("google_dork", None)
 
+    def update_tradecraft_tool(self, tool: Optional[callable]) -> None:
+        """Replace or remove the Tradecraft Lookup tool.
+
+        Called from `_apply_project_settings()` whenever the user's
+        tradecraft resource catalog changes. None -> tool unregistered
+        (zero enabled resources).
+        """
+        if tool:
+            self._all_tools["tradecraft_lookup"] = tool
+        else:
+            self._all_tools.pop("tradecraft_lookup", None)
+
     def set_wpscan_api_token(self, token: str) -> None:
         """Store WPScan API token for auto-injection into execute_wpscan args."""
         self._wpscan_api_token = token
@@ -1585,6 +1701,15 @@ class PhaseAwareToolExecutor:
     def set_gau_urlscan_api_key(self, key: str) -> None:
         """Store URLScan API key for auto-injection into execute_gau config."""
         self._gau_urlscan_api_key = key
+
+    def set_cve_intel_api_key(self, key: str) -> None:
+        """Store PDCP API key for auto-injection into cve_intel (vulnx) calls.
+
+        The key is forwarded to the MCP tool as the `api_key` parameter and
+        translated into a per-call PDCP_API_KEY env var inside the kali-sandbox.
+        Never written to disk or to a global env var; never visible to the LLM.
+        """
+        self._cve_intel_api_key = key
 
     def _extract_text_from_output(self, output) -> str:
         """
@@ -1679,6 +1804,10 @@ class PhaseAwareToolExecutor:
                 output = await active_tool.ainvoke(tool_args)
             elif tool_name == "google_dork":
                 output = await active_tool.ainvoke(tool_args.get("query", ""))
+            elif tool_name == "tradecraft_lookup":
+                # Pass the structured args through. The tool function picks them up
+                # by name (resource_id, query, cve_id, section_path, force_refresh).
+                output = await active_tool.ainvoke(tool_args)
             elif tool_name == "execute_wpscan":
                 # Inject WPScan API token if configured and not already in args
                 args = tool_args.get("args", "")
@@ -1691,6 +1820,14 @@ class PhaseAwareToolExecutor:
                 # Inject URLScan API key if configured (written to ~/.gau.toml by MCP server)
                 if getattr(self, '_gau_urlscan_api_key', ''):
                     adjusted = {**tool_args, "urlscan_api_key": self._gau_urlscan_api_key}
+                else:
+                    adjusted = tool_args
+                output = await active_tool.ainvoke(adjusted)
+            elif tool_name == "cve_intel":
+                # Inject PDCP API key if configured. The MCP wrapper translates
+                # this into a per-call PDCP_API_KEY env var; LLM never sees it.
+                if getattr(self, '_cve_intel_api_key', ''):
+                    adjusted = {**tool_args, "api_key": self._cve_intel_api_key}
                 else:
                     adjusted = tool_args
                 output = await active_tool.ainvoke(adjusted)

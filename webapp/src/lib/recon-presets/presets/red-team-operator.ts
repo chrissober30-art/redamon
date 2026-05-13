@@ -176,6 +176,15 @@ Red team operators running authorized engagements where some active probing is a
     arjunEnabled: true,
     arjunPassive: true,
 
+    // --- VHost & SNI: throttled hidden vhost discovery (no L4, fewer probes) ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: false,                   // SNI brute is louder; skip on red-team OPSEC
+    vhostSniUseDefaultWordlist: false,       // Default 2300 entries is too noisy
+    vhostSniUseGraphCandidates: true,        // Only test what's already in the graph
+    vhostSniConcurrency: 5,                  // Slow + quiet
+    vhostSniInjectDiscovered: true,
+
     // --- Nuclei: critical only, throttled, no intrusive ---
     nucleiEnabled: true,
     nucleiSeverity: ['critical'],

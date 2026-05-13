@@ -20,6 +20,7 @@ These tools are either installed in Docker images or pulled as Docker containers
 | **Subfinder** | Subdomain enumeration via passive sources | AGPL-3.0 | https://github.com/projectdiscovery/subfinder | Pulled as Docker image `projectdiscovery/subfinder:latest` at runtime |
 | **DNSx** | Fast DNS toolkit (resolution, bruteforce, wildcard filtering) | AGPL-3.0 | https://github.com/projectdiscovery/dnsx | Pulled as Docker image `projectdiscovery/dnsx:latest` at runtime |
 | **Interactsh** | OOB (Out-of-Band) interaction gathering | MIT | https://github.com/projectdiscovery/interactsh | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
+| **vulnx** | CVE intelligence (NVD + CISA KEV + EPSS + HackerOne + GitHub PoCs + Nuclei template availability). Successor to cvemap. | MIT | https://github.com/projectdiscovery/vulnx | Installed via `go install` in `mcp/kali-sandbox/Dockerfile`. Invoked as a subprocess by the `cve_intel` agent tool ([mcp/servers/network_recon_server.py](mcp/servers/network_recon_server.py)). Optional PDCP API key (configured per-user in Global Settings) is injected at call time as `PDCP_API_KEY` env var; never logged or committed. |
 
 ---
 
@@ -35,6 +36,49 @@ These tools are either installed in Docker images or pulled as Docker containers
 | **Impacket** | Python classes for working with network protocols | Apache-1.1 (modified) | https://github.com/fortra/impacket | Installed via `pip` in `mcp/requirements.txt` |
 | **Pwntools** | CTF framework and exploit development library | MIT | https://github.com/Gallopsled/pwntools | Installed via `pip` in `mcp/requirements.txt` |
 | **Dalfox** | XSS vulnerability scanner and parameter analysis | MIT | https://github.com/hahwul/dalfox | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
+| **kxss** | Per-character XSS reflection probe | Apache-2.0 | https://github.com/Emoe/kxss | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
+| **commix** | Automated command injection detection and exploitation | GPL-3.0 | https://github.com/commixproject/commix | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **ysoserial** | Java deserialization gadget chain generator | MIT | https://github.com/frohoff/ysoserial | JAR downloaded from upstream releases in `mcp/kali-sandbox/Dockerfile` |
+| **phpggc** | PHP gadget chain generator (unserialize / PHAR exploitation) | Apache-2.0 | https://github.com/ambionics/phpggc | Cloned from upstream in `mcp/kali-sandbox/Dockerfile` |
+| **netexec** | Multi-protocol network exploitation (CrackMapExec successor) | BSD-2-Clause | https://github.com/Pennyw0rth/NetExec | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **hashcat** | GPU-accelerated password cracking | MIT | https://github.com/hashcat/hashcat | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **sshpass** | Non-interactive SSH password authentication | GPL-2.0 | https://sourceforge.net/projects/sshpass/ | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **hashID** | Hash type identification (MD5, NTLM, bcrypt, etc.) | GPL-3.0 | https://github.com/psypanda/hashID | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **WPScan** | WordPress vulnerability scanner | WPScan Public Source License | https://github.com/wpscanteam/wpscan | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile`. **Free for pentesting assessments and personal use; commercial use may require a separate license from https://wpscan.com.** |
+
+---
+
+## Active Directory & Post-Exploitation (Python)
+
+These are AD reconnaissance and abuse primitives installed in the Kali sandbox container, used by the AD kill-chain and Windows-priv-esc Chat Skills.
+
+| Tool | Purpose | License | Source Repository | How Used |
+|------|---------|---------|-------------------|----------|
+| **BloodHound (Python collector)** | Active Directory relationship collector | MIT | https://github.com/dirkjanm/BloodHound.py | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` (CLI use only; no Python imports in RedAmon source) |
+| **certipy-ad** | AD Certificate Services exploitation (ESC1-ESC13) | MIT | https://github.com/ly4k/Certipy | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **ldapdomaindump** | LDAP enumeration (users, groups, password policies) | MIT | https://github.com/dirkjanm/ldapdomaindump | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **bloodyAD** | Live AD abuse primitives (password reset, group add, SPN set) | MIT | https://github.com/CravateRouge/bloodyAD | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **gMSADumper** | Read gMSA passwords (BloodHound ReadGMSAPassword edge) | GPL-3.0 | https://github.com/micahvandeusen/gMSADumper | Cloned from upstream in `mcp/kali-sandbox/Dockerfile` (separate-process invocation, mere aggregation) |
+| **kerbrute** | Kerberos pre-auth user enumeration + password spraying | Apache-2.0 | https://github.com/ropnop/kerbrute | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
+| **enum4linux-ng** | SMB / Windows / AD enumeration | GPL-3.0 | https://github.com/cddmp/enum4linux-ng | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **dnsrecon** | DNS enumeration (zone transfers, SRV, DNSSEC walk) | GPL-2.0 | https://github.com/darkoperator/dnsrecon | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **smbclient (Samba)** | SMB client for share enumeration and access | GPL-3.0 | https://gitlab.com/samba-team/samba | Installed via `apt-get` (`samba-common-bin`) in `mcp/kali-sandbox/Dockerfile` |
+| **ldap3** | Pure-Python LDAP client library | LGPL-3.0 | https://github.com/cannatag/ldap3 | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+
+---
+
+## Privilege Escalation Helpers (Staged Binaries)
+
+These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and served by the agent to a foothold host (HTTP, SMB, or upload primitive). They are **not** linked against RedAmon code; they are unmodified upstream artifacts staged for delivery.
+
+| Tool | Purpose | License | Source Repository | How Used |
+|------|---------|---------|-------------------|----------|
+| **PEASS-ng (linpeas / winPEAS)** | Linux + Windows privesc auditors | GPL-2.0 | https://github.com/peass-ng/PEASS-ng | Binaries downloaded in `mcp/kali-sandbox/Dockerfile`, staged in `/opt/tools/{linux,windows}/` (unmodified upstream artifact, served to foothold hosts; not linked against RedAmon) |
+| **LinEnum** | Linux enumeration helper script | MIT | https://github.com/rebootuser/LinEnum | Script downloaded in `mcp/kali-sandbox/Dockerfile`, staged in `/opt/tools/linux/` |
+| **pspy** | Real-time process snooper (no root needed) | GPL-3.0 | https://github.com/DominicBreuker/pspy | Binary downloaded in `mcp/kali-sandbox/Dockerfile`, staged in `/opt/tools/linux/` (unmodified upstream artifact, served to foothold hosts; not linked against RedAmon) |
+| **deepce** | Docker container escape primitive scanner | Apache-2.0 | https://github.com/stealthcopter/deepce | Script downloaded in `mcp/kali-sandbox/Dockerfile`, staged in `/opt/tools/linux/` |
+| **PowerUp.ps1 (PowerSploit)** | Windows local privilege escalation toolkit | BSD-3-Clause | https://github.com/PowerShellMafia/PowerSploit | Script downloaded in `mcp/kali-sandbox/Dockerfile`, staged in `/opt/tools/windows/` |
+| **PrivescCheck.ps1** | Windows privilege escalation audit script | BSD-3-Clause | https://github.com/itm4n/PrivescCheck | Script downloaded in `mcp/kali-sandbox/Dockerfile`, staged in `/opt/tools/windows/` |
 
 ---
 
@@ -55,6 +99,12 @@ These tools are either installed in Docker images or pulled as Docker containers
 | **Arjun** | HTTP hidden parameter discovery | AGPL-3.0 | https://github.com/s0md3v/Arjun | Installed via `pip` in `recon/requirements.txt` |
 | **ParamSpider** | URL parameter mining from web archives | MIT | https://github.com/devanshbatham/ParamSpider | Installed via `pip` (git) in `recon/requirements.txt` |
 | **TruffleHog** | Credential and secret scanning | AGPL-3.0 | https://github.com/trufflesecurity/trufflehog | Pulled as Docker image `trufflesecurity/trufflehog:latest` at runtime; also installed as binary in `trufflehog_scan/Dockerfile` |
+| **gitleaks** | Git repository secret scanner (API keys, passwords, tokens) | MIT | https://github.com/gitleaks/gitleaks | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
+| **subzy** | Subdomain takeover fingerprint scanner (90+ providers) | GPL-2.0 | https://github.com/PentestPad/subzy | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` (separate-process invocation, mere aggregation) |
+| **Nikto** | Web server vulnerability scanner | GPL-3.0 (database files non-GPL, distributable only with Nikto) | https://github.com/sullo/nikto | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **WhatWeb** | Web technology fingerprinting | GPL-2.0 | https://github.com/urbanadventurer/WhatWeb | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **testssl.sh** | SSL/TLS configuration auditing | GPL-2.0 | https://github.com/drwetter/testssl.sh | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
+| **CeWL** | Custom wordlist generator from target websites | CC-BY-SA-2.0 UK (with GPL-3.0+ alternative offered by upstream) | https://github.com/digininja/CeWL | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
 | **Subjack** | Subdomain takeover detection (CNAME/NS/MX/SPF + stale A records) | Apache-2.0 | https://github.com/haccer/subjack | Built from source via `go install` in `recon/Dockerfile` (multi-stage); invoked as native binary inside the recon container |
 | **BadDNS** | Deep DNS takeover detection (CNAME/NS/MX/TXT/SPF/DMARC/MTA-STS/wildcard/NSEC/references/zonetransfer modules) | **AGPL-3.0** | https://github.com/blacklanternsecurity/baddns | **Isolated in its own Docker image `redamon-baddns:latest`** (built from `baddns_scan/Dockerfile` via `pip install baddns`). RedAmon never imports from this package. The recon container spawns the sidecar via `docker run --rm` and receives results as NDJSON on stdout. The process + filesystem boundary preserves the AGPL-3.0 license scope. Upstream source code is available at the linked repository. |
 
@@ -67,6 +117,10 @@ These tools are either installed in Docker images or pulled as Docker containers
 | **jwt_tool** | JWT token testing and exploitation | GPL-3.0 | https://github.com/ticarpi/jwt_tool | Installed via `pip` (git) in `mcp/kali-sandbox/Dockerfile` |
 | **graphql-cop** | GraphQL security auditing | BSD-3-Clause | https://github.com/dolevf/graphql-cop | Installed via `pip` (git) in `mcp/kali-sandbox/Dockerfile` |
 | **GraphQLmap** | GraphQL endpoint exploitation | MIT | https://github.com/swisskyrepo/GraphQLmap | Installed via `pip` (git) in `mcp/kali-sandbox/Dockerfile` |
+| **SSTImap** | Server-Side Template Injection detection & exploitation | GPL-3.0 | https://github.com/vladko312/SSTImap | Cloned from upstream in `mcp/kali-sandbox/Dockerfile` (separate-process invocation, mere aggregation) |
+| **tplmap** | SSTI scanner (Smarty / Velocity coverage) | GPL-3.0 | https://github.com/epinna/tplmap | Cloned from upstream in `mcp/kali-sandbox/Dockerfile` (isolated venv) |
+| **semgrep** | Source-aware static analysis (SAST) | LGPL-2.1 | https://github.com/semgrep/semgrep | Installed via `pip` in `mcp/kali-sandbox/Dockerfile`. Used by the source-aware-sast Chat Skill on operator-provided repos. |
+| **Playwright** | Browser automation (Chromium) for web recon | Apache-2.0 | https://github.com/microsoft/playwright-python | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
 
 ---
 
@@ -284,4 +338,4 @@ AGPL-3.0 extends the GPL-3.0 copyleft to users who interact with the software **
 
 ---
 
-*Last updated: March 2026*
+*Last updated: April 2026*

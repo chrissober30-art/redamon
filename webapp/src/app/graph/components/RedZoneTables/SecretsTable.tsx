@@ -1,14 +1,15 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
 import {
   SeverityBadge,
   Mono,
   Truncated,
   UrlCell,
+  HostCell,
   filterRowsByText,
 } from './formatters'
 import { normalizeSeverity } from './types'
@@ -63,30 +64,33 @@ export const SecretsTable = memo(function SecretsTable({ projectId }: Props) {
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
-    exportRedZoneXlsx(
-      filtered.map(r => ({ ...r, valueSample: redactSecret(r.valueSample), matchedText: redactSecret(r.matchedText) })),
-      'Secrets',
-      [
-        { key: 'origin', header: 'Origin' },
-        { key: 'secretType', header: 'Type' },
-        { key: 'keyType', header: 'Category' },
-        { key: 'valueSample', header: 'Redacted Sample' },
-        { key: 'matchedText', header: 'Redacted Match' },
-        { key: 'entropy', header: 'Entropy' },
-        { key: 'confidence', header: 'Confidence' },
-        { key: 'severity', header: 'Severity' },
-        { key: 'validationStatus', header: 'Validation' },
-        { key: 'detectionMethod', header: 'Detection' },
-        { key: 'sourceModule', header: 'Source Module' },
-        { key: 'sourceUrl', header: 'Source URL' },
-        { key: 'jsFileUrl', header: 'Parent JS File' },
-        { key: 'baseUrl', header: 'BaseURL' },
-        { key: 'subdomain', header: 'Subdomain' },
-      ],
-      'redzone-secrets',
-    )
-  }, [filtered])
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() =>
+    rows.length > 0
+      ? {
+          rows: filtered.map(r => ({ ...r, valueSample: redactSecret(r.valueSample), matchedText: redactSecret(r.matchedText) })),
+          sheetName: 'Secrets',
+          fileSlug: 'redzone-secrets',
+          columns: [
+            { key: 'origin', header: 'Origin' },
+            { key: 'secretType', header: 'Type' },
+            { key: 'keyType', header: 'Category' },
+            { key: 'valueSample', header: 'Redacted Sample' },
+            { key: 'matchedText', header: 'Redacted Match' },
+            { key: 'entropy', header: 'Entropy' },
+            { key: 'confidence', header: 'Confidence' },
+            { key: 'severity', header: 'Severity' },
+            { key: 'validationStatus', header: 'Validation' },
+            { key: 'detectionMethod', header: 'Detection' },
+            { key: 'sourceModule', header: 'Source Module' },
+            { key: 'sourceUrl', header: 'Source URL' },
+            { key: 'jsFileUrl', header: 'Parent JS File' },
+            { key: 'baseUrl', header: 'BaseURL' },
+            { key: 'subdomain', header: 'Subdomain' },
+          ],
+        }
+      : undefined,
+    [filtered, rows.length],
+  )
 
   return (
     <RedZoneTableShell
@@ -95,7 +99,7 @@ export const SecretsTable = memo(function SecretsTable({ projectId }: Props) {
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search secret type, category, URL, subdomain..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}
@@ -130,7 +134,7 @@ export const SecretsTable = memo(function SecretsTable({ projectId }: Props) {
               <td><ValidationChip status={r.validationStatus} /></td>
               <td><span className={rowStyles.listChip}>{r.origin}</span></td>
               <td><UrlCell url={r.sourceUrl} max={260} /></td>
-              <td><Truncated text={r.subdomain} max={180} /></td>
+              <td>{r.subdomain ? <HostCell host={r.subdomain} /> : <Truncated text={r.subdomain} max={180} />}</td>
             </tr>
           ))}
         </tbody>

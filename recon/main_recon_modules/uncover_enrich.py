@@ -373,6 +373,32 @@ def run_uncover_expansion(
     print("\n[*][Uncover] Starting multi-engine target expansion")
     print("-" * 40)
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Uncover",
+        settings,
+        keys=[
+            ("UNCOVER_ENABLED", "Toggle"),
+            ("UNCOVER_DOCKER_IMAGE", "Image"),
+            ("UNCOVER_MAX_RESULTS", "Limits"),
+            ("SHODAN_API_KEY", "Engine credentials"),
+            ("CENSYS_API_TOKEN", "Engine credentials"),
+            ("CENSYS_ORG_ID", "Engine credentials"),
+            ("FOFA_API_KEY", "Engine credentials"),
+            ("ZOOMEYE_API_KEY", "Engine credentials"),
+            ("NETLAS_API_KEY", "Engine credentials"),
+            ("CRIMINALIP_API_KEY", "Engine credentials"),
+            ("UNCOVER_QUAKE_API_KEY", "Engine credentials"),
+            ("UNCOVER_HUNTER_API_KEY", "Engine credentials"),
+            ("UNCOVER_PUBLICWWW_API_KEY", "Engine credentials"),
+            ("UNCOVER_HUNTERHOW_API_KEY", "Engine credentials"),
+            ("UNCOVER_GOOGLE_API_KEY", "Engine credentials"),
+            ("UNCOVER_GOOGLE_API_CX", "Engine credentials"),
+            ("UNCOVER_ONYPHE_API_KEY", "Engine credentials"),
+            ("UNCOVER_DRIFTNET_API_KEY", "Engine credentials"),
+        ],
+    )
+
     config, engines = _build_provider_config(settings)
     if not engines or (len(engines) == 1 and engines[0] == 'shodan-idb'):
         print("[!][Uncover] No API keys configured for any search engine — skipping")

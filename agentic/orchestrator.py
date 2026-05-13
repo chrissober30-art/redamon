@@ -21,7 +21,7 @@ from state import (
     summarize_trace_for_response,
 )
 from project_settings import get_setting
-from key_rotation import KeyRotator
+from orchestrator_helpers.key_rotation import KeyRotator
 from tools import (
     MCPToolsManager,
     Neo4jToolManager,
@@ -355,6 +355,12 @@ class AgentOrchestrator:
             self.tool_executor.set_gau_urlscan_api_key(urlscan_key)
             logger.info("URLScan API key configured for GAU enrichment")
 
+        # PDCP API key (injected silently as PDCP_API_KEY env var into cve_intel calls)
+        pdcp_key = user_settings.get('pdcpApiKey', '')
+        if pdcp_key and self.tool_executor:
+            self.tool_executor.set_cve_intel_api_key(pdcp_key)
+            logger.info("PDCP API key configured for cve_intel rate-limit upgrade")
+
         # Google dork (SerpAPI)
         serp_api_key = user_settings.get('serpApiKey', '')
         if self._google_dork_manager and self.tool_executor:
@@ -365,6 +371,104 @@ class AgentOrchestrator:
                 logger.info("Updated Google dork tool with SerpAPI key")
         if serp_api_key and self._google_dork_manager:
             self._google_dork_manager.key_rotator = _build_rotator(serp_api_key, 'serp')
+
+        # Tradecraft Lookup
+        if self._tradecraft_manager and self.tool_executor:
+            tc_enabled = get_setting('TRADECRAFT_TOOL_ENABLED', True)
+            tc_resources = get_setting('TRADECRAFT_RESOURCES', []) or []
+            github_token = user_settings.get('githubAccessToken', '')
+            if tc_enabled:
+                self._tradecraft_manager.set_resources(tc_resources)
+                self._tradecraft_manager.set_github_token(github_token)
+                # Refresh tunable knobs from settings each load
+                self._tradecraft_manager.llm = self.llm
+                self._tradecraft_manager.section_picker_llm = self._build_section_picker_llm() or self.llm
+                self._tradecraft_manager.tier2_threshold_bytes = get_setting(
+                    'TRADECRAFT_TIER2_THRESHOLD_BYTES', 800
+                )
+                self._tradecraft_manager.fetch_timeout = get_setting(
+                    'TRADECRAFT_FETCH_TIMEOUT', 30
+                )
+                self._tradecraft_manager.default_ttl = get_setting(
+                    'TRADECRAFT_DEFAULT_TTL_SEC', 86400
+                )
+                new_tool = self._tradecraft_manager.get_tool()
+                self.tool_executor.update_tradecraft_tool(new_tool)
+                # Swap the dynamic per-resource catalog into TOOL_REGISTRY
+                from prompts.tool_registry import swap_tradecraft_entry
+                swap_tradecraft_entry(self._tradecraft_manager.build_registry_entry())
+                if new_tool:
+                    logger.info(
+                        f"Tradecraft Lookup tool registered with "
+                        f"{len(self._tradecraft_manager._resources)} resources"
+                    )
+                else:
+                    logger.info("Tradecraft Lookup tool: zero enabled resources")
+            else:
+                self.tool_executor.update_tradecraft_tool(None)
+                from prompts.tool_registry import pop_tradecraft_entry
+                pop_tradecraft_entry()
+
+        # User-managed MCP servers: trigger an async reload when the user's
+        # mcpServers list has changed since the last apply. Hash-based check
+        # keeps the prompt-prefix cache stable when nothing's changed (a fresh
+        # fetch returning identical data is a no-op).
+        try:
+            import hashlib
+            import json as _json
+            user_mcp_raw = get_setting('USER_MCP_SERVERS', []) or []
+            digest = hashlib.sha256(
+                _json.dumps(user_mcp_raw, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+            last_digest = getattr(self, '_last_user_mcp_hash', None)
+            if digest != last_digest:
+                self._last_user_mcp_hash = digest
+                try:
+                    import asyncio
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.reload_mcp_manifests(user_mcp_raw))
+                    logger.info(
+                        f"User MCP manifest changed (hash {digest[:12]}); "
+                        f"reload scheduled."
+                    )
+                except RuntimeError:
+                    # No running loop — apply must be running outside async ctx.
+                    # Skip; reload will fire on the next async-context apply.
+                    logger.debug("User MCP manifest changed but no running loop; deferred.")
+        except Exception as e:
+            logger.warning(f"User MCP manifest reload check failed: {e}")
+
+    def _build_section_picker_llm(self):
+        """Instantiate a Haiku LLM for the tradecraft section picker.
+
+        Returns None on any failure -> the manager will fall back to self.llm.
+        """
+        try:
+            picker_model = get_setting(
+                'TRADECRAFT_SECTION_PICKER_MODEL', 'claude-haiku-4-5-20251001'
+            )
+            from langchain_anthropic import ChatAnthropic
+            from orchestrator_helpers.llm_setup import (
+                _resolve_provider_key,
+                _anthropic_supports_temperature,
+            )
+            from project_settings import get_settings
+            user_providers = get_settings().get('USER_LLM_PROVIDERS') or []
+            anthropic_p = _resolve_provider_key(user_providers, 'anthropic')
+            api_key = (anthropic_p or {}).get('apiKey')
+            if not api_key:
+                return None
+            picker_kwargs = dict(
+                model=picker_model,
+                anthropic_api_key=api_key,
+                max_tokens=64,
+            )
+            if _anthropic_supports_temperature(picker_model):
+                picker_kwargs["temperature"] = 0
+            return ChatAnthropic(**picker_kwargs)
+        except Exception as e:
+            logger.debug(f"Section picker LLM build skipped: {e}")
+            return None
 
     def _setup_llm(self) -> None:
         """Initialize the LLM based on current model_name.
@@ -383,12 +487,26 @@ class AgentOrchestrator:
         anthropic_p = _resolve_provider_key(user_providers, "anthropic")
         openrouter_p = _resolve_provider_key(user_providers, "openrouter")
         bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+        deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+        gemini_p = _resolve_provider_key(user_providers, "gemini")
+        glm_p = _resolve_provider_key(user_providers, "glm")
+        kimi_p = _resolve_provider_key(user_providers, "kimi")
+        qwen_p = _resolve_provider_key(user_providers, "qwen")
+        xai_p = _resolve_provider_key(user_providers, "xai")
+        mistral_p = _resolve_provider_key(user_providers, "mistral")
 
         self.llm = setup_llm(
             self.model_name,
             openai_api_key=(openai_p or {}).get("apiKey"),
             anthropic_api_key=(anthropic_p or {}).get("apiKey"),
             openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+            deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+            gemini_api_key=(gemini_p or {}).get("apiKey"),
+            glm_api_key=(glm_p or {}).get("apiKey"),
+            kimi_api_key=(kimi_p or {}).get("apiKey"),
+            qwen_api_key=(qwen_p or {}).get("apiKey"),
+            xai_api_key=(xai_p or {}).get("apiKey"),
+            mistral_api_key=(mistral_p or {}).get("apiKey"),
             aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
             aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
             aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
@@ -401,8 +519,20 @@ class AgentOrchestrator:
 
     async def _setup_tools(self) -> None:
         """Set up all tools (MCP and Neo4j)."""
-        # Setup MCP tools
-        mcp_manager = MCPToolsManager()
+        # Build MCP server config: 5 system servers + (later, after project
+        # settings load) any user-managed servers from UserSettings.mcpServers.
+        # User servers are merged in via reload_mcp_manifests() once the
+        # project's settings are available; at startup we only have the
+        # system set so the agent can come up cleanly.
+        from tools import _build_system_mcp_servers
+        import mcp_registry
+        system_servers = _build_system_mcp_servers()
+        mcp_registry.set_current(system_servers)
+        server_configs, env_warnings = mcp_registry.to_mcp_servers_dict(system_servers)
+        if env_warnings:
+            mcp_registry.set_current(system_servers, warnings=env_warnings)
+
+        mcp_manager = MCPToolsManager(server_configs=server_configs)
         mcp_tools = await mcp_manager.get_tools()
 
         # Setup Neo4j graph query tool (LLM is None until project settings are loaded)
@@ -439,14 +569,100 @@ class AgentOrchestrator:
         self._google_dork_manager = GoogleDorkToolManager()
         google_dork_tool = self._google_dork_manager.get_tool()
 
+        # Setup Tradecraft Lookup tool (resources resolved later via _apply_project_settings).
+        # get_tool() returns None until at least one enabled resource is loaded.
+        from orchestrator_helpers.tradecraft_lookup import TradecraftLookupManager
+        self._tradecraft_manager = TradecraftLookupManager(
+            llm=self.llm,
+            mcp_manager=mcp_manager,
+        )
+        # Tool starts as None; orchestrator hot-swaps it once resources load.
+        tradecraft_tool = self._tradecraft_manager.get_tool()
+        # Strip the registry entry until resources are loaded so the
+        # baseline empty entry doesn't reach the system prompt.
+        from prompts.tool_registry import pop_tradecraft_entry
+        pop_tradecraft_entry()
+
+        # Stash the MCP manager so the /tradecraft/verify HTTP endpoint can reach it.
+        self._mcp_manager = mcp_manager
+
         # Create phase-aware tool executor
         self.tool_executor = PhaseAwareToolExecutor(
             mcp_manager, graph_tool, web_search_tool,
             shodan_tool, google_dork_tool,
+            tradecraft_tool,
         )
+        # No declared_tool_names filter at startup — only system MCP tools
+        # are loaded. User MCPs (with their declared filter) come through
+        # reload_mcp_manifests() once project settings are available.
         self.tool_executor.register_mcp_tools(mcp_tools)
 
         logger.info(f"Tools initialized: {len(self.tool_executor.get_all_tools())} available")
+
+    async def reload_mcp_manifests(self, user_servers_raw=None) -> dict:
+        """Re-merge system + user MCP servers, refresh registry, reconnect MCP client.
+
+        Called from:
+        - Webapp's POST /mcp/reload after a user adds/edits/deletes an MCP server.
+        - Implicitly during project session startup once user settings are
+          fetched (so per-user MCPs activate without a manual reload click).
+
+        Args:
+            user_servers_raw: list of dicts from UserSettings.mcpServers. When
+                None, reads from the most recent project_settings cache via
+                get_setting('USER_MCP_SERVERS', []).
+
+        Returns:
+            dict with the new manifest snapshot (servers, errors, warnings,
+            declared_tool_names) — same shape as GET /mcp/manifest body.
+        """
+        from tools import _build_system_mcp_servers
+        from prompts.tool_registry import apply_mcp_manifests_to_registry
+        from project_settings import get_setting
+        import mcp_registry
+
+        if user_servers_raw is None:
+            user_servers_raw = get_setting('USER_MCP_SERVERS', []) or []
+
+        user_servers, parse_errors = mcp_registry.parse_user_servers(user_servers_raw)
+        system_servers = _build_system_mcp_servers()
+        all_servers = system_servers + user_servers
+
+        server_configs, env_warnings = mcp_registry.to_mcp_servers_dict(all_servers)
+        mcp_registry.set_current(all_servers, errors=parse_errors, warnings=env_warnings)
+
+        declared_user_tools = apply_mcp_manifests_to_registry(user_servers)
+
+        # Swap the manager's config and force a reconnect to bind a fresh
+        # MultiServerMCPClient that includes any new user-MCP URLs.
+        if hasattr(self, '_mcp_manager') and self._mcp_manager is not None:
+            self._mcp_manager.replace_server_configs(server_configs)
+            seen_gen = self._mcp_manager.generation
+            new_gen, new_tools = await self._mcp_manager.reconnect(
+                seen_gen, reason="mcp_manifest_reload",
+            )
+            if new_tools:
+                self.tool_executor.register_mcp_tools(
+                    new_tools,
+                    declared_tool_names=declared_user_tools,
+                )
+                logger.info(
+                    f"MCP manifest reload: {len(user_servers)} user server(s), "
+                    f"{len(declared_user_tools)} declared tool(s), "
+                    f"{len(new_tools)} live tool(s) registered."
+                )
+            else:
+                logger.warning(
+                    "MCP manifest reload: reconnect returned no tools; "
+                    "system tools may be temporarily unavailable."
+                )
+
+        return {
+            "servers": mcp_registry.redact_for_api(all_servers),
+            "errors": [e.model_dump() for e in parse_errors],
+            "warnings": [w.model_dump() for w in env_warnings],
+            "declared_user_tool_names": sorted(declared_user_tools),
+        }
 
     def _setup_knowledge_base(self):
         """

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, Play, Search } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
@@ -26,6 +26,7 @@ export function SubdomainDiscoverySection({ data, updateField, onRun }: Subdomai
           <Search size={16} />
           Subdomain Discovery
           <NodeInfoTooltip section="SubdomainDiscovery" />
+          <WikiInfoButton target="SubdomainDiscovery" />
         </h2>
         <div className={styles.sectionHeaderRight}>
           {onRun && data.subdomainDiscoveryEnabled && (
@@ -193,7 +194,7 @@ export function SubdomainDiscoverySection({ data, updateField, onRun }: Subdomai
                     type="number"
                     className={`textInput ${styles.toggleRowCompactInput}`}
                     value={data.amassMaxResults}
-                    onChange={(e) => updateField('amassMaxResults', parseInt(e.target.value) || 5000)}
+                    onChange={(e) => updateField('amassMaxResults', parseInt(e.target.value) || 50000)}
                     min={1}
                     max={50000}
                   />

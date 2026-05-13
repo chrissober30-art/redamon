@@ -88,11 +88,44 @@ export const DataTable = memo(function DataTable({
       id: 'name',
       header: 'Name',
       size: 400,
-      cell: info => (
-        <span className={styles.nameCell} title={info.getValue()}>
-          {info.getValue()}
-        </span>
-      ),
+      cell: info => {
+        const name = info.getValue()
+        const node = info.row.original.node
+        const props = node.properties as Record<string, unknown>
+        const method = typeof props.method === 'string' ? props.method.toUpperCase() : ''
+
+        if (node.type === 'Endpoint' && method === 'GET') {
+          const fullUrl = typeof props.full_url === 'string' ? props.full_url : ''
+          const baseurl = typeof props.baseurl === 'string' ? props.baseurl : ''
+          const path = typeof props.path === 'string' ? props.path : ''
+          let href = fullUrl
+          if (!href && baseurl) {
+            href = path
+              ? `${baseurl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
+              : baseurl
+          }
+          if (href) {
+            return (
+              <a
+                className={styles.nameCell}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={href}
+                onClick={e => e.stopPropagation()}
+              >
+                {name}
+              </a>
+            )
+          }
+        }
+
+        return (
+          <span className={styles.nameCell} title={name}>
+            {name}
+          </span>
+        )
+      },
     }),
     columnHelper.accessor(row => Object.keys(row.node.properties).filter(k => k !== 'project_id' && k !== 'user_id').length, {
       id: 'properties',

@@ -150,6 +150,13 @@ export function ReconLogsDrawer({
     }
   }
 
+  // Highlight the union target-list breakdown emitted by build_target_urls
+  // (e.g. "[*][Targets] Merged 50 URLs: 2 additional httpx URLs + 48 unprobed
+  // subdomains"). Easy to spot when scrolling through verbose scan logs.
+  const isTargetsLine = (logText: string) =>
+    logText.includes('[Targets]') &&
+    (logText.includes('Merged ') || logText.includes('No targets'))
+
   return (
     <div className={`${styles.drawer} ${isOpen ? styles.drawerOpen : ''}`}>
       {/* Header */}
@@ -248,7 +255,9 @@ export function ReconLogsDrawer({
             {logs.map((log, index) => (
               <div
                 key={index}
-                className={`${styles.logLine} ${getLogClassName(log.level)}`}
+                className={`${styles.logLine} ${getLogClassName(log.level)}${
+                  isTargetsLine(log.log) ? ` ${styles.logTargets}` : ''
+                }`}
               >
                 <span className={styles.logTimestamp}>
                   {new Date(log.timestamp).toLocaleTimeString()}

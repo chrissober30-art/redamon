@@ -21,12 +21,11 @@ interface PlanWaveCardProps {
   onAddApiKey?: (toolId: string) => void
   onApprove?: () => void
   onReject?: () => void
-  confirmationDisabled?: boolean
   /** Cancel a single running tool inside this wave. Receives the tool's item.id. */
   onToolStop?: (itemId: string) => void
 }
 
-export function PlanWaveCard({ item, isExpanded, onToggleExpand, missingApiKeys, onAddApiKey, onApprove, onReject, confirmationDisabled, onToolStop }: PlanWaveCardProps) {
+export function PlanWaveCard({ item, isExpanded, onToggleExpand, missingApiKeys, onAddApiKey, onApprove, onReject, onToolStop }: PlanWaveCardProps) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
 
   const toggleToolExpand = (toolId: string) => {
@@ -118,8 +117,8 @@ export function PlanWaveCard({ item, isExpanded, onToggleExpand, missingApiKeys,
             </div>
             {item.status === 'pending_approval' && onApprove && (
               <div className={styles.confirmActions}>
-                <button className={styles.allowBtn} onClick={(e) => { e.stopPropagation(); onApprove() }} disabled={confirmationDisabled}>Allow</button>
-                <button className={styles.denyBtn} onClick={(e) => { e.stopPropagation(); onReject?.() }} disabled={confirmationDisabled}>Deny</button>
+                <button className={styles.allowBtn} onClick={(e) => { e.stopPropagation(); onApprove() }}>Allow</button>
+                <button className={styles.denyBtn} onClick={(e) => { e.stopPropagation(); onReject?.() }}>Deny</button>
               </div>
             )}
             <button className={styles.expandButton}>

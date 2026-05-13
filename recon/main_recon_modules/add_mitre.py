@@ -1077,11 +1077,20 @@ def run_mitre_enrichment(recon_data: Dict = None, output_file: Path = None, sett
     print("\n" + "=" * 60)
     print("[*][MITRE] RedAmon - CWE/CAPEC Enrichment")
     print("=" * 60)
-    print(f"[*][MITRE] Include CWE: {include_cwe}")
-    print(f"[*][MITRE] Include CAPEC: {include_capec}")
-    print(f"[*][MITRE] Enrich Recon: {enrich_recon}")
-    print(f"[*][MITRE] Enrich GVM: {enrich_gvm}")
-    print(f"[*][MITRE] Auto Update DB: {auto_update}")
+
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "MITRE",
+        settings,
+        keys=[
+            ("MITRE_AUTO_UPDATE_DB", "DB lifecycle"),
+            ("MITRE_CACHE_TTL_HOURS", "DB lifecycle"),
+            ("MITRE_ENRICH_RECON", "Enrichment scope"),
+            ("MITRE_ENRICH_GVM", "Enrichment scope"),
+            ("MITRE_INCLUDE_CWE", "Data inclusion"),
+            ("MITRE_INCLUDE_CAPEC", "Data inclusion"),
+        ],
+    )
 
     # Collect all CVE IDs to download only needed years
     all_cve_ids = []

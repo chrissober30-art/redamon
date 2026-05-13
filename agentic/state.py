@@ -32,11 +32,11 @@ ApprovalDecision = Literal["approve", "modify", "abort"]
 QuestionFormat = Literal["text", "single_choice", "multi_choice"]
 
 # Attack path types for dynamic routing
-# Known types: "cve_exploit", "brute_force_credential_guess", "phishing_social_engineering", "denial_of_service", "sql_injection", "xss"
-# Unclassified types: "<descriptive_term>-unclassified" (e.g., "ssrf-unclassified", "file_upload-unclassified")
+# Known types: "cve_exploit", "brute_force_credential_guess", "phishing_social_engineering", "denial_of_service", "sql_injection", "xss", "ssrf", "rce", "path_traversal"
+# Unclassified types: "<descriptive_term>-unclassified" (e.g., "file_upload-unclassified", "xxe-unclassified")
 AttackPathType = str  # Validated by AttackPathClassification.attack_path_type validator
 
-KNOWN_ATTACK_PATHS = {"cve_exploit", "brute_force_credential_guess", "phishing_social_engineering", "denial_of_service", "sql_injection", "xss"}
+KNOWN_ATTACK_PATHS = {"cve_exploit", "brute_force_credential_guess", "phishing_social_engineering", "denial_of_service", "sql_injection", "xss", "ssrf", "rce", "path_traversal"}
 _UNCLASSIFIED_RE = re.compile(r'^[a-z][a-z0-9_]*-unclassified$')
 
 
@@ -341,9 +341,18 @@ class FireteamMemberSpec(BaseModel):
     """
     name: str = Field(description="Short human-readable name, shown in UI")
     task: str = Field(description="Task description the member receives as its objective")
-    skills: List[str] = Field(
+    # The member's "primary tools" — names MUST match keys in TOOL_REGISTRY
+    # exactly (e.g. "execute_httpx", "execute_curl", "kali_shell",
+    # "query_graph"). Tools outside this list are treated as "fallback" and
+    # require a tool_expansion_reason on the member's decision.
+    tools: List[str] = Field(
         default_factory=list,
-        description="Skill slugs filtered into member's allowed tool set",
+        description=(
+            "Canonical tool names from TOOL_REGISTRY (e.g. 'execute_httpx', "
+            "'execute_curl', 'kali_shell'). These become the member's primary "
+            "toolbox; everything else is a 'fallback' that requires "
+            "justification when the member calls it."
+        ),
     )
 
 
@@ -397,7 +406,7 @@ class FireteamMemberState(TypedDict):
     member_name: str             # for streaming attribution
     member_id: str               # UUID for chain graph and logging
     fireteam_id: str             # fireteam this member belongs to
-    skills: List[str]            # tool filter
+    tools: List[str]             # primary tool allowlist (canonical TOOL_REGISTRY names)
     task: str                    # member's local objective
 
     # Member-local
@@ -405,6 +414,48 @@ class FireteamMemberState(TypedDict):
     target_info: dict
     chain_findings_memory: List[dict]
     chain_failures_memory: List[dict]
+
+    # Parent engagement-state snapshot at deploy time. Populated once by
+    # fireteam_deploy_node._build_member_state, then read every iteration by
+    # fireteam_member_think_node._build_member_prompt and rendered via
+    # format_chain_context (the same renderer the root agent uses). MUST be
+    # declared here — LangGraph strips undeclared keys from a TypedDict
+    # state on merge, so without these fields the member would never see
+    # the root agent's findings/failures/decisions/trace and would appear
+    # to start from a cold context (the bug that produced empty
+    # "Engagement state" sections in member prompts).
+    _parent_chain_findings: List[dict]
+    _parent_chain_failures: List[dict]
+    _parent_chain_decisions: List[dict]
+    _parent_execution_trace: List[dict]
+
+    # Sibling member specs for the same wave, minus this member. Populated once
+    # by fireteam_deploy_node._build_member_state from the fireteam plan, then
+    # rendered into the system prompt as an "out of scope" block so the LLM
+    # knows which surfaces are owned by other members and must not be probed.
+    # MUST be declared here (see comment above) — LangGraph strips undeclared
+    # keys on merge, so without this field the peer block would always be empty.
+    _peer_tasks: List[dict]
+
+    # Soft skill-allowlist accounting (per-run). Incremented inside
+    # fireteam_member_think_node whenever the member's decision references a
+    # tool outside its declared `tools` (the "fallback toolbox"). Surfaces a
+    # graduated nudge in the prompt prefix when it climbs without producing new
+    # findings — see _build_member_prompt's `budget_prefix`. Reset implicitly
+    # because each member starts with a fresh state.
+    fallback_uses_this_run: int
+
+    # Stall detector for the soft allowlist (paired with fallback_uses_this_run).
+    # Tracks how many consecutive iterations have produced zero new
+    # chain_findings entries. Combined with the fallback counter it powers the
+    # "Recommendation: complete" nudge when a member is burning fallback calls
+    # without yield.
+    iterations_since_new_finding: int
+
+    # Last-seen findings count, snapshotted at end of each iteration. Read at
+    # start of next iteration to compute the "did we get new findings?" delta
+    # that feeds iterations_since_new_finding.
+    last_findings_count: int
 
     # Tool confirmation escalation (member does not block; parent handles)
     _pending_confirmation: Optional[dict]
@@ -488,6 +539,24 @@ class LLMDecision(BaseModel):
     # Deep Think self-request (only used when Deep Think is enabled)
     need_deep_think: bool = Field(default=False, description="Set to true if you feel stuck or not progressing, to trigger strategic re-evaluation on next iteration")
 
+    # Tool expansion (fireteam members only). When a member's tool call uses a
+    # tool outside its declared `tools` list (the "fallback toolbox"), this
+    # field MUST carry a one-sentence justification. The validator in
+    # fireteam_member_think_node re-prompts the LLM if it reaches for a fallback
+    # tool without filling this field. Logged in chain context so the root
+    # planner sees which expansions were genuinely useful and can adjust the
+    # tools assignment on the next wave. Always None for the root agent.
+    tool_expansion_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Required ONLY when tool_name (or any plan_tools step's tool_name) "
+            "is outside your declared `tools` (primary) list. One sentence "
+            "explaining why your primary tools cannot accomplish this step. "
+            "If your primary tools CAN do the job, switch to one instead of "
+            "filling this field."
+        ),
+    )
+
 
 class OutputAnalysis(BaseModel):
     """
@@ -517,7 +586,7 @@ class AttackPathClassification(BaseModel):
         description="Required phase for this request: 'informational' for recon, 'exploitation' for attacks"
     )
     attack_path_type: str = Field(
-        description="The classified attack path type: 'cve_exploit', 'brute_force_credential_guess', 'phishing_social_engineering', 'denial_of_service', or '<term>-unclassified'"
+        description="The classified attack path type: 'cve_exploit', 'brute_force_credential_guess', 'phishing_social_engineering', 'denial_of_service', 'sql_injection', 'xss', 'ssrf', 'rce', 'path_traversal', 'user_skill:<id>', or '<term>-unclassified'"
     )
     secondary_attack_path: Optional[str] = Field(
         default=None,
@@ -557,8 +626,8 @@ class AttackPathClassification(BaseModel):
         if _UNCLASSIFIED_RE.match(v):
             return v
         raise ValueError(
-            f"attack_path_type must be 'cve_exploit', 'brute_force_credential_guess', "
-            f"'phishing_social_engineering', 'user_skill:<id>', or match '<term>-unclassified' pattern. Got: '{v}'"
+            f"attack_path_type must be one of {sorted(KNOWN_ATTACK_PATHS)}, "
+            f"'user_skill:<id>', or match '<term>-unclassified' pattern. Got: '{v}'"
         )
 
 
@@ -1164,7 +1233,7 @@ def format_chain_context(
 
             evidence = (f.get("evidence") or "").strip()
             if evidence:
-                lines.append(f"    Evidence: {evidence[:150]}")
+                lines.append(f"    Evidence: {evidence[:10000]}")
 
             cves = f.get("related_cves") or []
             ips = f.get("related_ips") or []
@@ -1241,10 +1310,10 @@ def format_chain_context(
                         tname = t.get("tool_name") or "unknown"
                         tool_counts[tname] = tool_counts.get(tname, 0) + 1
                     tool_str = ", ".join(f"{c} {n}" for n, c in tool_counts.items())
-                    lines.append(f"  {it} [{phase}]: Wave[{tool_str}] ->{fail_marker} {analysis[:100]}")
+                    lines.append(f"  {it} [{phase}]: Wave[{tool_str}] ->{fail_marker} {analysis[:10000]}")
                 else:
                     tool_name = tools[0].get("tool_name") or "none"
-                    lines.append(f"  {it} [{phase}]: {tool_name} ->{fail_marker} {analysis[:100]}")
+                    lines.append(f"  {it} [{phase}]: {tool_name} ->{fail_marker} {analysis[:10000]}")
             lines.append("")
 
         if total_iterations > recent_iterations:
@@ -1320,7 +1389,7 @@ def format_chain_context(
 
                 # Analysis (once, not repeated per tool)
                 if analysis:
-                    lines.append(f"    Analysis: {analysis[:600]}")
+                    lines.append(f"    Analysis: {analysis[:10000]}")
 
             else:
                 # ── Single tool ──
@@ -1338,7 +1407,7 @@ def format_chain_context(
                 if args and tool != "none":
                     lines.append(f"    Args: {str(args)[:300]}")
                 if success:
-                    out_preview = (analysis or output or "")[:500]
+                    out_preview = (analysis or output or "")[:10000]
                     if out_preview:
                         lines.append(f"    OK | {out_preview}")
                     else:

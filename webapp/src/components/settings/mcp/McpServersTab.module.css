@@ -1,0 +1,601 @@
+.section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+
+.sectionDescription {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-3);
+  line-height: 1.5;
+}
+
+.subTitle {
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin: var(--space-5) 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.headerActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.primaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--accent-primary);
+  color: var(--accent-on-primary, #fff);
+  border: none;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.primaryBtn:hover { filter: brightness(1.05); }
+.primaryBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+}
+
+.secondaryBtn:hover { background: var(--bg-tertiary); }
+.secondaryBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Distinct call-to-action for the connection-test / tool-discovery button.
+   Visually louder than secondaryBtn so users notice they should click it
+   first to populate their tools list. */
+.discoverBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  border: 1px solid #b45309;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.discoverBtn:hover {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+}
+
+.discoverBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.iconBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.iconBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.linkBtn {
+  background: transparent;
+  border: none;
+  color: var(--accent-primary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  margin-left: var(--space-2);
+  text-decoration: underline;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-weight: var(--font-medium);
+}
+
+.table td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle, var(--border-default));
+  vertical-align: middle;
+}
+
+.cellTitle { font-weight: var(--font-medium); color: var(--text-primary); }
+.cellSub { color: var(--text-tertiary); font-size: var(--text-xs); margin-top: 2px; }
+
+.transportPill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+}
+
+.switch {
+  display: inline-block;
+  position: relative;
+  width: 36px;
+  height: 20px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch span {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.switch span::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.switch input:checked + span {
+  background: var(--accent-primary);
+}
+
+.switch input:checked + span::before {
+  transform: translateX(16px);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.field > span {
+  color: var(--text-secondary);
+  font-weight: var(--font-medium);
+  font-size: var(--text-xs);
+}
+
+.field input,
+.field select,
+.field textarea {
+  padding: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.field input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.field textarea {
+  font-family: var(--font-mono, monospace);
+  resize: vertical;
+}
+
+.fieldWide { grid-column: 1 / -1; }
+
+.fieldErr {
+  color: var(--accent-error, #c43);
+  font-size: var(--text-xs);
+}
+
+.injectedBadge {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: var(--font-medium);
+  color: var(--accent-primary);
+  background: rgba(80, 130, 220, 0.12);
+  border: 1px solid rgba(80, 130, 220, 0.35);
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  cursor: help;
+}
+
+.phasesRow {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.checkInline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.presetsBlock {
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+}
+
+.presetsHeader {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.presetsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2);
+  /* Cap the height so 24 presets don't push the saved-servers table out
+     of view; users scroll vertically inside the grid. */
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.presetsGrid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.presetsGrid::-webkit-scrollbar-thumb {
+  background-color: var(--border-default);
+  border-radius: 4px;
+}
+
+.presetCard {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+  min-height: 88px;
+}
+
+.presetCard:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.presetCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.presetCardLabel {
+  font-weight: var(--font-semibold);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.presetCategoryTag {
+  font-size: 9px;
+  font-weight: var(--font-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(80, 130, 220, 0.15);
+  color: var(--accent-primary);
+}
+
+.presetCardBlurb {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.presetCardFooter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: 2px;
+}
+
+.presetTransportTag,
+.presetAuthTag,
+.presetAddedTag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: var(--font-medium);
+  text-transform: lowercase;
+}
+
+.presetTransportTag {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono, monospace);
+}
+
+.presetAuthTag {
+  background: rgba(204, 130, 60, 0.18);
+  color: rgb(160, 100, 40);
+}
+
+.presetAddedTag {
+  background: rgba(60, 160, 100, 0.15);
+  color: rgb(60, 130, 80);
+}
+
+.tokenInputRow {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.tokenInputRow input {
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+}
+
+.toolBlock {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+  background: var(--bg-primary);
+}
+
+.toolHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.errorBanner {
+  background: var(--bg-error, rgba(204, 60, 60, 0.12));
+  color: var(--accent-error, #c43);
+  border: 1px solid var(--accent-error, #c43);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.testOk,
+.testFail {
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.testOk {
+  background: rgba(60, 160, 100, 0.12);
+  color: rgb(60, 130, 80);
+  border: 1px solid rgba(60, 160, 100, 0.4);
+}
+
+.testFail {
+  background: rgba(204, 60, 60, 0.12);
+  color: var(--accent-error, #c43);
+  border: 1px solid var(--accent-error, #c43);
+}
+
+.warnList {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+}
+
+.warnList li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: 2px;
+}
+
+.discoveredToolsBlock ul {
+  margin: var(--space-1) 0 0 var(--space-3);
+  padding: 0;
+}
+
+.discoveredToolsBlock li {
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+}
+
+.discoveredToolsBlock code {
+  background: var(--bg-secondary);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: var(--font-mono, monospace);
+}
+
+.discoveredHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/* Scrollable table — keeps long discovery results (e.g. 41 GitHub tools)
+   from blowing up the form layout. */
+.discoveredTableWrap {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.discoveredTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.discoveredTable thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  z-index: 1;
+}
+
+.discoveredTable th {
+  text-align: left;
+  padding: var(--space-2);
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.discoveredTable td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle, var(--border-default));
+  vertical-align: top;
+}
+
+.discoveredTable tr:last-child td { border-bottom: none; }
+
+.discoveredTable code {
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.discoveredDescCell {
+  color: var(--text-secondary);
+  line-height: 1.4;
+  max-width: 360px;
+}
+
+.tag,
+.tagWarn {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: var(--text-xs);
+}
+
+.tag {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+
+.tagWarn {
+  background: rgba(204, 130, 60, 0.18);
+  color: rgb(160, 100, 40);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

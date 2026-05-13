@@ -12,8 +12,16 @@
 <br/>
 
 <p align="center">
+  <a href="https://www.redamon.org/"><img height="34" src="https://img.shields.io/badge/🌐_Website-redamon.org-A01025?style=for-the-badge&labelColor=000000" alt="RedAmon Website"/></a>
+  <a href="https://discord.com/invite/dxSrH2gaC"><img height="34" src="https://img.shields.io/badge/Discord-Join_Community-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=000000" alt="Discord Community"/></a>
+  <a href="https://t.me/redamon_ai"><img height="34" src="https://img.shields.io/badge/Telegram-Join_Channel-26A5E4?style=for-the-badge&logo=telegram&logoColor=white&labelColor=000000" alt="Telegram Channel"/></a>
+</p>
+
+<br/>
+
+<p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v4.2.0-release-2E8B57?style=flat" alt="Version 4.2.0"/>
+  <img height="24" src="https://img.shields.io/badge/v4.9.3-release-2E8B57?style=flat" alt="Version 4.9.3"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -64,6 +72,16 @@
 
 <br/>
 
+<h2 align="center">Recon as a Living Knowledge Graph</h2>
+<p align="center">
+<img src="assets/redamon-graph.gif" alt="RedAmon Neo4j attack-surface graph rendered in 2D" width="100%"/>
+</p>
+<p align="center">
+  <em>Industry-standard scanners chained so each tool's output feeds the next, then merged into a single Neo4j knowledge graph. Findings are deduplicated, relationships are explicit, and the agent inherits a structured, fully connected attack surface ready to query in natural language.</em>
+</p>
+
+<br/>
+
 <h1 align="center"><span style="color:#D48A8A">Offense</span> meets <span style="color:#8AAED4">defense</span> — one pipeline, full visibility.</h1>
 <p align="center">
 <b><samp><big>Reconnaissance ➜ Exploitation ➜ Post-Exploitation ➜ AI Triage ➜ CodeFix Agent ➜ GitHub PR</big></samp></b>
@@ -110,6 +128,8 @@ We maintain a public **[Project Board](https://github.com/users/samugit83/projec
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2+
+  - **macOS:** Docker Desktop, with Memory raised to at least 4 GB (8 GB with `--gvm`) in Settings → Resources. Clone under `~/` so the path is inside the default File Sharing list.
+  - **Windows:** Docker Desktop with the WSL2 backend, run from inside the WSL2 filesystem (`~/`), not `/mnt/c/`.
 
 That's it. No Node.js, Python, or security tools needed on your host.
 
@@ -198,19 +218,22 @@ All lifecycle management is handled by a single script:
 
 | Command | Description |
 |---------|-------------|
-| `./redamon.sh install` | Build + start without GVM |
+| `./redamon.sh install` | Build + start lightweight (no GVM, no Knowledge Base, Tavily-only web search) |
+| `./redamon.sh install --kbase` | Build + start with the local Knowledge Base (~4.4 GB heavier) |
 | `./redamon.sh install --gvm` | Build + start with GVM/OpenVAS |
-| `./redamon.sh install --skipkbase` | Build without Knowledge Base (~4.4 GB lighter, Tavily-only) |
-| **`./redamon.sh update`** | **Pull latest version, smart-rebuild only changed services** |
-| `./redamon.sh up` | Start services (auto-detects GVM mode) |
-| `./redamon.sh up dev` | Start in dev mode with hot-reload (auto-detects GVM mode) |
+
+> Flags can be combined: `./redamon.sh install --gvm --kbase`
+
+| Command | Description |
+|---------|-------------|
+| **`./redamon.sh update`** | **Pull latest version, smart-rebuild only changed services (preserves your install-time GVM/KB choice)** |
+| `./redamon.sh up` | Start services (auto-detects GVM and KB mode from install) |
+| `./redamon.sh up dev` | Start in dev mode with hot-reload (auto-detects GVM and KB mode) |
 | `./redamon.sh down` | Stop services (preserves data) |
-| `./redamon.sh status` | Show running services, version, GVM mode |
+| `./redamon.sh status` | Show running services, version, GVM mode, KB state |
 | `./redamon.sh clean` | Remove containers + images, keep data |
 | `./redamon.sh reset-password` | Reset a user's password from the terminal |
 | `./redamon.sh purge` | Remove everything including all data |
-
-> Flags can be combined: `./redamon.sh install --skipkbase --gvm`
 
 
 ### Updating to a New Version
@@ -270,6 +293,14 @@ docker compose --profile tools down --rmi local   # Remove built images
 docker compose --profile tools down --rmi local --volumes --remove-orphans  # Full cleanup
 ```
 
+**Reclaim disk space:**
+```bash
+docker system df                                  # Show Docker disk usage (add -v for per-image breakdown)
+docker image prune -f                             # Remove dangling images (auto-run by `./redamon.sh update`)
+docker builder prune -f                           # Clear build cache (NOT auto-cleaned — can grow to many GB over time)
+docker container prune -f                         # Remove stopped containers
+```
+
 > For a complete development reference -- hot-reload rules, common commands, important rules, and AI-assisted coding guidelines -- see the **[Developer Guide](readmes/README.DEV.md)**.
 
 ---
@@ -278,15 +309,15 @@ docker compose --profile tools down --rmi local --volumes --remove-orphans  # Fu
 
 The agent's `web_search` tool includes a local **Knowledge Base** -- a RAG pipeline that searches curated security datasets (GTFOBins, LOLBAS, OWASP WSTG, NVD CVEs, ExploitDB, Nuclei templates, and agent skill docs) before falling back to Tavily web search. When the KB returns a high-confidence match, Tavily is skipped entirely for faster, offline-capable results.
 
-**How it works:** During `install` / `up` / `restart`, RedAmon automatically builds a lightweight KB index (~1,200 chunks in 10-15 min on CPU). At query time, the agent runs a hybrid retrieval pipeline (FAISS vector search + Neo4j fulltext), reranks with a cross-encoder, and checks a confidence threshold. If the score is high enough, results come from the local KB. Otherwise, it falls back to Tavily or merges both.
+**How it works:** When the KB is enabled, `install` / `up` / `restart` builds a lightweight KB index (~1,200 chunks in 10-15 min on CPU). At query time, the agent runs a hybrid retrieval pipeline (FAISS vector search + Neo4j fulltext), reranks with a cross-encoder, and checks a confidence threshold. If the score is high enough, results come from the local KB. Otherwise, it falls back to Tavily or merges both.
 
-**Default behavior:** The KB is enabled by default. On first install, it detects your hardware (GPU / CPU / API) and offers a quick-start option. No configuration needed.
-
-**Skip it entirely:** If you don't need the local KB (e.g., limited disk space), use `--skipkbase` to build a ~4.4 GB lighter image with Tavily-only web search:
+**Default behavior:** The KB is **opt-in**. `./redamon.sh install` produces a lightweight install (~4.4 GB lighter, Tavily-only web search). To enable the local KB, pass `--kbase`:
 
 ```bash
-./redamon.sh install --skipkbase
+./redamon.sh install --kbase
 ```
+
+On first install with `--kbase`, RedAmon detects your hardware (GPU / CPU / API) and offers a quick-start profile. The choice is persisted, so subsequent `update` / `up` commands respect it without re-passing the flag.
 
 **Speed up ingestion with API embeddings:** By default, embeddings run locally on CPU/GPU. On CPU-only machines, large datasets (ExploitDB, NVD) can take hours. You can offload embedding to an external API by creating a `.env` file from the template:
 
@@ -384,7 +415,7 @@ The platform is built around six pillars:
 
 ### Reconnaissance Pipeline
 
-A fully automated, **parallelized** scanning engine running inside a Kali Linux container. Given a root domain, subdomain list, or IP/CIDR ranges, it maps the complete external attack surface using a **fan-out / fan-in** pipeline architecture: subdomain discovery (crt.sh, HackerTarget, Subfinder, Amass, Knockpy — all 5 tools run concurrently), **puredns wildcard filtering** (validates subdomains against public DNS resolvers and removes wildcard/poisoned entries), parallel DNS resolution (20 workers), Shodan + port scanning (Masscan / Naabu — both run in parallel), passive threat intelligence enrichment (7 tools: Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP — all run in parallel with port scanning) in parallel, Nmap service version detection and NSE vulnerability scripts on discovered ports, HTTP probing with technology fingerprinting (httpx + Wappalyzer), resource enumeration (Katana, Hakrawler, GAU, ParamSpider, Kiterunner — internally parallel, followed by jsluice JavaScript analysis, FFuf directory fuzzing with custom wordlist support, and Arjun hidden parameter discovery with multi-method parallel execution), and a **parallel vulnerability phase** where Nuclei (9,000+ templates + DAST fuzzing) runs concurrently with a dedicated **GraphQL security scanner** (introspection detection, schema extraction, sensitive-field flagging, plus 12 graphql-cop misconfiguration checks) and a layered **Subdomain Takeover scanner** (Subjack + Nuclei takeover templates + BadDNS AGPL-3.0 isolated sidecar with cross-tool dedup and confidence scoring). Neo4j graph updates run in a dedicated background thread so the main pipeline is never blocked. Results are stored as JSON and imported into the Neo4j graph.
+A fully automated, **parallelized** scanning engine running inside a Kali Linux container. Given a root domain, subdomain list, or IP/CIDR ranges, it maps the complete external attack surface using a **fan-out / fan-in** pipeline architecture: subdomain discovery (crt.sh, HackerTarget, Subfinder, Amass, Knockpy — all 5 tools run concurrently), **puredns wildcard filtering** (validates subdomains against public DNS resolvers and removes wildcard/poisoned entries), parallel DNS resolution (20 workers), Shodan + port scanning (Masscan / Naabu — both run in parallel), passive threat intelligence enrichment (7 tools: Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP — all run in parallel with port scanning) in parallel, Nmap service version detection and NSE vulnerability scripts on discovered ports, HTTP probing with technology fingerprinting (httpx + Wappalyzer), resource enumeration (Katana, Hakrawler, GAU, ParamSpider, Kiterunner — internally parallel, followed by jsluice JavaScript analysis, FFuf directory fuzzing with custom wordlist support, and Arjun hidden parameter discovery with multi-method parallel execution), and a **parallel vulnerability phase** where Nuclei (9,000+ templates + DAST fuzzing) runs concurrently with a dedicated **GraphQL security scanner** (introspection detection, schema extraction, sensitive-field flagging, plus 12 graphql-cop misconfiguration checks) a layered **Subdomain Takeover scanner** (Subjack + Nuclei takeover templates + BadDNS AGPL-3.0 isolated sidecar with cross-tool dedup and confidence scoring), and a **VHost & SNI Enumeration scanner** (curl-only dual-layer probing: L7 Host-header overrides + L4 TLS SNI swaps against a baseline raw-IP request, with anomaly-driven severity ladder and discovery feedback loop into httpx). Neo4j graph updates run in a dedicated background thread so the main pipeline is never blocked. Results are stored as JSON and imported into the Neo4j graph.
 
 > **[Wiki: Running Reconnaissance](https://github.com/samugit83/redamon/wiki/Running-Reconnaissance)** | **[Technical: README.RECON.md](readmes/README.RECON.md)**
 
@@ -422,9 +453,10 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 | | **Endpoint Extraction** | REST, GraphQL, WebSocket, router patterns | Passive | Per JS file |
 | | **Framework Fingerprinting** | 12 built-in + custom signatures | Passive | Per JS file |
 | | **DOM Sink Detection** | 17 XSS/prototype pollution patterns | Passive | Per JS file |
-| **Vulnerability Scanning** | **Vulnerability Scanning** | Nuclei (9,000+ templates + DAST + custom template upload) | Active | Parallel with GraphQL Scan + Subdomain Takeover (GROUP 6 Phase A) |
-| **GraphQL Security** | **GraphQL Security Testing** | Endpoint discovery, introspection test, schema extraction, sensitive-field detection, graphql-cop (12 misconfig checks: alias/batch/directive DoS, GraphiQL, trace mode, GET/POST CSRF, field suggestions) | Active / Passive | Parallel with Nuclei + Subdomain Takeover (GROUP 6 Phase A) |
-| **Subdomain Takeover** | **Subdomain Takeover Detection** | Subjack (Apache-2.0 DNS-first fingerprints) + Nuclei takeover templates (`http/takeovers/` + `dns/`) + BadDNS (AGPL-3.0 isolated sidecar: CNAME, NS, MX, TXT, SPF, DMARC, wildcard, NSEC, references, zonetransfer). Cross-tool dedup, 12+ auto-exploitable providers, confidence-scored `confirmed` / `likely` / `manual_review` verdicts | Active / Passive | Parallel with Nuclei + GraphQL Scan (GROUP 6 Phase A) |
+| **Vulnerability Scanning** | **Vulnerability Scanning** | Nuclei (9,000+ templates + DAST + custom template upload) | Active | Parallel with GraphQL Scan + Subdomain Takeover + VHost & SNI (GROUP 6 Phase A) |
+| **GraphQL Security** | **GraphQL Security Testing** | Endpoint discovery, introspection test, schema extraction, sensitive-field detection, graphql-cop (12 misconfig checks: alias/batch/directive DoS, GraphiQL, trace mode, GET/POST CSRF, field suggestions) | Active / Passive | Parallel with Nuclei + Subdomain Takeover + VHost & SNI (GROUP 6 Phase A) |
+| **Subdomain Takeover** | **Subdomain Takeover Detection** | Subjack (Apache-2.0 DNS-first fingerprints) + Nuclei takeover templates (`http/takeovers/` + `dns/`) + BadDNS (AGPL-3.0 isolated sidecar: CNAME, NS, MX, TXT, SPF, DMARC, wildcard, NSEC, references, zonetransfer). Cross-tool dedup, 12+ auto-exploitable providers, confidence-scored `confirmed` / `likely` / `manual_review` verdicts | Active / Passive | Parallel with Nuclei + GraphQL Scan + VHost & SNI (GROUP 6 Phase A) |
+| **VHost & SNI Enumeration** | **Hidden Virtual Host Discovery** | Curl-only dual-layer probing: L7 Host-header overrides + L4 TLS SNI swaps via `--resolve`, baseline-comparison anomaly detection, 4-tier severity ladder (`high` for L7/L4 routing inconsistency, `medium` for internal-keyword matches, `low`/`info` for status/size deltas), 2,471-entry default wordlist + custom + graph-derived candidates, discovery feedback loop into httpx | Active | Parallel with Nuclei + GraphQL Scan + Subdomain Takeover (GROUP 6 Phase A) |
 | **Security Checks** | **Security Checks** | WAF bypass, direct IP access, TLS expiry, missing headers, cache-control | Active | Parallel workers |
 | **CVE & MITRE** | **CVE Enrichment** | NVD API, Vulners API | Passive | Sequential |
 | | **MITRE Enrichment** | CWE / CAPEC mapping | Passive | Sequential |
@@ -436,6 +468,12 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 Run **any single tool** from the pipeline independently without re-running the entire scan. Up to **12 partial recons can run in parallel** per project, each with independent logs, stop controls, and status badges visible in both the Graph toolbar and Project Settings header. Each tool section has a play button that opens a modal where you can review existing graph data, add custom targets (subdomains, IPs, ports, or URLs), and launch the tool in isolation. Results are merged back into the Neo4j graph using `MERGE` operations -- duplicates are updated, not recreated. The tool runs with all project settings (timeouts, wordlists, API keys, proxy) applied automatically. All pipeline tools support partial recon.
 
 > **[Wiki: Recon Pipeline Workflow -- Partial Recon](https://github.com/samugit83/redamon/wiki/Recon-Pipeline-Workflow#partial-recon)**
+
+#### AI in Pipeline
+
+Optional **LLM-augmented decision points** wired inside the recon pipeline where static look-ups historically drift -- **Nuclei** prunes its tag list to the detected tech stack, the **WAF classifier** catches header-stripped Cloudflare/AWS WAF/Imperva, and many others across FFuf, Nuclei false-positive filtering, and subdomain-takeover disambiguation. Each hook is a **cascade fallback** after the static path with a deterministic safe fallback, so an LLM outage cannot break a scan. One master toggle in the Target tab governs them all.
+
+> **[Wiki: AI in Pipeline](https://github.com/samugit83/redamon/wiki/Recon-Pipeline-Workflow#ai-in-pipeline)**
 
 ### GVM Vulnerability Scanner
 
@@ -459,6 +497,8 @@ A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progre
 |:-----:|-------|-------------|:------:|:----------:|
 | **Intelligence** | **query_graph** | Neo4j graph queries -- primary source of truth for recon data | All | -- |
 | | **web_search** | Internet search via Tavily for CVE details, exploit PoCs, advisories | All | -- |
+| | **cve_intel** | ProjectDiscovery `vulnx` -- structured CVE intelligence aggregating NVD + CISA KEV + EPSS + HackerOne + GitHub PoCs + Nuclei template availability. 69 lucene-filterable fields. Optional PDCP key (per-user, anonymous mode = 10 req/min) | All | network_recon :8000 |
+| | **tradecraft_lookup** | User-curated catalog of trusted security knowledge URLs (HackTricks, PayloadsAllTheThings, CVE PoC repos, vendor blogs) -- 6 auto-detected resource types, sitemap-driven section pick, sqlite+disk cache | Exploit, Post | -- |
 | | **shodan** | Shodan OSINT -- host details, reverse DNS, device search | Info, Exploit | -- |
 | | **google_dork** | Google dorking via SerpAPI -- exposed files, admin panels, directory listings | Info | -- |
 | **Recon & OSINT** | **execute_subfinder** | Passive subdomain enumeration via OSINT (CT logs, DNS datasets). No traffic to target | Info, Exploit | network_recon :8000 |
@@ -478,10 +518,18 @@ A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progre
 | **Exploitation** | **metasploit_console** | Persistent msfconsole -- exploit execution, session management, post-exploitation | Exploit, Post | metasploit :8003 |
 | | **msf_restart** | Full Metasploit reset -- kills all sessions, clears module state | Exploit, Post | metasploit :8003 |
 | | **execute_hydra** | THC Hydra brute force -- 50+ protocols (SSH, FTP, RDP, SMB, HTTP, MySQL, etc.) | Exploit, Post | network_recon :8000 |
-| **Code Execution** | **kali_shell** | Full Kali Linux shell -- nikto, whatweb, testssl, commix, dnsrecon, dnsx, enum4linux-ng, netexec, bloodhound-python, certipy-ad, gitleaks, and 50+ CLI tools | All | network_recon :8000 |
+| **Code Execution** | **kali_shell** | Full Kali Linux shell -- nikto, whatweb, testssl, commix, sstimap, tplmap, ysoserial, phpggc, dnsrecon, dnsx, subzy, enum4linux-ng, netexec, kerbrute, bloodhound-python, bhgraph, certipy-ad, bloodyAD, jwt_tool, graphql-cop, graphqlmap, gitleaks, semgrep, hashcat, john, cewl, paramspider, Node.js + npm, Python libs (websockets, zeep, python3-saml, boto3, msal, azure-identity, google-auth, google-cloud-storage), pre-staged post-exploit toolkits at /opt/tools/{linux,windows}/ (linpeas, LinEnum, pspy64, deepce, winPEAS, PowerUp, PrivescCheck), and 70+ CLI tools | All | network_recon :8000 |
 | | **execute_code** | Write and run code files (Python, bash, Ruby, Perl, C, C++) -- no shell escaping | Exploit, Post | network_recon :8000 |
 
 <sub>All MCP tools run inside a Kali Linux sandbox container. Tools marked as dangerous require manual confirmation before execution. Stealth mode restricts active tools to passive-only or single-target operations. **Note:** WPScan is licensed under the [WPScan Public Source License](https://github.com/wpscanteam/wpscan/blob/master/LICENSE) (not MIT). Free for pentesting assessments and personal use; commercial use may require a separate license from [wpscan.com](https://wpscan.com).</sub>
+
+#### MCP Tool Plugins (extending the agent's tool arsenal)
+
+Beyond the 5 built-in MCP servers above, you can plug **any Model-Context-Protocol server** into the agent as a *tool plugin* — Shodan, GitHub, Censys, Hugging Face, mitmproxy, your own internal MCPs — without editing code, rebuilding containers, or running migrations. Open **Global Settings → MCP Tool Plugins**.
+
+Two paths: pick one of **39 prefilled Quick-Add presets** (OSINT, threat-intel, cloud, web-app scanners, reporting, reverse engineering — categories tagged on every card), or click **Add MCP** for a manual config. Three transports supported: `stdio`, `sse`, `streamable_http`. The orange **Discover and add new tools** button runs a live `list_tools()` against the draft, returns within 30 seconds, and auto-imports each discovered tool with its name, description, and a JSON-Schema-derived `args_format` (types, enums, defaults, min/max, per-property descriptions). Save → tools auto-appear in every project's Tool Matrix and in the agent's system prompt within ~1 second. No agent restart, no `prisma db push`.
+
+> **Full operator manual** — every form field, all 39 presets, the auth flow, the live discovery workflow, validation rules, troubleshooting, and the storage / security model: **[MCP Tool Plugins wiki page](https://github.com/samugit83/redamon/wiki/MCP-Tool-Plugins)**.
 
 ### Fireteam — Parallel Specialist Sub-Agents
 
@@ -535,13 +583,13 @@ Two-agent pipeline: a **Triage Agent** runs 9 hardcoded Cypher queries then uses
 
 ### Agent Skills
 
-An **LLM-powered Intent Router** classifies user requests into agent skills: CVE (MSF), SQL Injection, Credential Testing, Social Engineering, Availability Testing, or custom user-defined skills uploaded as Markdown files. Ready-to-use **[community skills](agentic/community-skills/)** are available for API testing, XSS, SQLi, and SSRF -- download the `.md` file and upload it via **Global Settings > Agent Skills** to activate it for your user. You can also [contribute your own](https://github.com/samugit83/redamon/wiki/Agent-Skills#share-your-skills-with-the-community) by opening a PR.
+An **LLM-powered Intent Router** classifies user requests into agent skills: CVE (MSF), SQL Injection, XSS, SSRF, RCE, Path Traversal / LFI / RFI, Credential Testing, Social Engineering, Availability Testing, or custom user-defined skills uploaded as Markdown files. Ready-to-use **[community skills](agentic/community-skills/)** ship for API testing, XSS, SQLi, XXE, BFLA, SSTI, IDOR / BOLA, insecure deserialization, mass assignment, subdomain takeover, and insecure file uploads -- download the `.md` file and upload it via **Global Settings > Agent Skills** to activate it for your user. You can also [contribute your own](https://github.com/samugit83/redamon/wiki/Agent-Skills#share-your-skills-with-the-community) by opening a PR.
 
 > **[Wiki: Agent Skills](https://github.com/samugit83/redamon/wiki/Agent-Skills)** | **[Community Skills](agentic/community-skills/)**
 
 ### Chat Skills
 
-**On-demand reference injection** via `/skill` command in the agent chat. Chat Skills are tactical reference docs -- tool playbooks, vulnerability guides, framework-specific notes -- that you inject into the agent's context exactly when you need them. Type `/skill ssrf` to load SSRF expertise, or click the skill picker button for a browsable list. 36 community-contributed skills ship with RedAmon covering vulnerabilities, tooling, scan modes, frameworks, technologies, and protocols. Unlike Agent Skills (which drive classification and phase-aware workflows), Chat Skills are supplementary context that persists until you change or remove them.
+**On-demand reference injection** via `/skill` command in the agent chat. Chat Skills are tactical reference docs -- tool playbooks, vulnerability guides, framework-specific notes -- that you inject into the agent's context exactly when you need them. Type `/skill ssrf` to load SSRF expertise, or click the skill picker button for a browsable list. **46 reference skills** ship with RedAmon covering vulnerabilities (JWT, OAuth/OIDC, CSRF, race conditions, business logic, prototype pollution, ReDoS, 2FA bypass, LDAP/XPath injection, web cache poisoning, CORS, host header injection, clickjacking, CRLF, and more), tooling (sqlmap, nuclei, ffuf, nmap, httpx, naabu, katana, subfinder, semgrep), protocols (GraphQL, WebSocket, SOAP/WS-Security, SAML), technologies (Firebase, Supabase), frameworks (Next.js, FastAPI, NestJS), Active Directory (kill chain, Kerberoasting/ASREPRoast, AD-CS ESC1-15, BloodHound path-to-DA), cloud (AWS, Azure, GCP), and post-exploitation (Docker escape, Linux / Windows privesc). Unlike Agent Skills (which drive classification and phase-aware workflows), Chat Skills are supplementary context that persists until you change or remove them.
 
 > **[Wiki: Chat Skills](https://github.com/samugit83/redamon/wiki/Chat-Skills)** | **[Community Chat Skills](agentic/skills/)**
 
@@ -554,18 +602,6 @@ Scans GitHub repositories, gists, and commit history for exposed secrets using *
 ### TruffleHog Deep Secret Scanner
 
 Scans GitHub repositories for leaked credentials using **700+ detectors** with automatic verification of whether discovered secrets are still active. Powered by the TruffleHog engine (`trufflesecurity/trufflehog`), it detects API keys, passwords, tokens, certificates, and more across full commit history. Results are stored as `TrufflehogScan → TrufflehogRepository → TrufflehogFinding` nodes in the Neo4j graph. Both GitHub Hunt and TruffleHog are accessible from the **"Other Scans" modal** in the graph toolbar.
-
-### GraphQL Security Testing
-
-Dedicated GraphQL security scanner running as a **parallel sibling to Nuclei** (GROUP 6 Phase A). Auto-discovers GraphQL endpoints from five sources (user-specified URLs, HTTP probe `Content-Type` matches, resource-enum paths, JS Recon findings, and pattern probing on common paths like `/graphql`, `/api/graphql`, `/v1/graphql`), tests each for exposed introspection with a configurable TypeRef depth (1-20), extracts the full schema and computes a hash for change detection, counts queries/mutations/subscriptions, and flags sensitive fields (`password`, `token`, `ssn`, `cvv`, `credit`, etc.). Optional **graphql-cop** Docker-in-Docker integration runs 12 additional misconfiguration checks per endpoint: alias overloading, batch query DoS, directive overloading, circular introspection DoS, GraphiQL/Playground detection, Apollo trace mode, GET-method queries/mutations, POST url-encoded CSRF, field suggestions, and unhandled error leakage. Supports 5 auth modes (bearer, cookie, custom header, basic, API key), global rate limiting with retries on `429`/`5xx`, Tor routing via `--network host`, RoE host exclusion with wildcards, and endpoint capability flags (`graphql_graphiql_exposed`, `graphql_tracing_enabled`, `graphql_get_allowed`, `graphql_batching_enabled`) persisted on the Endpoint node even for negative results. Stealth mode forces the four DoS-class tests off and drops concurrency to 1.
-
-> **[Wiki: GraphQL Security Testing](https://github.com/samugit83/redamon/wiki/GraphQL-Security-Testing)** | **[Technical: README.RECON.md — Module 5b](readmes/README.RECON.md#module-5b-graphql_scan)**
-
-### Subdomain Takeover Detection
-
-Layered subdomain takeover scanner running as a **third parallel sibling in GROUP 6 Phase A** (alongside Nuclei and the GraphQL scanner). Stacks three independent detection engines so coverage compounds: **Subjack** (Apache-2.0 Go binary baked into the recon image for DNS-first CNAME/NS/MX fingerprinting with `-ssl`, `-a`, `-ns`, `-ar`, `-mail` switches), **Nuclei takeover templates** (reuses the existing `projectdiscovery/nuclei` image with `-t http/takeovers/ -t dns/` against only alive URLs from httpx so ~60 takeover-focused templates fire instead of the full 9,000+ community set), and the **BadDNS AGPL-3.0 sidecar** (runs inside an isolated `redamon-baddns:latest` Docker-in-Docker image -- RedAmon code never imports baddns -- covering 10 modules: CNAME, NS, MX, TXT, SPF, DMARC, wildcard, NSEC-walk, zone-transfer, HTML references). Findings are deduplicated across tools on `(hostname, provider, method)`, scored 0-100 with an additive rule set (+30 confirmed by 2+ tools, +25 Subjack confirmed, +20 auto-exploitable provider, +15 Nuclei template match, +10 method=cname, -15 probabilistic methods, -10 unknown provider), and mapped to `confirmed` / `likely` / `manual_review` verdicts against a configurable confidence threshold (default 60). Identifies 40+ takeover providers (GitHub Pages, Heroku, AWS S3/CloudFront/Elastic Beanstalk, Azure App Service/Blob/Traffic Manager, Shopify, Fastly, Ghost, Zendesk, Webflow, Netlify, Vercel, Surge, Tumblr, Statuspage, Unbounce, Readthedocs, Pantheon, Bitbucket, Intercom, and more) with a 12-provider auto-exploitable list that triggers a confidence bonus. Emits `Vulnerability` nodes with `source="takeover_scan"` attached to existing `Subdomain` (or `Domain` apex) nodes via `HAS_VULNERABILITY`, with deterministic IDs so rescans converge in place instead of duplicating. Stealth mode forces Nuclei + BadDNS off and keeps only Subjack in DNS-only mode (CNAME/NS/MX resolution, no HTTP traffic).
-
-> **[Wiki: Subdomain Takeover Detection](https://github.com/samugit83/redamon/wiki/Subdomain-Takeover-Detection)** | **[Technical: README.RECON.md](readmes/README.RECON.md)**
 
 ### Project Settings
 
@@ -814,7 +850,9 @@ For questions, feedback, or collaboration inquiries: **devergo.sam@gmail.com**
 
 This project is released under the [MIT License](LICENSE).
 
-RedAmon integrates several third-party tools under their own licenses (AGPL-3.0, GPL, BSD, and others). Source code for all AGPL-licensed components is available at their upstream repositories. See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for the complete list.
+RedAmon integrates several third-party tools under their own licenses (MIT, Apache-2.0, BSD, GPL-2.0/3.0, AGPL-3.0, LGPL, and the WPScan Public Source License). Source code for all AGPL-licensed components is available at their upstream repositories. The full inventory and license obligations are documented in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+
+> **Commercial use note**: The Kali sandbox image bundles **WPScan**, which is governed by the WPScan Public Source License. WPScan restricts commercial use (SaaS, paid product offerings, value-added services) without a separate license from the WPScan team. Pentesting engagements and personal use are permitted. If you intend to use RedAmon in a commercial product or service, review [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) before distribution.
 
 See [DISCLAIMER.md](DISCLAIMER.md) for full terms of use, acceptable use policy, and legal compliance requirements.
 

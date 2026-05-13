@@ -10,6 +10,19 @@ from project_settings import load_project_settings
 
 logger = logging.getLogger(__name__)
 
+# Anthropic models that reject the `temperature` parameter (HTTP 400
+# "temperature is deprecated for this model"). Add new model IDs here as
+# Anthropic deprecates the param on subsequent generations.
+ANTHROPIC_NO_TEMPERATURE_MODELS = {
+    "claude-opus-4-7",
+    "claude-sonnet-4-7",
+    "claude-haiku-4-6",
+}
+
+
+def _anthropic_supports_temperature(model_id: str) -> bool:
+    return model_id not in ANTHROPIC_NO_TEMPERATURE_MODELS
+
 
 def parse_model_provider(model_name: str) -> tuple[str, str]:
     """
@@ -19,6 +32,13 @@ def parse_model_provider(model_name: str) -> tuple[str, str]:
       - "custom/<configId>"   → ("custom", "<configId>")
       - "openrouter/<model>"  → ("openrouter", "<model>")
       - "bedrock/<model>"     → ("bedrock", "<model>")
+      - "deepseek/<model>"    → ("deepseek", "<model>")
+      - "gemini/<model>"      → ("gemini", "<model>")
+      - "glm/<model>"         → ("glm", "<model>")
+      - "kimi/<model>"        → ("kimi", "<model>")
+      - "qwen/<model>"        → ("qwen", "<model>")
+      - "xai/<model>"         → ("xai", "<model>")
+      - "mistral/<model>"     → ("mistral", "<model>")
       - "claude-*"            → ("anthropic", "claude-*")
       - anything else         → ("openai", "<model>")
 
@@ -33,6 +53,20 @@ def parse_model_provider(model_name: str) -> tuple[str, str]:
         return ("openrouter", model_name[len("openrouter/"):])
     elif model_name.startswith("bedrock/"):
         return ("bedrock", model_name[len("bedrock/"):])
+    elif model_name.startswith("deepseek/"):
+        return ("deepseek", model_name[len("deepseek/"):])
+    elif model_name.startswith("gemini/"):
+        return ("gemini", model_name[len("gemini/"):])
+    elif model_name.startswith("glm/"):
+        return ("glm", model_name[len("glm/"):])
+    elif model_name.startswith("kimi/"):
+        return ("kimi", model_name[len("kimi/"):])
+    elif model_name.startswith("qwen/"):
+        return ("qwen", model_name[len("qwen/"):])
+    elif model_name.startswith("xai/"):
+        return ("xai", model_name[len("xai/"):])
+    elif model_name.startswith("mistral/"):
+        return ("mistral", model_name[len("mistral/"):])
     elif model_name.startswith("claude-"):
         return ("anthropic", model_name)
     else:
@@ -45,6 +79,13 @@ def setup_llm(
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
     openrouter_api_key: str | None = None,
+    deepseek_api_key: str | None = None,
+    gemini_api_key: str | None = None,
+    glm_api_key: str | None = None,
+    kimi_api_key: str | None = None,
+    qwen_api_key: str | None = None,
+    xai_api_key: str | None = None,
+    mistral_api_key: str | None = None,
     openai_compat_api_key: str | None = None,
     openai_compat_base_url: str | None = None,
     aws_access_key_id: str | None = None,
@@ -70,15 +111,26 @@ def setup_llm(
         ptype = custom_llm_config.get("providerType", "openai_compatible")
 
         if ptype == "anthropic":
-            llm = ChatAnthropic(
-                model=custom_llm_config.get("modelIdentifier", api_model),
+            anth_model = custom_llm_config.get("modelIdentifier", api_model)
+            anth_kwargs = dict(
+                model=anth_model,
                 api_key=custom_llm_config.get("apiKey", ""),
                 base_url=custom_llm_config.get("baseUrl") or None,
                 default_headers=custom_llm_config.get("defaultHeaders") or {},
                 timeout=float(custom_llm_config.get("timeout", 120)),
-                temperature=custom_llm_config.get("temperature", 0),
                 max_tokens=custom_llm_config.get("maxTokens", 16384),
+                # Survive transient network blips. SDK default max_retries=2
+                # with ~3s total budget fails through spikes lasting 5-10s; 5
+                # retries spread over ~30s ride out any reasonable blip. The
+                # per-request timeout is user-configurable via the `timeout`
+                # kwarg above (alias of default_request_timeout in
+                # langchain_anthropic — passing both would silently let the
+                # user value win, so we keep only the configurable one).
+                max_retries=5,
             )
+            if _anthropic_supports_temperature(anth_model):
+                anth_kwargs["temperature"] = custom_llm_config.get("temperature", 0)
+            llm = ChatAnthropic(**anth_kwargs)
         elif ptype == "bedrock":
             from langchain_aws import ChatBedrockConverse
             llm = ChatBedrockConverse(
@@ -143,6 +195,90 @@ def setup_llm(
             },
         )
 
+    elif provider == "deepseek":
+        if not deepseek_api_key:
+            raise ValueError(
+                f"DeepSeek API key is required for model '{model_name}'"
+            )
+        llm = ChatOpenAI(
+            model=api_model,
+            api_key=deepseek_api_key,
+            base_url="https://api.deepseek.com/v1",
+            temperature=0,
+        )
+
+    elif provider == "gemini":
+        if not gemini_api_key:
+            raise ValueError(
+                f"Google Gemini API key is required for model '{model_name}'"
+            )
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        llm = ChatGoogleGenerativeAI(
+            model=api_model,
+            google_api_key=gemini_api_key,
+            temperature=0,
+        )
+
+    elif provider == "glm":
+        if not glm_api_key:
+            raise ValueError(
+                f"GLM (Zhipu AI) API key is required for model '{model_name}'"
+            )
+        llm = ChatOpenAI(
+            model=api_model,
+            api_key=glm_api_key,
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            temperature=0,
+        )
+
+    elif provider == "kimi":
+        if not kimi_api_key:
+            raise ValueError(
+                f"Kimi (Moonshot) API key is required for model '{model_name}'"
+            )
+        llm = ChatOpenAI(
+            model=api_model,
+            api_key=kimi_api_key,
+            base_url="https://api.moonshot.ai/v1",
+            temperature=0,
+        )
+
+    elif provider == "qwen":
+        if not qwen_api_key:
+            raise ValueError(
+                f"Qwen (Alibaba) API key is required for model '{model_name}'"
+            )
+        llm = ChatOpenAI(
+            model=api_model,
+            api_key=qwen_api_key,
+            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            temperature=0,
+        )
+
+    elif provider == "xai":
+        if not xai_api_key:
+            raise ValueError(
+                f"xAI (Grok) API key is required for model '{model_name}'"
+            )
+        llm = ChatOpenAI(
+            model=api_model,
+            api_key=xai_api_key,
+            base_url="https://api.x.ai/v1",
+            temperature=0,
+        )
+
+    elif provider == "mistral":
+        if not mistral_api_key:
+            raise ValueError(
+                f"Mistral AI API key is required for model '{model_name}'"
+            )
+        llm = ChatOpenAI(
+            model=api_model,
+            api_key=mistral_api_key,
+            base_url="https://api.mistral.ai/v1",
+            temperature=0,
+        )
+
     elif provider == "bedrock":
         if not aws_access_key_id or not aws_secret_access_key:
             raise ValueError(
@@ -162,12 +298,19 @@ def setup_llm(
             raise ValueError(
                 f"Anthropic API key is required for model '{model_name}'"
             )
-        llm = ChatAnthropic(
+        anth_kwargs = dict(
             model=api_model,
             api_key=anthropic_api_key,
-            temperature=0,
             max_tokens=16384,
+            # Survive transient network blips: see custom-provider path for
+            # max_retries rationale. 300s is below Anthropic's 10-min
+            # server-side cap but generous for Opus heavy prompts.
+            max_retries=5,
+            default_request_timeout=300.0,
         )
+        if _anthropic_supports_temperature(api_model):
+            anth_kwargs["temperature"] = 0
+        llm = ChatAnthropic(**anth_kwargs)
 
     else:  # openai
         if not openai_api_key:
@@ -219,6 +362,13 @@ def apply_project_settings(orchestrator, project_id: str) -> None:
         anthropic_p = _resolve_provider_key(user_providers, "anthropic")
         openrouter_p = _resolve_provider_key(user_providers, "openrouter")
         bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+        deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+        gemini_p = _resolve_provider_key(user_providers, "gemini")
+        glm_p = _resolve_provider_key(user_providers, "glm")
+        kimi_p = _resolve_provider_key(user_providers, "kimi")
+        qwen_p = _resolve_provider_key(user_providers, "qwen")
+        xai_p = _resolve_provider_key(user_providers, "xai")
+        mistral_p = _resolve_provider_key(user_providers, "mistral")
 
         try:
             orchestrator.llm = setup_llm(
@@ -226,6 +376,13 @@ def apply_project_settings(orchestrator, project_id: str) -> None:
                 openai_api_key=(openai_p or {}).get("apiKey"),
                 anthropic_api_key=(anthropic_p or {}).get("apiKey"),
                 openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+                deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+                gemini_api_key=(gemini_p or {}).get("apiKey"),
+                glm_api_key=(glm_p or {}).get("apiKey"),
+                kimi_api_key=(kimi_p or {}).get("apiKey"),
+                qwen_api_key=(qwen_p or {}).get("apiKey"),
+                xai_api_key=(xai_p or {}).get("apiKey"),
+                mistral_api_key=(mistral_p or {}).get("apiKey"),
                 aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
                 aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
                 aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",

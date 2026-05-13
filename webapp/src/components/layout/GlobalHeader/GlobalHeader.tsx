@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Crosshair, FolderOpen, Shield, CircleHelp, TrendingUp, FileText, Settings, Users, GitBranch } from 'lucide-react'
+import { Crosshair, FolderOpen, Shield, BookOpen, TrendingUp, FileText, Settings, Users, GitBranch } from 'lucide-react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { ProjectSelector } from './ProjectSelector'
 import { UserSelector } from './UserSelector'
@@ -89,7 +89,7 @@ export function GlobalHeader() {
           className={styles.helpLink}
           title="Wiki Documentation"
         >
-          <CircleHelp size={16} />
+          <BookOpen size={17} />
         </a>
 
         <div className={styles.divider} />

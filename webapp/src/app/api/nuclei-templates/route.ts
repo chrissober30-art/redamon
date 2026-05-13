@@ -121,8 +121,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Sanitize filename
-    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    // Sanitize filename. Nuclei v3+ ONLY recognizes the `.yaml` extension as a
+    // template file -- a `-t foo.yml` is treated as a path-list file (one
+    // template path per line) and the actual template is never loaded, with
+    // a confusing "no templates provided for scan" fatal. Normalize to .yaml
+    // on upload so this footgun can't reach the scanner.
+    const normalized = filename.replace(/\.yml$/i, '.yaml')
+    const safeName = normalized.replace(/[^a-zA-Z0-9._-]/g, '_')
 
     // Validate YAML content
     const content = await file.text()

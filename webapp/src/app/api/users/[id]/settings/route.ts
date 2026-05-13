@@ -12,7 +12,7 @@ function maskSecret(value: string): string {
 }
 
 const TUNNEL_FIELDS = ['ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
-const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan', 'censys', 'fofa', 'otx', 'netlas', 'virustotal', 'zoomeye', 'criminalip', 'quake', 'hunter', 'publicwww', 'hunterhow', 'onyphe', 'driftnet'] as const
+const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan', 'censys', 'fofa', 'otx', 'netlas', 'virustotal', 'zoomeye', 'criminalip', 'quake', 'hunter', 'publicwww', 'hunterhow', 'onyphe', 'driftnet', 'pdcp'] as const
 
 // GET /api/users/[id]/settings
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -65,6 +65,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         googleApiCx: '',
         onypheApiKey: '',
         driftnetApiKey: '',
+        wpscanApiToken: '',
+        pdcpApiKey: '',
         ngrokAuthtoken: '',
         chiselServerUrl: '',
         chiselAuth: '',
@@ -99,6 +101,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         onypheApiKey: maskSecret(settings.onypheApiKey),
         driftnetApiKey: maskSecret(settings.driftnetApiKey),
         wpscanApiToken: maskSecret(settings.wpscanApiToken),
+        pdcpApiKey: maskSecret(settings.pdcpApiKey),
         ngrokAuthtoken: maskSecret(settings.ngrokAuthtoken),
         chiselAuth: maskSecret(settings.chiselAuth),
       }
@@ -126,7 +129,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
 
     const data: Record<string, string> = {}
-    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiToken', 'censysOrgId', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'quakeApiKey', 'hunterApiKey', 'publicWwwApiKey', 'hunterHowApiKey', 'googleApiKey', 'googleApiCx', 'onypheApiKey', 'driftnetApiKey', 'wpscanApiToken', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
+    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiToken', 'censysOrgId', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'quakeApiKey', 'hunterApiKey', 'publicWwwApiKey', 'hunterHowApiKey', 'googleApiKey', 'googleApiCx', 'onypheApiKey', 'driftnetApiKey', 'wpscanApiToken', 'pdcpApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
 
     for (const field of fields) {
       if (field in body) {
@@ -252,6 +255,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       googleApiCx: maskSecret(settings.googleApiCx),
       onypheApiKey: maskSecret(settings.onypheApiKey),
       driftnetApiKey: maskSecret(settings.driftnetApiKey),
+      wpscanApiToken: maskSecret(settings.wpscanApiToken),
+      pdcpApiKey: maskSecret(settings.pdcpApiKey),
       ngrokAuthtoken: maskSecret(settings.ngrokAuthtoken),
       chiselAuth: maskSecret(settings.chiselAuth),
       rotationConfigs,

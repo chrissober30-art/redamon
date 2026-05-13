@@ -96,7 +96,7 @@ class BuildMemberStateTokenFieldsTests(unittest.TestCase):
         return {
             "name": "Web",
             "task": "recon",
-            "skills": [],
+            "tools": [],
         }
 
     def test_seeds_token_fields_to_zero(self):

@@ -1401,6 +1401,56 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
     if settings is None:
         settings = {}
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "httpx",
+        settings,
+        keys=[
+            ("HTTPX_DOCKER_IMAGE", "Image"),
+            ("HTTPX_THREADS", "Performance"),
+            ("HTTPX_TIMEOUT", "Performance"),
+            ("HTTPX_RETRIES", "Performance"),
+            ("HTTPX_RATE_LIMIT", "Performance"),
+            ("HTTPX_FOLLOW_REDIRECTS", "Redirects"),
+            ("HTTPX_MAX_REDIRECTS", "Redirects"),
+            ("HTTPX_PROBE_STATUS_CODE", "Probes"),
+            ("HTTPX_PROBE_CONTENT_LENGTH", "Probes"),
+            ("HTTPX_PROBE_CONTENT_TYPE", "Probes"),
+            ("HTTPX_PROBE_TITLE", "Probes"),
+            ("HTTPX_PROBE_SERVER", "Probes"),
+            ("HTTPX_PROBE_RESPONSE_TIME", "Probes"),
+            ("HTTPX_PROBE_WORD_COUNT", "Probes"),
+            ("HTTPX_PROBE_LINE_COUNT", "Probes"),
+            ("HTTPX_PROBE_TECH_DETECT", "Tech detection"),
+            ("HTTPX_PROBE_IP", "Network"),
+            ("HTTPX_PROBE_CNAME", "Network"),
+            ("HTTPX_PROBE_TLS_INFO", "TLS"),
+            ("HTTPX_PROBE_TLS_GRAB", "TLS"),
+            ("HTTPX_PROBE_FAVICON", "Fingerprinting"),
+            ("HTTPX_PROBE_JARM", "Fingerprinting"),
+            ("HTTPX_PROBE_HASH", "Fingerprinting"),
+            ("HTTPX_INCLUDE_RESPONSE", "Response"),
+            ("HTTPX_INCLUDE_RESPONSE_HEADERS", "Response"),
+            ("HTTPX_PROBE_ASN", "ASN/CDN"),
+            ("HTTPX_PROBE_CDN", "ASN/CDN"),
+            ("HTTPX_PATHS", "Advanced"),
+            ("HTTPX_CUSTOM_HEADERS", "Advanced"),
+            ("HTTPX_MATCH_CODES", "Advanced"),
+            ("HTTPX_FILTER_CODES", "Advanced"),
+            ("USE_TOR_FOR_RECON", "Anonymity"),
+            ("WAPPALYZER_ENABLED", "Wappalyzer enrichment"),
+            ("WAPPALYZER_MIN_CONFIDENCE", "Wappalyzer enrichment"),
+            ("WAPPALYZER_REQUIRE_HTML", "Wappalyzer enrichment"),
+            ("WAPPALYZER_AUTO_UPDATE", "Wappalyzer enrichment"),
+            ("WAPPALYZER_CACHE_TTL_HOURS", "Wappalyzer enrichment"),
+            ("WAPPALYZER_NPM_VERSION", "Wappalyzer enrichment"),
+            ("BANNER_GRAB_ENABLED", "Banner grabbing"),
+            ("BANNER_GRAB_TIMEOUT", "Banner grabbing"),
+            ("BANNER_GRAB_THREADS", "Banner grabbing"),
+            ("BANNER_GRAB_MAX_LENGTH", "Banner grabbing"),
+        ],
+    )
+
     # Extract settings from passed dict
     HTTPX_DOCKER_IMAGE = settings.get('HTTPX_DOCKER_IMAGE', 'projectdiscovery/httpx:latest')
     HTTPX_THREADS = settings.get('HTTPX_THREADS', 50)

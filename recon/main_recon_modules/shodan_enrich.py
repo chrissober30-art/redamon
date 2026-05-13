@@ -429,6 +429,21 @@ def run_shodan_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
     if not any([do_host, do_rdns, do_ddns, do_cves]):
         return combined_result
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Shodan",
+        settings,
+        keys=[
+            ("SHODAN_HOST_LOOKUP", "Lookups"),
+            ("SHODAN_REVERSE_DNS", "Lookups"),
+            ("SHODAN_DOMAIN_DNS", "Lookups"),
+            ("SHODAN_PASSIVE_CVES", "Lookups"),
+            ("SHODAN_WORKERS", "Performance"),
+            ("SHODAN_API_KEY", "API credentials"),
+            ("SHODAN_KEY_ROTATOR", "API credentials"),
+        ],
+    )
+
     print(f"\n[PHASE] Shodan OSINT Enrichment")
     print("-" * 40)
 

@@ -8,7 +8,7 @@ import { useProjects, useDeleteProject } from '@/hooks/useProjects'
 import { useUsers, useCreateUser, useDeleteUser } from '@/hooks/useUsers'
 import { useProject } from '@/providers/ProjectProvider'
 import { ProjectCard } from '@/components/projects/ProjectCard'
-import { useAlertModal, useToast } from '@/components/ui'
+import { useAlertModal, useToast, WikiInfoButton } from '@/components/ui'
 import { ImportModal } from './ImportModal'
 import styles from './page.module.css'
 
@@ -103,6 +103,7 @@ export default function ProjectsPage() {
         <div className={styles.headerLeft}>
           <FolderOpen size={20} />
           <h1 className={styles.title}>Projects</h1>
+          <WikiInfoButton target="projects" title="Open Creating a Project wiki page" />
         </div>
         <div className={styles.headerActions}>
           <button

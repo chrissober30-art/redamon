@@ -23,7 +23,6 @@ interface FireteamMemberCardProps {
   missingApiKeys?: Set<string>
   onAddApiKey?: (toolId: string) => void
   onToolConfirmation?: (itemId: string, decision: 'approve' | 'reject') => void
-  toolConfirmationDisabled?: boolean
   /** Cancel a single running tool inside this member's tool list or nested plan waves. */
   onToolStop?: (itemId: string) => void
 }
@@ -49,7 +48,7 @@ function statusIcon(status: FireteamMemberPanel['status']) {
   }
 }
 
-export function FireteamMemberCard({ member, missingApiKeys, onAddApiKey, onToolConfirmation, toolConfirmationDisabled, onToolStop }: FireteamMemberCardProps) {
+export function FireteamMemberCard({ member, missingApiKeys, onAddApiKey, onToolConfirmation, onToolStop }: FireteamMemberCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
   const [collapsedWaves, setCollapsedWaves] = useState<Set<string>>(new Set())
@@ -124,45 +123,49 @@ export function FireteamMemberCard({ member, missingApiKeys, onAddApiKey, onTool
           {member.completion_reason && member.status !== 'success' && (
             <div className={styles.completionReason}>Reason: {member.completion_reason}</div>
           )}
-          {member.planWaves.length > 0 && (
-            <div className={styles.waves}>
-              {member.planWaves.map(w => (
-                <PlanWaveCard
-                  key={w.id}
-                  item={w}
-                  isExpanded={!collapsedWaves.has(w.id)}
-                  onToggleExpand={() => toggleWaveExpand(w.id)}
-                  missingApiKeys={missingApiKeys}
-                  onAddApiKey={onAddApiKey}
-                  onApprove={
-                    w.status === 'pending_approval' && onToolConfirmation
-                      ? () => onToolConfirmation(w.id, 'approve')
-                      : undefined
-                  }
-                  onReject={
-                    w.status === 'pending_approval' && onToolConfirmation
-                      ? () => onToolConfirmation(w.id, 'reject')
-                      : undefined
-                  }
-                  confirmationDisabled={toolConfirmationDisabled}
-                  onToolStop={onToolStop}
-                />
-              ))}
-            </div>
-          )}
-          {member.tools.length > 0 && (
-            <div className={styles.tools}>
-              {member.tools.map(t => (
-                <ToolExecutionCard
-                  key={t.id}
-                  item={t}
-                  isExpanded={expandedTools.has(t.id)}
-                  onToggleExpand={() => toggleToolExpand(t.id)}
-                  missingApiKey={missingApiKeys?.has(t.tool_name) ?? false}
-                  onAddApiKey={onAddApiKey ? () => onAddApiKey(t.tool_name) : undefined}
-                  onStop={onToolStop ? () => onToolStop(t.id) : undefined}
-                />
-              ))}
+          {(member.planWaves.length > 0 || member.tools.length > 0) && (
+            <div className={styles.timeline}>
+              {/* Merge waves + standalone tools into a single timestamp-sorted
+                  stream. The two state lists are populated independently, so
+                  rendering them in fixed JSX order (waves-then-tools) put new
+                  waves above older standalone tools, breaking the operator's
+                  chronological mental model. */}
+              {[...member.planWaves, ...member.tools]
+                .slice()
+                .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+                .map(item =>
+                  item.type === 'plan_wave' ? (
+                    <PlanWaveCard
+                      key={item.id}
+                      item={item}
+                      isExpanded={!collapsedWaves.has(item.id)}
+                      onToggleExpand={() => toggleWaveExpand(item.id)}
+                      missingApiKeys={missingApiKeys}
+                      onAddApiKey={onAddApiKey}
+                      onApprove={
+                        item.status === 'pending_approval' && onToolConfirmation
+                          ? () => onToolConfirmation(item.id, 'approve')
+                          : undefined
+                      }
+                      onReject={
+                        item.status === 'pending_approval' && onToolConfirmation
+                          ? () => onToolConfirmation(item.id, 'reject')
+                          : undefined
+                      }
+                      onToolStop={onToolStop}
+                    />
+                  ) : (
+                    <ToolExecutionCard
+                      key={item.id}
+                      item={item}
+                      isExpanded={expandedTools.has(item.id)}
+                      onToggleExpand={() => toggleToolExpand(item.id)}
+                      missingApiKey={missingApiKeys?.has(item.tool_name) ?? false}
+                      onAddApiKey={onAddApiKey ? () => onAddApiKey(item.tool_name) : undefined}
+                      onStop={onToolStop ? () => onToolStop(item.id) : undefined}
+                    />
+                  ),
+                )}
             </div>
           )}
           {toolCount === 0 && member.status === 'running' && !member.latest_thought && (

@@ -8,19 +8,23 @@ Add **[SKILL_ID]** (e.g. `ssrf`, `xxe`, `deserialization`) as a new **built-in A
 
 ## Architecture recap (read this first)
 
-A built-in Agent Skill is wired through **7 layers**. Every new skill must touch ALL of them to work end to end.
+A built-in Agent Skill is wired through **9 layers**. Every new skill must touch ALL of them to work end to end. Layers 8 and 9 are the ones implementers most often forget -- they are not in the project-settings page, they live in the chat drawer, and missing them produces silent UX gaps (no tooltip entry, no example prompts) without any error.
 
 | # | Layer | File | What it does |
 |---|---|---|---|
 | 1 | Workflow prompts | [agentic/prompts/<skill_id>_prompts.py](../../agentic/prompts/) | Multi-line Python string constants: the per-phase workflow the LLM follows |
 | 2 | Package re-exports | [agentic/prompts/__init__.py](../../agentic/prompts/__init__.py) | `from .<skill>_prompts import ...` and add to `__all__` |
 | 3 | Phase injection | [agentic/prompts/__init__.py `get_phase_tools()`](../../agentic/prompts/__init__.py) | `_inject_builtin_skill_workflow()` branch that appends the prompts when the skill is classified |
-| 4 | Classification | [agentic/prompts/classification.py](../../agentic/prompts/classification.py) | Section text in `_BUILTIN_SKILL_MAP`, criteria in `_CLASSIFICATION_INSTRUCTIONS`, entry in the ordered skill-id lists, entry in `valid_types` |
-| 5 | Project settings defaults | [agentic/project_settings.py](../../agentic/project_settings.py) | Entry under `ATTACK_SKILL_CONFIG.builtIn` + any per-skill tunables (e.g. `SQLI_LEVEL`) |
-| 6 | Prisma schema default | [webapp/prisma/schema.prisma](../../webapp/prisma/schema.prisma) line ~681 (`attackSkillConfig`) | JSON default for the Project field |
+| 4 | Classification | [agentic/prompts/classification.py](../../agentic/prompts/classification.py) + [agentic/state.py](../../agentic/state.py) `KNOWN_ATTACK_PATHS` | Section text in `_BUILTIN_SKILL_MAP`, criteria in `_CLASSIFICATION_INSTRUCTIONS`, entry in the ordered skill-id lists, entry in `valid_types`, AND add the skill ID to `KNOWN_ATTACK_PATHS` so the Pydantic validator accepts the classifier output |
+| 5 | Project settings defaults | [agentic/project_settings.py](../../agentic/project_settings.py) | Entry under `ATTACK_SKILL_CONFIG.builtIn` + any per-skill tunables (e.g. `SQLI_LEVEL`) + `fetch_agent_settings` mappings if the tunables are per-project |
+| 6 | Prisma schema default | [webapp/prisma/schema.prisma](../../webapp/prisma/schema.prisma) line ~681 (`attackSkillConfig`) | JSON default for the Project field, plus any per-skill columns if you added Prisma-backed tunables |
 | 7 | Frontend UI + badge | [AttackSkillsSection.tsx](../../webapp/src/components/projects/ProjectForm/sections/AttackSkillsSection.tsx) + [phaseConfig.ts](../../webapp/src/app/graph/components/AIAssistantDrawer/phaseConfig.ts) | Per-project toggle card + classification badge color/label |
+| 8 | **Drawer skills tooltip API** | [webapp/src/app/api/users/[id]/attack-skills/available/route.ts](../../webapp/src/app/api/users/[id]/attack-skills/available/route.ts) `BUILT_IN_SKILLS` array | Drives the **Agent Skills tooltip** in the chat-drawer header (the hover panel on the active-skill badge). Skills missing from this hardcoded list will not appear in the tooltip even if classification picks them. |
+| 9 | **Drawer suggestion prompts** | [webapp/src/app/graph/components/AIAssistantDrawer/suggestionData.ts](../../webapp/src/app/graph/components/AIAssistantDrawer/suggestionData.ts) `EXPLOITATION_GROUPS` (and `INFORMATIONAL_GROUPS` / `POST_EXPLOITATION_GROUPS` if applicable) | Example-prompt cards in the chat-drawer suggestion dropdown. Add a new `SESubGroup` block with the skill's `id`, a human title, and 4-6 ready-to-send prompt examples that exercise the skill. Without this entry the user has no one-click way to invoke the new skill. |
 
-Classification key = the snake_case string used EVERYWHERE: `cve_exploit`, `sql_injection`, `xss`, etc. Pick it once in Phase 1 and use that exact literal across all 7 layers.
+Classification key = the snake_case string used EVERYWHERE: `cve_exploit`, `sql_injection`, `xss`, etc. Pick it once in Phase 1 and use that exact literal across all 9 layers.
+
+A handful of files reference skill IDs only in stale doc-comments (e.g. [webapp/src/lib/websocket-types.ts](../../webapp/src/lib/websocket-types.ts) line ~337's `attack_path_type` comment). These do NOT affect runtime, but updating them along with the new skill prevents future readers from being misled. `grep -rn "cve_exploit" webapp/src/` will surface every remaining reference.
 
 ---
 
@@ -74,6 +78,93 @@ Post-exploitation?:       yes | no             # DoS says no; most say yes
 - `brute_force_credential_guess` gates on `"execute_hydra" in allowed_tools`
 
 Pick the analogous one for your skill.
+
+---
+
+## Phase 1.5: Designing tunables (decide BEFORE you write the prompt)
+
+The "Tunable settings" line in the Phase 1 contract is the most consequential design choice in the whole skill. Every tunable becomes: a default in `DEFAULT_AGENT_SETTINGS`, a column in the Prisma `Project` model, a field mapping in `fetch_agent_settings`, a UI control in the per-skill section component, and a branch in `_inject_builtin_skill_workflow`. Wrong calls here ripple across all 7 layers; right calls let the prompt and sub-prompts vary per-engagement without touching code.
+
+### When to add a tunable (the decision rule)
+
+Add a tunable ONLY when the answer is yes to at least one of the following, AND no to the disqualifier:
+
+- **Operator-meaningful?** Would a real pentester or compliance officer change this between engagements? (e.g. "client forbids OOB callbacks", "client wants only AWS metadata pivots", "engagement permits aggressive payloads").
+- **Site-specific?** Does the value depend on the target environment, not the technique? (e.g. internal CIDR ranges, custom internal hostnames, OOB provider domain when oast.fun is blocked).
+- **Scope-altering?** Does the value flip whether a meaningful sub-workflow ships in the prompt at all? (e.g. SSRF cloud-metadata sub-section, RCE deserialization sub-section, XSS blind-callback workflow).
+- **RoE-sensitive?** Does the value gate behaviour that an RoE document would explicitly forbid? (e.g. data exfiltration, account lockout, persistent footholds, container escape).
+- **Prompt-bloat gate?** Does the value let a small client trim a 5+ KB sub-section the LLM doesn't always need? (e.g. SSRF advanced payload reference, XSS CSP-bypass guidance).
+
+**Disqualifier (do NOT make it a tunable):** the agent can decide this at runtime from observed target behaviour. Concretely: which payload to try first, whether to escalate to a noisier technique, retry counts, timing variance for oracle detection, which order to enumerate parameters in, how many parallel curls to fire. These belong in the prompt as guidance ("start with the simplest payload; escalate only if filtered"), not in settings.
+
+The competitor benchmark in [internal/SKILL_TO_ADD.md](../../internal/SKILL_TO_ADD.md) is also a useful sanity-check: count the per-skill knobs the upstream prompt actually parameterizes. Strix prompts have ~0-2 user-facing variables; Shannon has ~5-10 because of the deliverable-CLI plumbing we strip. Aim for 2-5 RedAmon tunables; over 6 usually means something belongs in code as the agent's default.
+
+### The three dynamic-prompt patterns (and when to use each)
+
+Pick the pattern based on what the setting actually changes:
+
+#### Pattern A: String `.format()` placeholder
+
+The setting value flows directly into the rendered prompt text. Use when the agent needs to SEE the value to act on it (a numeric threshold, a free-text scope hint, a pre-resolved CLI flag string).
+
+- Source: [agentic/prompts/sql_injection_prompts.py](../../agentic/prompts/sql_injection_prompts.py) `SQLI_TOOLS` uses `{sqli_level}`, `{sqli_risk}`, `{sqli_tamper_scripts}`.
+- Wiring (Layer 3): pass via `.format(**settings_dict)` in `_inject_builtin_skill_workflow`.
+- Best for: thresholds (`SQLI_LEVEL=3`), pre-built flag strings (`HYDRA_FLAGS`), free-text site context (`SSRF_CUSTOM_INTERNAL_TARGETS`), hostname / CIDR lists, OOB provider domain.
+- Caveat: the prompt MUST escape literal braces (`{{` / `}}`) everywhere else in the template; Python's `str.format` will otherwise raise `KeyError`. Run a unit test that calls `.format(**defaults)` to catch this on every prompt change.
+
+#### Pattern B: Whole sub-section conditional injection
+
+An entire pre-rendered markdown block is appended to `parts` only when a boolean is True. Use when the alternative is "the agent doesn't need this content at all in this engagement."
+
+- Source: [agentic/prompts/xss_prompts.py](../../agentic/prompts/xss_prompts.py) `XSS_BLIND_WORKFLOW` is appended only when `XSS_BLIND_CALLBACK_ENABLED` is True.
+- Wiring (Layer 3): a plain `if setting and "tool" in allowed_tools: parts.append(SUB_SECTION)` after `parts.append(MAIN_TOOLS.format(...))`.
+- Best for: heavy reference blocks (3-10 KB) that only some engagements need, OOB callback workflows, optional payload reference tables, language-specific deserialization workflows, cloud-provider-specific blocks.
+- Caveat: the sub-section constant is appended raw, NOT formatted. So it uses single braces `{...}` for legitimate JSON / Jinja2 / IFS / etc. If you accidentally write `{{...}}` thinking it will be substituted, it will reach the LLM with literal double braces. A regex check `re.findall(r'\{rce_[a-z_]+\}', SUB_SECTION) == []` prevents misuse-of-format-placeholder leaks.
+
+#### Pattern C: Swap-block (one-of-N substitution into a `.format` slot)
+
+A `{block_name}` placeholder in the main template is filled with one of two (or more) prebuilt strings, picked by the setting. Use when the alternative is not "skip" but "behave differently."
+
+- Source A: [agentic/prompts/denial_of_service_prompts.py](../../agentic/prompts/denial_of_service_prompts.py) `DOS_TOOLS` has a `{dos_assessment_only_block}` slot filled with either an inline assessment-mode warning or empty string.
+- Source B: [agentic/prompts/rce_prompts.py](../../agentic/prompts/rce_prompts.py) `RCE_TOOLS` has a `{rce_aggressive_block}` slot filled with `RCE_AGGRESSIVE_DISABLED` (forbids destructive techniques) or `RCE_AGGRESSIVE_ENABLED` (permits them with mandatory cleanup).
+- Wiring (Layer 3): resolve the swap value before format, pass it as the placeholder: `parts.append(MAIN_TOOLS.format(..., my_block=BLOCK_A if cond else BLOCK_B))`.
+- Best for: assessment-vs-active modes, aggressive-vs-conservative payload sets, stealth-vs-loud guidance, RoE-gated step replacements.
+- Caveat: the swap-in strings are themselves NOT format-templated (Python's `str.format` does not recurse into substituted values). So they use single braces `{...}` for any legit content. Same brace discipline as Pattern B.
+
+### Picking defaults
+
+Apply this matrix when assigning the boolean default in `DEFAULT_AGENT_SETTINGS`:
+
+| Behaviour the setting enables | Default | Reason |
+|-------------------------------|---------|--------|
+| Sends data outside the engagement (OOB, blind callback, exfil to oast.fun) | `False` | Some clients ban external infrastructure even for testing. Operator must opt in. |
+| Modifies target state (file write, persistent shell, account changes, cron) | `False` | Cleanup obligation, audit trail, RoE risk. |
+| Probes cloud metadata or container/k8s APIs | `True` (with sub-section toggle off if you want trimmed prompts) | Common in cloud engagements; passive reads. |
+| Adds payload reference / WAF-bypass / CSP-bypass guidance | `True` | Pure prompt content, no target side-effect. Lets less-experienced agents pick the right payload. |
+| Selects between conservative and aggressive payload sets | `False` (conservative) | Read-only proofs already satisfy a Level 3 finding for most skills. |
+| Trims a heavy sub-section purely for prompt length | `True` (include) | Default to full coverage; let length-conscious operators turn off. |
+
+If a setting is RoE-gated (e.g. `denial_of_service` requires `ROE_ALLOW_DOS`), default the FEATURE flag to True (so the prompt is functional when RoE permits) and let the RoE gate in classification + injection do the actual blocking. Do not double-gate.
+
+### Naming + storage conventions
+
+- **Setting key:** `<SKILL_ID_UPPER>_<FEATURE>_ENABLED` for booleans, `<SKILL_ID_UPPER>_<NOUN>` for values. Examples: `SSRF_OOB_CALLBACK_ENABLED`, `SSRF_REQUEST_TIMEOUT`, `RCE_AGGRESSIVE_PAYLOADS`, `SQLI_LEVEL`. Match the prefix to the skill_id exactly so a `grep -r SSRF_` finds every site that touches SSRF.
+- **API field name:** camelCase, same root: `ssrfOobCallbackEnabled`, `rceAggressivePayloads`. Required in `fetch_agent_settings` mappings AND in the Prisma column `@map("ssrf_oob_callback_enabled")` snake_case.
+- **Format placeholder:** lowercase snake_case of the setting key, without the skill prefix when readable: `{rce_oob_callback_enabled}`, `{sqli_level}`. The placeholder is what the LLM sees rendered; keep it readable.
+- **Comment in `DEFAULT_AGENT_SETTINGS`:** one trailing line documenting WHY this is operator-changeable, not WHAT the value does. The `WHY` is what informs whether the toggle should live in the UI at all.
+
+### Cross-checking against the 7 layers
+
+Once you have your tunable list locked, walk it through every layer to confirm nothing dangles:
+
+1. Layer 1 (`<skill>_prompts.py`): the placeholder appears in the template AND a sub-section / swap-block exists for it.
+2. Layer 3 (`_inject_builtin_skill_workflow`): the setting is read with `get_setting('<KEY>', <default>)` and passed to `.format()` (Pattern A) OR gates an `if`-append (Pattern B) OR resolves the swap-block argument (Pattern C).
+3. Layer 5 (`project_settings.py`): key in `DEFAULT_AGENT_SETTINGS` AND a camelCase mapping in `fetch_agent_settings`.
+4. Layer 6 (Prisma): if the tunable is per-project (most are), a column with `@default(...)` and `@map("snake_case_name")`. Pure prompt-bloat toggles can live in defaults only if you accept that all projects share them.
+5. Layer 7 (frontend `<Skill>Section.tsx`): a labelled input that writes to the camelCase Prisma field via `updateField`. One-line operator-facing description. If you have 3+ booleans plus a value field, group them under a sub-heading.
+6. Test (Phase 9 smoke + the per-skill test file): a unit test toggles each setting and asserts the rendered prompt changes (Pattern A: value visible in output; Pattern B: sub-section heading present/absent; Pattern C: correct swap-block selected).
+
+If a tunable fails any of these checks, it is not yet a tunable -- it is dead config. Either complete the wiring or delete it.
 
 ---
 
@@ -338,8 +429,53 @@ Existing colors in use:
 - red (#ef4444) `denial_of_service`
 - cyan (#06b6d4) `sql_injection`
 - green (#10b981) `xss`
+- orange (#f97316) `ssrf`
+- rose (#f43f5e) `rce`
 - blue (#3b82f6) reserved for user skills
 - gray reserved for unclassified
+
+**8.3** Edit [webapp/src/app/api/users/[id]/attack-skills/available/route.ts](../../webapp/src/app/api/users/[id]/attack-skills/available/route.ts) (Layer 8).
+
+This API route's `BUILT_IN_SKILLS` array feeds the **skill-tooltip overlay** rendered above the chat input by `PhaseIndicatorBar.tsx` via the `useAttackSkillData` hook. If the new skill is not added here, it will NOT appear in the tooltip even though classification, badge, and project settings work. The user will see the active badge but the popup will be missing the entry.
+
+Add an object matching the existing shape (id + name + description, NO icon -- the tooltip renders text only):
+
+```ts
+{
+  id: '<skill_id>',
+  name: '<Display Name>',
+  description: '<one-line description matching the AttackSkillsSection card>',
+},
+```
+
+Keep the order in this array consistent with the order in `BUILT_IN_SKILLS` of [AttackSkillsSection.tsx](../../webapp/src/components/projects/ProjectForm/sections/AttackSkillsSection.tsx) so the project-settings page and the drawer tooltip read the same.
+
+**8.4** Edit [webapp/src/app/graph/components/AIAssistantDrawer/suggestionData.ts](../../webapp/src/app/graph/components/AIAssistantDrawer/suggestionData.ts) (Layer 9).
+
+Append a new `SESubGroup` block to `EXPLOITATION_GROUPS` (and to `INFORMATIONAL_GROUPS` / `POST_EXPLOITATION_GROUPS` only if the skill has phase-specific recon or post-exploitation actions worth pre-canning):
+
+```ts
+{
+  id: '<skill_id>',
+  title: '<Display Name>',
+  items: [
+    {
+      suggestions: [
+        { label: '<short verb phrase>', prompt: '<full instruction the agent will receive>' },
+        // 3-6 examples covering the most common asks for this skill
+      ],
+    },
+  ],
+},
+```
+
+Guidelines for the prompt examples:
+- Each `prompt` must be a self-contained instruction that the agent can execute. Do NOT reference variables or placeholders the agent won't have ("the target" is fine; "TARGET_HOST" is not).
+- Cover the breadth of the skill: the most common payload class, an OOB / blind variant, an automation pivot, and a bypass / WAF-evasion case if applicable.
+- Keep each `label` under 60 characters so the dropdown stays readable.
+- Mention specific tools (`commix`, `sqlmap`, `dalfox`, `ysoserial`, etc.) so the agent knows which one to reach for.
+
+Without this entry the new skill will be classified correctly when the user types a request, but the chat drawer's "Example prompts" dropdown will have no quick-launch buttons for it -- a noticeable UX regression versus the older skills.
 
 ---
 
@@ -385,6 +521,7 @@ docker compose build webapp && docker compose up -d webapp
 - [ ] `agentic/prompts/<skill_id>_prompts.py` created with `<SKILL_ID_UPPER>_TOOLS`
 - [ ] Constants re-exported in [agentic/prompts/__init__.py](../../agentic/prompts/__init__.py) + added to `__all__`
 - [ ] New `elif` branch in `_inject_builtin_skill_workflow()` with phase guard
+- [ ] `<skill_id>` added to `KNOWN_ATTACK_PATHS` in [agentic/state.py](../../agentic/state.py) (otherwise the Pydantic validator rejects classifier output)
 - [ ] `_<SKILL_ID_UPPER>_SECTION` added and wired into `_BUILTIN_SKILL_MAP`
 - [ ] `_CLASSIFICATION_INSTRUCTIONS[<skill_id>]` added
 - [ ] `<skill_id>` added to BOTH ordered lists in `build_classification_prompt()`
@@ -394,5 +531,8 @@ docker compose build webapp && docker compose up -d webapp
 - [ ] `BUILT_IN_SKILLS` entry added in [AttackSkillsSection.tsx](../../webapp/src/components/projects/ProjectForm/sections/AttackSkillsSection.tsx)
 - [ ] `DEFAULT_CONFIG.builtIn.<skill_id>` added in [AttackSkillsSection.tsx](../../webapp/src/components/projects/ProjectForm/sections/AttackSkillsSection.tsx)
 - [ ] `KNOWN_ATTACK_PATH_CONFIG[<skill_id>]` badge added in [phaseConfig.ts](../../webapp/src/app/graph/components/AIAssistantDrawer/phaseConfig.ts)
+- [ ] **`BUILT_IN_SKILLS` entry added in [api/users/[id]/attack-skills/available/route.ts](../../webapp/src/app/api/users/[id]/attack-skills/available/route.ts)** (Layer 8: powers the chat-drawer skills tooltip; easy to miss, no UI failure on the project form if forgotten)
+- [ ] **Suggestion-prompt block added to `EXPLOITATION_GROUPS` in [suggestionData.ts](../../webapp/src/app/graph/components/AIAssistantDrawer/suggestionData.ts)** (Layer 9: 4-6 ready-to-send example prompts so the user has one-click invocations in the chat drawer)
+- [ ] Stale skill-id comments swept (`grep -rn "<old skill id list>" webapp/src/`); update doc-comments in files like [webapp/src/lib/websocket-types.ts](../../webapp/src/lib/websocket-types.ts) so they reflect the new skill set
 - [ ] Agent container rebuilt; webapp rebuilt (or hot-reloaded in dev)
-- [ ] End-to-end smoke test passed (keyword -> badge -> workflow in system prompt)
+- [ ] End-to-end smoke test passed (keyword -> badge -> workflow in system prompt -> tooltip lists the new skill with checkmark when active -> suggestion-dropdown shows the example prompts)

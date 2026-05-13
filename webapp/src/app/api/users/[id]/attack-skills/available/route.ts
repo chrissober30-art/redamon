@@ -22,6 +22,21 @@ const BUILT_IN_SKILLS = [
     description: 'Reflected, stored, DOM-based, and blind XSS testing with dalfox, kxss, Playwright, and CSP-bypass guidance',
   },
   {
+    id: 'ssrf',
+    name: 'Server-Side Request Forgery',
+    description: 'SSRF detection, internal-network probing, cloud-metadata pivots, protocol smuggling, DNS rebinding, and Redis/FastCGI/Docker RCE chains',
+  },
+  {
+    id: 'rce',
+    name: 'Remote Code Execution',
+    description: 'RCE / command injection, SSTI across templating engines, deserialization gadget chains (ysoserial), eval / OGNL / SpEL injection, and media-pipeline RCE',
+  },
+  {
+    id: 'path_traversal',
+    name: 'Path Traversal / LFI / RFI',
+    description: 'Arbitrary file read via path traversal, Local File Inclusion, Remote File Inclusion, PHP wrapper chains (php://filter, data://, expect://), log poisoning, and Zip Slip archive-extraction tests',
+  },
+  {
     id: 'brute_force_credential_guess',
     name: 'Credential Testing',
     description: 'Credential policy validation using Hydra against login services',

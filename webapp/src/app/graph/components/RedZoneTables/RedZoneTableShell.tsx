@@ -1,8 +1,14 @@
 'use client'
 
-import { memo, type ReactNode } from 'react'
+import { memo, useCallback, useState, type ReactNode } from 'react'
 import { Loader2, AlertTriangle, Database, Search, Download, RefreshCw, SearchX } from 'lucide-react'
 import styles from './RedZoneTableShell.module.css'
+import {
+  exportRedZoneCsv,
+  exportRedZoneJson,
+  exportRedZoneMarkdown,
+  type RedZoneExportConfig,
+} from './exportCsv'
 
 interface RedZoneTableShellProps {
   title: string
@@ -10,6 +16,9 @@ interface RedZoneTableShellProps {
   search: string
   onSearchChange: (value: string) => void
   searchPlaceholder?: string
+  /** Provide rows + columns to render CSV/JSON/MD export buttons. */
+  exportConfig?: RedZoneExportConfig
+  /** Legacy single-button CSV callback (kept for back-compat). */
   onExport?: () => void
   onRefresh?: () => void
   isLoading: boolean
@@ -27,6 +36,7 @@ export const RedZoneTableShell = memo(function RedZoneTableShell({
   search,
   onSearchChange,
   searchPlaceholder = 'Search...',
+  exportConfig,
   onExport,
   onRefresh,
   isLoading,
@@ -37,6 +47,34 @@ export const RedZoneTableShell = memo(function RedZoneTableShell({
   noMatchLabel = 'No rows match your search.',
   children,
 }: RedZoneTableShellProps) {
+  const [exporting, setExporting] = useState<'csv' | 'json' | 'md' | null>(null)
+  const runExport = useCallback(
+    async (format: 'csv' | 'json' | 'md', fn: () => Promise<void>) => {
+      if (exporting) return
+      setExporting(format)
+      try { await fn() } finally { setExporting(null) }
+    },
+    [exporting],
+  )
+  const handleCsv = useCallback(() => {
+    if (!exportConfig) return
+    runExport('csv', () =>
+      exportRedZoneCsv(exportConfig.rows, exportConfig.sheetName, exportConfig.columns, exportConfig.fileSlug),
+    )
+  }, [exportConfig, runExport])
+  const handleJson = useCallback(() => {
+    if (!exportConfig) return
+    runExport('json', () =>
+      exportRedZoneJson(exportConfig.rows, exportConfig.sheetName, exportConfig.columns, exportConfig.fileSlug),
+    )
+  }, [exportConfig, runExport])
+  const handleMd = useCallback(() => {
+    if (!exportConfig) return
+    runExport('md', () =>
+      exportRedZoneMarkdown(exportConfig.rows, exportConfig.sheetName, exportConfig.columns, exportConfig.fileSlug),
+    )
+  }, [exportConfig, runExport])
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -64,12 +102,33 @@ export const RedZoneTableShell = memo(function RedZoneTableShell({
               <RefreshCw size={12} />
             </button>
           )}
-          {onExport && (
-            <button className={styles.exportBtn} onClick={onExport} aria-label="Export to Excel">
+          {exportConfig ? (
+            <>
+              <button className={styles.exportBtn} onClick={handleCsv} disabled={!!exporting} aria-label="Export to CSV" title="Export to CSV">
+                {exporting === 'csv'
+                  ? <Loader2 size={12} className={styles.spinner} />
+                  : <Download size={12} />}
+                <span>CSV</span>
+              </button>
+              <button className={styles.exportBtn} onClick={handleJson} disabled={!!exporting} aria-label="Export to JSON" title="Export to JSON">
+                {exporting === 'json'
+                  ? <Loader2 size={12} className={styles.spinner} />
+                  : <Download size={12} />}
+                <span>JSON</span>
+              </button>
+              <button className={styles.exportBtn} onClick={handleMd} disabled={!!exporting} aria-label="Export to Markdown" title="Export to Markdown">
+                {exporting === 'md'
+                  ? <Loader2 size={12} className={styles.spinner} />
+                  : <Download size={12} />}
+                <span>MD</span>
+              </button>
+            </>
+          ) : onExport ? (
+            <button className={styles.exportBtn} onClick={onExport} aria-label="Export to CSV">
               <Download size={12} />
-              <span>XLSX</span>
+              <span>CSV</span>
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 

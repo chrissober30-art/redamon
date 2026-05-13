@@ -4,6 +4,7 @@ RedAmon - Katana Crawler Helpers for Resource Enumeration
 Active URL discovery using Katana web crawler.
 """
 
+import os
 import select
 import subprocess
 import ssl
@@ -91,8 +92,12 @@ def run_katana_crawler(
 
     print(f"[*][Katana] Target URLs: {len(valid_urls)}")
 
-    # Write all target URLs to a temp file for Katana's -list flag
-    url_file = f"/tmp/katana_targets_{uuid.uuid4().hex[:8]}.txt"
+    # Write target URLs to /tmp/redamon (bind-mounted same path host<->recon
+    # container, see docker-compose.yml). Plain /tmp doesn't work under
+    # Docker-in-Docker: the spawned katana container's -v /tmp:/tmp resolves
+    # against the host daemon's /tmp, not the recon container's /tmp.
+    os.makedirs("/tmp/redamon", exist_ok=True)
+    url_file = f"/tmp/redamon/katana_targets_{uuid.uuid4().hex[:8]}.txt"
 
     try:
         with open(url_file, 'w') as f:
@@ -104,7 +109,7 @@ def run_katana_crawler(
         if use_proxy:
             cmd.extend(["--network", "host"])
 
-        cmd.extend(["-v", "/tmp:/tmp"])
+        cmd.extend(["-v", "/tmp/redamon:/tmp/redamon"])
 
         cmd.extend([
             docker_image,
@@ -221,13 +226,25 @@ def run_katana_crawler(
                     process.kill()
                 process.wait()
 
+                # Surface stderr if Katana exited early with no discoveries
+                # (most common cause: -list file unreachable under DinD).
+                elapsed = time.time() - start_time
+                if not discovered_urls and elapsed < 10 and process.returncode not in (0, None):
+                    try:
+                        stderr_output = process.stderr.read() if process.stderr else ""
+                        if stderr_output:
+                            print(f"[!][Katana] Exited in {elapsed:.1f}s with code {process.returncode}, stderr:")
+                            for line in stderr_output.strip().splitlines()[:20]:
+                                print(f"[!][Katana]   {line}")
+                    except Exception:
+                        pass
+
         except Exception as e:
             print(f"[!][Katana] Error: {e}")
 
     finally:
         # Clean up temp file
         try:
-            import os
             os.unlink(url_file)
         except OSError:
             pass

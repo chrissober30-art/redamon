@@ -16,7 +16,7 @@ By accessing this server you agree to the following terms:
 
 1. **RedAmon-only testing** -- This server is provided exclusively for testing with the [RedAmon](https://github.com/samugit83/redamon) framework. Manual exploitation, third-party scanners, and automated tools other than RedAmon are not authorized.
 
-2. **Scope** -- You may only interact with the services listed in the target service map below (ports 80, 4000, 9090, 3306, 27017, 8080, 8888, 21/6200). All other ports, IPs, and infrastructure behind this server are out of scope.
+2. **Scope** -- You may only interact with the services listed in the target service map below (ports 80, 443, 4000, 9090, 3306, 27017, 8080, 8888, 21/6200). All other ports, IPs, and infrastructure behind this server are out of scope.
 
 3. **No lateral movement** -- Do not attempt to pivot from this server to other systems, networks, or AWS infrastructure (including the EC2 metadata service at 169.254.169.254).
 
@@ -40,11 +40,12 @@ Violations of these rules will result in immediate IP ban and may be reported to
 
 ---
 
-## Services (7 containers)
+## Services (7 containers + nginx landing/SNI router)
 
 | Service | Port | Technology | Vulns |
 |---------|------|-----------|-------|
-| DVWS-Node REST + SOAP | 80 | Node.js, Express | SQLi, XXE, cmd injection, IDOR, etc. |
+| Nginx landing + reverse proxy | 80, 443 | nginx:alpine | Hidden virtual hosts (Host-header + TLS-SNI routing) -- see VHost & SNI demo below |
+| DVWS-Node REST + SOAP | 80 (via nginx) | Node.js, Express | SQLi, XXE, cmd injection, IDOR, etc. |
 | GraphQL Playground | 4000 | Apollo Server | IDOR, introspection, file write |
 | XML-RPC | 9090 | xmlrpc module | SSRF |
 | MySQL 8 | 3306 | MySQL 8.4 | Exposed, scannable |
@@ -123,6 +124,64 @@ Violations of these rules will result in immediate IP ban and may be reported to
 | 30 | Open Redirect | `/api/v2/users/logout/:redirect` | GET |
 | 31 | CORS Misconfiguration | various | - |
 | 32 | Information Disclosure | `/api/v2/info`, `/openAPI-spec.json`, `/api-docs` | GET |
+| 33 | Hidden virtual hosts (Host-header routing, port 80) | nginx | 5 vhosts -- see VHost & SNI demo below |
+| 34 | SNI-routed hidden services (port 443) | nginx | 2 vhosts reachable only via TLS SNI |
+| 35 | Host header / SNI routing inconsistency | nginx | host_header_bypass primitive (high severity) |
+
+---
+
+## VHost & SNI Demo (RedAmon module test fixture)
+
+The nginx landing container exposes **seven hidden virtual hosts** specifically designed to exercise every detection class produced by RedAmon's [VHost & SNI Enumeration](https://github.com/samugit83/redamon/wiki/VHost-and-SNI-Enumeration) module. None of these hostnames have public DNS records -- they are reachable only when the requester forges the HTTP `Host:` header (L7) or the TLS SNI value (L4).
+
+### Hidden vhosts on port 80 (HTTP, L7 / Host-header trick)
+
+| Hostname | Status | Body size | Severity RedAmon should report | Why |
+|----------|:---:|:---:|:---:|-----|
+| `admin.gpigs.devergolabs.com` | 200 | ~1.7 KB | **medium** | `admin` is in the internal-keyword list -> escalated |
+| `staging.gpigs.devergolabs.com` | 200 | ~1.1 KB | **medium** | `staging` keyword |
+| `jenkins.gpigs.devergolabs.com` | 200 | ~1.2 KB | **medium** | `jenkins` keyword |
+| `marketing.gpigs.devergolabs.com` | **403** | ~970 B | **low** | Status differs from baseline (200), no internal keyword |
+| `news.gpigs.devergolabs.com` | 200 | ~360 B | **info** | Same status code as baseline, only body size differs |
+
+> Baseline (port 80, no Host override) returns the landing page **200 / ~21 B** for the proxied default in this fixture (the real DVWS landing is larger -- the fixture is intentionally small so size deltas are unambiguous).
+
+The default port-80 server keeps serving the landing page + DVWS proxy as before -- that landing page IS the baseline RedAmon compares against.
+
+### Hidden vhosts on port 443 (TLS, L4 / SNI trick)
+
+The nginx server presents a multi-SAN self-signed cert (CN=`gpigs.devergolabs.com`, SANs covering all hidden vhost names). RedAmon's httpx scrapes the SAN list and feeds the discovered names back into the VHost & SNI module's candidate set on the next run.
+
+| Hostname | Reachable via | Severity | Why |
+|----------|---------------|:---:|-----|
+| `internal.gpigs.devergolabs.com` | TLS SNI only (curl `--resolve`) | **medium** | Internal-keyword `internal`, large body delta vs the small TLS baseline |
+| `k8s.gpigs.devergolabs.com` | Either L4 or L7 -- BUT returns DIFFERENT bodies depending on which lane reached it | **high** -- `host_header_bypass` | `if ($ssl_server_name = ...)` returns ~2 KB JSON when SNI matched, ~1 KB JSON when only the Host header matched. RedAmon flags the L7 vs L4 disagreement as a routing-bypass primitive |
+
+### Expected RedAmon output
+
+After a full recon run targeting `gpigs.devergolabs.com` with `vhostSniEnabled: true`:
+
+- **7 `Vulnerability` nodes** with `source="vhost_sni_enum"`, attached to 7 newly-MERGEd `Subdomain` nodes
+- **Severity distribution:**
+  - **1 high** -- `k8s.gpigs.devergolabs.com` flagged as `host_header_bypass` (L7 vs L4 disagreement)
+  - **4 medium** -- `admin`, `staging`, `jenkins`, `internal` (all match internal-keyword patterns)
+  - **1 low** -- `marketing` (status differs from baseline, no internal keyword)
+  - **1 info** -- `news` (only body size differs, same status code)
+- **IP enrichment** on the gpigs IP: `is_reverse_proxy: true`, `hidden_vhost_count: 7`, `vhost_baseline_status` + `vhost_baseline_size` recorded, plus `vhost_candidates_tested` + `vhost_ports_tested` totals
+- **Up to 7 new `BaseURL` nodes** with `discovery_source="vhost_sni_enum"`, ready for follow-up Katana/Nuclei partial recon (only created when `VHOST_SNI_INJECT_DISCOVERED` is on, which is the default)
+
+To run only this module against the target:
+
+```bash
+# In RedAmon project settings: enable VHost & SNI, leave defaults
+# Then in the workflow graph, click Play on the VHost & SNI node
+# Or via API:
+curl -X POST http://localhost:8010/recon/<projectId>/partial \
+  -H "Content-Type: application/json" \
+  -d '{"tool_id":"VhostSni","graph_inputs":{"domain":"gpigs.devergolabs.com"}}'
+```
+
+> **Cert is self-signed.** Browsers will warn -- accept the risk for testing. RedAmon's curl probes use `-k` so they bypass cert validation.
 
 ---
 
@@ -131,7 +190,9 @@ Violations of these rules will result in immediate IP ban and may be reported to
 ### 1. Launch EC2
 - **AMI**: Ubuntu 22.04 or Amazon Linux 2023
 - **Type**: t2.micro (or larger for faster builds)
-- **Security Group**: SSH (22) + TCP 80 + TCP 4000 + TCP 9090 -- your IP only
+- **Security Group**: SSH (22) + TCP 80 + TCP 443 + TCP 4000 + TCP 9090 -- your IP only
+
+> **NEW:** TCP 443 is required for the [VHost & SNI demo](#vhost--sni-demo-redamon-module-test-fixture). Without it the SNI-routed hidden vhosts (`internal.*`, `k8s.*`) are unreachable and only the L7 detection path can be exercised.
 
 ### 2. Deploy (first time or any update)
 
@@ -157,6 +218,9 @@ ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "cd ~/dvws-node && sudo docke
 | 80 | Swagger UI | `http://<IP>/api-docs` |
 | 80 | OpenAPI Spec | `http://<IP>/openAPI-spec.json` |
 | 80 | SOAP WSDL | `http://<IP>/dvwsuserservice?wsdl` |
+| 80 | Hidden vhosts (Host-header routing) | `curl -H "Host: admin.gpigs.devergolabs.com" http://<IP>/` (5 vhosts -- see VHost & SNI demo) |
+| 443 | TLS landing baseline | `https://<IP>/` (small fixed body) |
+| 443 | Hidden vhosts (TLS SNI routing) | `curl --resolve internal.gpigs.devergolabs.com:443:<IP> https://internal.gpigs.devergolabs.com/` (2 vhosts -- see VHost & SNI demo) |
 | 4000 | GraphQL Playground | `http://<IP>:4000/` |
 | 9090 | XML-RPC | `http://<IP>:9090/xmlrpc` |
 

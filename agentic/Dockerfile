@@ -92,6 +92,10 @@ COPY agentic/requirements-kb.txt .
 # Core Python dependencies (always installed)
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install uv (~10 MB) for stdio Python-ecosystem MCP servers (`uvx mcp-...`).
+# Lets users add stdio MCPs via the Settings UI without rebuilding the image.
+RUN pip install --no-cache-dir uv
+
 # Build arg: set to "true" to skip heavy KB dependencies (~4.4 GB saved)
 # Use ./redamon.sh install --skipkbase to activate
 # Declared AFTER core pip install so changing SKIP_KB doesn't bust that cache layer.

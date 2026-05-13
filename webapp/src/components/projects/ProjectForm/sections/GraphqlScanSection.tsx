@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, Braces, Play } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
@@ -29,6 +29,7 @@ export function GraphqlScanSection({ data, updateField, projectId, mode, onRun }
           <Braces size={16} />
           GraphQL Security Scanner
           <NodeInfoTooltip section="GraphqlScan" />
+          <WikiInfoButton target="GraphqlScan" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>

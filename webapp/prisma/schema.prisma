@@ -19,7 +19,9 @@ model User {
   attackSkills  UserAttackSkill[]
   chatSkills      UserChatSkill[]
   projectPresets  UserProjectPreset[]
+  tradecraftResources UserTradecraftResource[]
   settings        UserSettings?
+  uiPreferences Json              @default("{}") @map("ui_preferences")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @updatedAt @map("updated_at")
 
@@ -91,11 +93,15 @@ model UserSettings {
   onypheApiKey     String  @default("") @map("onyphe_api_key")
   driftnetApiKey   String  @default("") @map("driftnet_api_key")
   wpscanApiToken   String  @default("") @map("wpscan_api_token")
+  pdcpApiKey       String  @default("") @map("pdcp_api_key")
 
   // Tunneling & Infrastructure
   ngrokAuthtoken  String   @default("") @map("ngrok_authtoken")
   chiselServerUrl String   @default("") @map("chisel_server_url")
   chiselAuth      String   @default("") @map("chisel_auth")
+
+  // User-managed MCP servers (UI-driven, see /settings/mcp)
+  mcpServers      Json     @default("[]") @map("mcp_servers")
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -114,6 +120,67 @@ model ApiKeyRotationConfig {
 
   @@unique([userId, toolName])
   @@map("api_key_rotation_configs")
+}
+
+// =============================================================================
+// LangGraph checkpointer tables — owned by agentic/orchestrator.py via the
+// `AsyncPostgresSaver.setup()` migration runner. Declared here so that
+// `prisma db push --accept-data-loss` (run by the webapp entrypoint) does
+// NOT see them as "extras" and drop them on every webapp restart.
+//
+// Schema mirrors langgraph.checkpoint.postgres.base.MIGRATIONS — keep in
+// sync with that library. Ignored by the Prisma client (the webapp never
+// reads/writes these directly; only the agent does, via psycopg).
+// =============================================================================
+
+model CheckpointMigrations {
+  v Int @id
+
+  @@map("checkpoint_migrations")
+  @@ignore
+}
+
+model Checkpoint {
+  threadId           String  @map("thread_id")
+  checkpointNs       String  @default("") @map("checkpoint_ns")
+  checkpointId       String  @map("checkpoint_id")
+  parentCheckpointId String? @map("parent_checkpoint_id")
+  type               String?
+  checkpoint         Json
+  metadata           Json    @default("{}")
+
+  @@id([threadId, checkpointNs, checkpointId])
+  @@map("checkpoints")
+  @@ignore
+}
+
+model CheckpointBlob {
+  threadId     String @map("thread_id")
+  checkpointNs String @default("") @map("checkpoint_ns")
+  channel      String
+  version      String
+  type         String
+  blob         Bytes?
+
+  @@id([threadId, checkpointNs, channel, version])
+  @@map("checkpoint_blobs")
+  @@ignore
+}
+
+model CheckpointWrite {
+  threadId     String @map("thread_id")
+  checkpointNs String @default("") @map("checkpoint_ns")
+  checkpointId String @map("checkpoint_id")
+  taskId       String @map("task_id")
+  idx          Int
+  channel      String
+  type         String?
+  blob         Bytes
+  taskPath     String @default("") @map("task_path")
+
+  @@id([threadId, checkpointNs, checkpointId, taskId, idx])
+  @@map("checkpoint_writes")
+  @@ignore
 }
 
 model Project {
@@ -138,6 +205,8 @@ model Project {
   ownershipTxtPrefix          String   @default("_redamon-verify") @map("ownership_txt_prefix")
   stealthMode                 Boolean  @default(false) @map("stealth_mode")
   targetGuardrailEnabled      Boolean  @default(true) @map("target_guardrail_enabled")
+  aiInPipeline                Boolean  @default(false) @map("ai_in_pipeline")
+  aiPipelineModel             String   @default("claude-opus-4-6") @map("ai_pipeline_model")
 
   // ========== RECON PRESET ==========
   reconPresetId               String?  @map("recon_preset_id")
@@ -256,7 +325,7 @@ model Project {
   bannerGrabEnabled           Boolean  @default(true) @map("banner_grab_enabled")
   bannerGrabTimeout           Int      @default(5) @map("banner_grab_timeout")
   bannerGrabThreads           Int      @default(20) @map("banner_grab_threads")
-  bannerGrabMaxLength         Int      @default(500) @map("banner_grab_max_length")
+  bannerGrabMaxLength         Int      @default(1000) @map("banner_grab_max_length")
 
   // ========== NUCLEI VULNERABILITY SCANNER ==========
   nucleiEnabled               Boolean  @default(true)  @map("nuclei_enabled")
@@ -270,9 +339,9 @@ model Project {
   nucleiConcurrency           Int      @default(25) @map("nuclei_concurrency")
   nucleiTimeout               Int      @default(10) @map("nuclei_timeout")
   nucleiRetries               Int      @default(1) @map("nuclei_retries")
-  nucleiTags                  String[] @default([]) @map("nuclei_tags")
-  nucleiExcludeTags           String[] @default([]) @map("nuclei_exclude_tags")
-  nucleiDastMode              Boolean  @default(true) @map("nuclei_dast_mode")
+  nucleiTags                  String[] @default(["cve", "xss", "sqli", "rce", "lfi", "ssrf", "xxe", "ssti"]) @map("nuclei_tags")
+  nucleiExcludeTags           String[] @default(["dos", "fuzz"]) @map("nuclei_exclude_tags")
+  nucleiDastMode              Boolean  @default(false) @map("nuclei_dast_mode")
   nucleiAutoUpdateTemplates   Boolean  @default(true) @map("nuclei_auto_update_templates")
   nucleiNewTemplatesOnly      Boolean  @default(false) @map("nuclei_new_templates_only")
   nucleiHeadless              Boolean  @default(false) @map("nuclei_headless")
@@ -282,6 +351,8 @@ model Project {
   nucleiScanAllIps            Boolean  @default(false) @map("nuclei_scan_all_ips")
   nucleiInteractsh            Boolean  @default(true) @map("nuclei_interactsh")
   nucleiDockerImage           String   @default("projectdiscovery/nuclei:latest") @map("nuclei_docker_image")
+  nucleiAiTags                Boolean  @default(false) @map("nuclei_ai_tags")
+  nucleiAiResponseFilter      Boolean  @default(false) @map("nuclei_ai_response_filter")
 
   // ========== SUBDOMAIN TAKEOVER (Subjack + Nuclei takeover templates) ==========
   subdomainTakeoverEnabled         Boolean  @default(false) @map("subdomain_takeover_enabled")
@@ -296,6 +367,7 @@ model Project {
   subjackRunTimeout                Int      @default(900)   @map("subjack_run_timeout")
   nucleiTakeoversEnabled           Boolean  @default(true)  @map("nuclei_takeovers_enabled")
   nucleiTakeoverRunTimeout         Int      @default(1800)  @map("nuclei_takeover_run_timeout")
+  takeoverAiClassifier             Boolean  @default(false) @map("takeover_ai_classifier")
   takeoverSeverity                 String[] @default(["critical", "high", "medium"]) @map("takeover_severity")
   takeoverConfidenceThreshold      Int      @default(60)    @map("takeover_confidence_threshold")
   takeoverRateLimit                Int      @default(50)    @map("takeover_rate_limit")
@@ -307,11 +379,24 @@ model Project {
   baddnsNameservers                String[] @default([]) @map("baddns_nameservers")
   baddnsRunTimeout                 Int      @default(1800) @map("baddns_run_timeout")
 
+  // ========== VHOST & SNI ENUMERATION ==========
+  vhostSniEnabled                  Boolean  @default(false) @map("vhost_sni_enabled")
+  vhostSniTimeout                  Int      @default(3) @map("vhost_sni_timeout")
+  vhostSniConcurrency              Int      @default(20) @map("vhost_sni_concurrency")
+  vhostSniBaselineSizeTolerance    Int      @default(50) @map("vhost_sni_baseline_size_tolerance")
+  vhostSniTestL7                   Boolean  @default(true) @map("vhost_sni_test_l7")
+  vhostSniTestL4                   Boolean  @default(true) @map("vhost_sni_test_l4")
+  vhostSniInjectDiscovered         Boolean  @default(true) @map("vhost_sni_inject_discovered")
+  vhostSniUseDefaultWordlist       Boolean  @default(true) @map("vhost_sni_use_default_wordlist")
+  vhostSniUseGraphCandidates       Boolean  @default(true) @map("vhost_sni_use_graph_candidates")
+  vhostSniCustomWordlist           String   @default("") @map("vhost_sni_custom_wordlist") @db.Text
+  vhostSniMaxCandidatesPerIp       Int      @default(2000) @map("vhost_sni_max_candidates_per_ip")
+
   // ========== KATANA WEB CRAWLER ==========
   katanaEnabled               Boolean  @default(true) @map("katana_enabled")
   katanaDockerImage           String   @default("projectdiscovery/katana:latest") @map("katana_docker_image")
   katanaDepth                 Int      @default(2) @map("katana_depth")
-  katanaMaxUrls               Int      @default(300) @map("katana_max_urls")
+  katanaMaxUrls               Int      @default(300000) @map("katana_max_urls")
   katanaRateLimit             Int      @default(50) @map("katana_rate_limit")
   katanaTimeout               Int      @default(3600) @map("katana_timeout")
   katanaJsCrawl               Boolean  @default(true) @map("katana_js_crawl")
@@ -328,7 +413,7 @@ model Project {
   hakrawlerDepth              Int      @default(2) @map("hakrawler_depth")
   hakrawlerThreads            Int      @default(5) @map("hakrawler_threads")
   hakrawlerTimeout            Int      @default(30) @map("hakrawler_timeout")
-  hakrawlerMaxUrls            Int      @default(500) @map("hakrawler_max_urls")
+  hakrawlerMaxUrls            Int      @default(50000) @map("hakrawler_max_urls")
   hakrawlerIncludeSubs        Boolean  @default(true) @map("hakrawler_include_subs")
   hakrawlerInsecure           Boolean  @default(true) @map("hakrawler_insecure")
   hakrawlerCustomHeaders      String[] @default([]) @map("hakrawler_custom_headers")
@@ -336,7 +421,7 @@ model Project {
 
   // ========== JSLUICE JS ANALYZER ==========
   jsluiceEnabled              Boolean  @default(true) @map("jsluice_enabled")
-  jsluiceMaxFiles             Int      @default(100) @map("jsluice_max_files")
+  jsluiceMaxFiles             Int      @default(10000) @map("jsluice_max_files")
   jsluiceTimeout              Int      @default(300) @map("jsluice_timeout")
   jsluiceExtractUrls          Boolean  @default(true) @map("jsluice_extract_urls")
   jsluiceExtractSecrets       Boolean  @default(true) @map("jsluice_extract_secrets")
@@ -345,7 +430,7 @@ model Project {
 
   // ========== JS RECON SCANNER ==========
   jsReconEnabled              Boolean  @default(false) @map("js_recon_enabled")
-  jsReconMaxFiles             Int      @default(500)   @map("js_recon_max_files")
+  jsReconMaxFiles             Int      @default(10000)   @map("js_recon_max_files")
   jsReconTimeout              Int      @default(900)   @map("js_recon_timeout")
   jsReconConcurrency          Int      @default(10)    @map("js_recon_concurrency")
   jsReconValidateKeys         Boolean  @default(true)  @map("js_recon_validate_keys")
@@ -410,7 +495,7 @@ model Project {
   ffufThreads                 Int      @default(40) @map("ffuf_threads")
   ffufRate                    Int      @default(0) @map("ffuf_rate")
   ffufTimeout                 Int      @default(10) @map("ffuf_timeout")
-  ffufMaxTime                 Int      @default(600) @map("ffuf_max_time")
+  ffufMaxTime                 Int      @default(1800) @map("ffuf_max_time")
   ffufMatchCodes              Int[]    @default([200, 201, 204, 301, 302, 307, 308, 401, 403, 405]) @map("ffuf_match_codes")
   ffufFilterCodes             Int[]    @default([]) @map("ffuf_filter_codes")
   ffufFilterSize              String   @default("") @map("ffuf_filter_size")
@@ -421,7 +506,8 @@ model Project {
   ffufFollowRedirects         Boolean  @default(false) @map("ffuf_follow_redirects")
   ffufCustomHeaders           String[] @default([]) @map("ffuf_custom_headers")
   ffufSmartFuzz               Boolean  @default(true) @map("ffuf_smart_fuzz")
-  ffufParallelism             Int      @default(4) @map("ffuf_parallelism")
+  ffufParallelism             Int      @default(20) @map("ffuf_parallelism")
+  ffufAiExtensions            Boolean  @default(false) @map("ffuf_ai_extensions")
 
   // ========== ARJUN PARAMETER DISCOVERY ==========
   arjunEnabled                Boolean  @default(true) @map("arjun_enabled")
@@ -429,7 +515,7 @@ model Project {
   arjunTimeout                Int      @default(15) @map("arjun_timeout")
   arjunScanTimeout            Int      @default(600) @map("arjun_scan_timeout")
   arjunMethods                String[] @default(["GET", "POST"]) @map("arjun_methods")
-  arjunMaxEndpoints           Int      @default(50) @map("arjun_max_endpoints")
+  arjunMaxEndpoints           Int      @default(50000) @map("arjun_max_endpoints")
   arjunChunkSize              Int      @default(500) @map("arjun_chunk_size")
   arjunRateLimit              Int      @default(0) @map("arjun_rate_limit")
   arjunStable                 Boolean  @default(false) @map("arjun_stable")
@@ -441,7 +527,7 @@ model Project {
   gauEnabled                  Boolean  @default(false) @map("gau_enabled")
   gauDockerImage              String   @default("sxcurity/gau:latest") @map("gau_docker_image")
   gauProviders                String[] @default(["wayback", "commoncrawl", "otx", "urlscan"]) @map("gau_providers")
-  gauMaxUrls                  Int      @default(1000) @map("gau_max_urls")
+  gauMaxUrls                  Int      @default(50000) @map("gau_max_urls")
   gauTimeout                  Int      @default(60) @map("gau_timeout")
   gauThreads                  Int      @default(5) @map("gau_threads")
   gauBlacklistExtensions      String[] @default([]) @map("gau_blacklist_extensions")
@@ -507,6 +593,7 @@ model Project {
   securityCheckDirectIpHttps        Boolean @default(true) @map("security_check_direct_ip_https")
   securityCheckIpApiExposed         Boolean @default(true) @map("security_check_ip_api_exposed")
   securityCheckWafBypass            Boolean @default(true) @map("security_check_waf_bypass")
+  wafAiClassifier                   Boolean @default(false) @map("waf_ai_classifier")
   securityCheckTlsExpiringSoon      Boolean @default(true) @map("security_check_tls_expiring_soon")
   securityCheckTlsExpiryDays        Int     @default(30) @map("security_check_tls_expiry_days")
   securityCheckMissingReferrerPolicy Boolean @default(true) @map("security_check_missing_referrer_policy")
@@ -559,7 +646,7 @@ model Project {
   agentRequireApprovalForExploitation   Boolean  @default(true) @map("agent_require_approval_for_exploitation")
   agentRequireApprovalForPostExploitation Boolean @default(true) @map("agent_require_approval_for_post_exploitation")
   agentRequireToolConfirmation           Boolean  @default(true) @map("agent_require_tool_confirmation")
-  agentToolOutputMaxChars               Int      @default(20000) @map("agent_tool_output_max_chars")
+  agentToolOutputMaxChars               Int      @default(40000) @map("agent_tool_output_max_chars")
   agentPlanMaxParallelTools             Int      @default(10) @map("agent_plan_max_parallel_tools")
   agentCypherMaxRetries                 Int      @default(3) @map("agent_cypher_max_retries")
   agentLlmParseMaxRetries               Int      @default(3) @map("agent_llm_parse_max_retries")
@@ -567,7 +654,7 @@ model Project {
   agentCreateGraphImageOnInit           Boolean  @default(false) @map("agent_create_graph_image_on_init")
   agentLogMaxMb                         Int      @default(10) @map("agent_log_max_mb")
   agentLogBackupCount                   Int      @default(5) @map("agent_log_backup_count")
-  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\"],\"google_dork\":[\"informational\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\"],\"execute_httpx\":[\"informational\",\"exploitation\"],\"execute_subfinder\":[\"informational\",\"exploitation\"],\"execute_wpscan\":[\"informational\",\"exploitation\"],\"execute_jsluice\":[\"informational\",\"exploitation\"],\"execute_amass\":[\"informational\",\"exploitation\"],\"execute_katana\":[\"informational\",\"exploitation\"],\"execute_arjun\":[\"informational\",\"exploitation\"],\"execute_ffuf\":[\"informational\",\"exploitation\"],\"execute_gau\":[\"informational\",\"exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_playwright\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
+  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"cve_intel\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\"],\"google_dork\":[\"informational\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\"],\"execute_httpx\":[\"informational\",\"exploitation\"],\"execute_subfinder\":[\"informational\",\"exploitation\"],\"execute_wpscan\":[\"informational\",\"exploitation\"],\"execute_jsluice\":[\"informational\",\"exploitation\"],\"execute_amass\":[\"informational\",\"exploitation\"],\"execute_katana\":[\"informational\",\"exploitation\"],\"execute_arjun\":[\"informational\",\"exploitation\"],\"execute_ffuf\":[\"informational\",\"exploitation\"],\"execute_gau\":[\"informational\",\"exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_playwright\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"],\"tradecraft_lookup\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
   agentKaliInstallEnabled               Boolean  @default(false) @map("agent_kali_install_enabled")
   agentKaliInstallAllowedPackages       String   @default("") @map("agent_kali_install_allowed_packages")
   agentKaliInstallForbiddenPackages     String   @default("") @map("agent_kali_install_forbidden_packages")
@@ -579,7 +666,7 @@ model Project {
   fireteamEnabled                       Boolean  @default(true)            @map("fireteam_enabled")
   fireteamMaxConcurrent                 Int      @default(5)               @map("fireteam_max_concurrent")
   fireteamMaxMembers                    Int      @default(5)               @map("fireteam_max_members")
-  fireteamMemberMaxIterations           Int      @default(20)              @map("fireteam_member_max_iterations")
+  fireteamMemberMaxIterations           Int      @default(10)              @map("fireteam_member_max_iterations")
   fireteamTimeoutSec                    Int      @default(3600)            @map("fireteam_timeout_sec")
   fireteamAllowedPhases                 String[] @default(["informational", "exploitation", "post_exploitation"]) @map("fireteam_allowed_phases")
   fireteamConfirmationTimeoutSec        Int      @default(600)             @map("fireteam_confirmation_timeout_sec")
@@ -607,7 +694,7 @@ model Project {
 
   // URLScan.io Passive Enrichment
   urlscanEnabled                        Boolean  @default(true)  @map("urlscan_enabled")
-  urlscanMaxResults                     Int      @default(5000)  @map("urlscan_max_results")
+  urlscanMaxResults                     Int      @default(50000)  @map("urlscan_max_results")
 
   // OSINT & Threat Intelligence Master Switch
   osintEnrichmentEnabled                Boolean  @default(false) @map("osint_enrichment_enabled")
@@ -631,7 +718,7 @@ model Project {
   netlasWorkers                         Int      @default(5) @map("netlas_workers")
   zoomEyeWorkers                        Int      @default(5) @map("zoomeye_workers")
   uncoverEnabled                        Boolean  @default(false)  @map("uncover_enabled")
-  uncoverMaxResults                     Int      @default(500)    @map("uncover_max_results")
+  uncoverMaxResults                     Int      @default(50000)    @map("uncover_max_results")
   uncoverDockerImage                    String   @default("projectdiscovery/uncover:latest") @map("uncover_docker_image")
 
   // Subdomain Discovery Master Switch
@@ -647,10 +734,10 @@ model Project {
   subfinderEnabled                      Boolean  @default(true)  @map("subfinder_enabled")
   subfinderMaxResults                   Int      @default(5000)  @map("subfinder_max_results")
   subfinderDockerImage                  String   @default("projectdiscovery/subfinder:latest") @map("subfinder_docker_image")
-  amassEnabled                          Boolean  @default(true) @map("amass_enabled")
-  amassMaxResults                       Int      @default(5000)  @map("amass_max_results")
+  amassEnabled                          Boolean  @default(false) @map("amass_enabled")
+  amassMaxResults                       Int      @default(50000)  @map("amass_max_results")
   amassTimeout                          Int      @default(10)    @map("amass_timeout")
-  amassActive                           Boolean  @default(true) @map("amass_active")
+  amassActive                           Boolean  @default(false) @map("amass_active")
   amassBrute                            Boolean  @default(false) @map("amass_brute")
   amassBruteWordlists                  Json     @default("[\"default\"]") @map("amass_brute_wordlists")
   amassDockerImage                      String   @default("caffix/amass:latest") @map("amass_docker_image")
@@ -677,8 +764,34 @@ model Project {
   sqliRisk                              Int      @default(1) @map("sqli_risk")
   sqliTamperScripts                     String   @default("") @map("sqli_tamper_scripts")
 
+  // ========== SSRF SETTINGS ==========
+  ssrfOobCallbackEnabled                Boolean  @default(true) @map("ssrf_oob_callback_enabled")
+  ssrfCloudMetadataEnabled              Boolean  @default(true) @map("ssrf_cloud_metadata_enabled")
+  ssrfGopherEnabled                     Boolean  @default(true) @map("ssrf_gopher_enabled")
+  ssrfDnsRebindingEnabled               Boolean  @default(true) @map("ssrf_dns_rebinding_enabled")
+  ssrfPayloadReferenceEnabled           Boolean  @default(true) @map("ssrf_payload_reference_enabled")
+  ssrfRequestTimeout                    Int      @default(10) @map("ssrf_request_timeout")
+  ssrfPortScanPorts                     String   @default("22,80,443,2375,3306,5432,6379,8080,8500,9200,27017") @map("ssrf_port_scan_ports")
+  ssrfInternalRanges                    String   @default("127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16") @map("ssrf_internal_ranges")
+  ssrfOobProvider                       String   @default("oast.fun") @map("ssrf_oob_provider")
+  ssrfCloudProviders                    String   @default("aws,gcp,azure,digitalocean,alibaba") @map("ssrf_cloud_providers")
+  ssrfCustomInternalTargets             String   @default("") @map("ssrf_custom_internal_targets") @db.Text
+
+  // ========== RCE / COMMAND INJECTION SETTINGS ==========
+  rceOobCallbackEnabled                 Boolean  @default(true) @map("rce_oob_callback_enabled")
+  rceDeserializationEnabled             Boolean  @default(true) @map("rce_deserialization_enabled")
+  rceAggressivePayloads                 Boolean  @default(false) @map("rce_aggressive_payloads")
+
+  // ========== PATH TRAVERSAL / LFI / RFI SETTINGS ==========
+  pathTraversalOobCallbackEnabled       Boolean  @default(true)  @map("path_traversal_oob_callback_enabled")
+  pathTraversalPhpWrappersEnabled       Boolean  @default(true)  @map("path_traversal_php_wrappers_enabled")
+  pathTraversalArchiveExtractionEnabled Boolean  @default(false) @map("path_traversal_archive_extraction_enabled")
+  pathTraversalPayloadReferenceEnabled  Boolean  @default(true)  @map("path_traversal_payload_reference_enabled")
+  pathTraversalRequestTimeout           Int      @default(10)    @map("path_traversal_request_timeout")
+  pathTraversalOobProvider              String   @default("oast.fun") @map("path_traversal_oob_provider")
+
   // ========== ATTACK SKILL CONFIG ==========
-  attackSkillConfig                    Json     @default("{\"builtIn\":{\"cve_exploit\":true,\"brute_force_credential_guess\":true,\"phishing_social_engineering\":true,\"denial_of_service\":true,\"sql_injection\":true,\"xss\":true},\"user\":{}}") @map("attack_skill_config")
+  attackSkillConfig                    Json     @default("{\"builtIn\":{\"cve_exploit\":true,\"brute_force_credential_guess\":true,\"phishing_social_engineering\":true,\"denial_of_service\":true,\"sql_injection\":true,\"xss\":true,\"ssrf\":true,\"rce\":true,\"path_traversal\":true},\"user\":{}}") @map("attack_skill_config")
 
   // ========== CYPHERFIX SETTINGS ==========
   cypherfixGithubToken              String   @default("") @map("cypherfix_github_token")
@@ -979,4 +1092,43 @@ model UserProjectPreset {
 
   @@index([userId])
   @@map("user_project_presets")
+}
+
+model UserTradecraftResource {
+  id                   String   @id @default(cuid())
+  userId               String   @map("user_id")
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name                 String
+  // Server-generated stable identifier the agent uses as resource_id.
+  // Lowercase kebab-case from `name` with collision suffix (e.g. "hacktricks", "hacktricks-2").
+  // Stable across renames so in-flight conversations and cache rows don't break.
+  slug                 String
+  url                  String
+  enabled              Boolean  @default(true)
+
+  // mkdocs-wiki | github-repo | cve-poc-db | sphinx-docs | gitbook | agentic-crawl
+  resourceType         String   @default("agentic-crawl") @map("resource_type")
+  summary              String   @default("") @db.Text
+  sitemap              Json     @default("{}")
+
+  // Crawl-only metadata (only set when resourceType=agentic-crawl):
+  crawlStoppedBecause  String   @default("") @map("crawl_stopped_because")
+  crawlStats           Json     @default("{}") @map("crawl_stats")
+
+  // Auth + caching tunables
+  githubTokenOverride  String   @default("") @map("github_token_override")
+  cacheTtlSec          Int      @default(0) @map("cache_ttl_sec")
+
+  // Lifecycle
+  lastVerifiedAt       DateTime? @map("last_verified_at")
+  lastRefreshedAt      DateTime? @map("last_refreshed_at")
+  lastError            String   @default("") @map("last_error") @db.Text
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, url])
+  @@unique([userId, slug])
+  @@index([userId])
+  @@map("user_tradecraft_resources")
 }

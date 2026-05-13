@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import { Bug, ChevronDown, Play } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import { NodeInfoTooltip } from '../NodeInfoTooltip'
+import { FileImportButton } from '../FileImportButton'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
@@ -25,6 +26,7 @@ export function HakrawlerSection({ data, updateField, onRun }: HakrawlerSectionP
           <Bug size={16} />
           Hakrawler Web Crawler
           <NodeInfoTooltip section="Hakrawler" />
+          <WikiInfoButton target="Hakrawler" />
           <span className={styles.badgeActive}>Active</span>
         </h2>
         <div className={styles.sectionHeaderRight}>
@@ -84,7 +86,7 @@ export function HakrawlerSection({ data, updateField, onRun }: HakrawlerSectionP
                     type="number"
                     className="textInput"
                     value={data.hakrawlerMaxUrls}
-                    onChange={(e) => updateField('hakrawlerMaxUrls', parseInt(e.target.value) || 500)}
+                    onChange={(e) => updateField('hakrawlerMaxUrls', parseInt(e.target.value) || 50000)}
                     min={1}
                   />
                   <span className={styles.fieldHint}>Maximum URLs to collect (process killed at limit)</span>
@@ -160,13 +162,20 @@ export function HakrawlerSection({ data, updateField, onRun }: HakrawlerSectionP
                 <h3 className={styles.subSectionTitle}>Custom Headers</h3>
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Request Headers</label>
-                  <textarea
-                    className="textarea"
-                    value={(data.hakrawlerCustomHeaders ?? []).join('\n')}
-                    onChange={(e) => updateField('hakrawlerCustomHeaders', e.target.value.split('\n').filter(Boolean))}
-                    placeholder="Cookie: session=abc123&#10;Authorization: Bearer token..."
-                    rows={3}
-                  />
+                  <div className={styles.fileImportWrap}>
+                    <textarea
+                      className="textarea"
+                      value={(data.hakrawlerCustomHeaders ?? []).join('\n')}
+                      onChange={(e) => updateField('hakrawlerCustomHeaders', e.target.value.split('\n').filter(Boolean))}
+                      placeholder="Cookie: session=abc123&#10;Authorization: Bearer token..."
+                      rows={3}
+                    />
+                    <FileImportButton
+                      variant="textarea"
+                      fieldName="headers"
+                      onImport={(values) => updateField('hakrawlerCustomHeaders', values)}
+                    />
+                  </div>
                   <span className={styles.fieldHint}>One header per line (e.g., Cookie: value). Sent with every request</span>
                 </div>
               </div>

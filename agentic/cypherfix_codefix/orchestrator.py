@@ -457,12 +457,26 @@ class CodeFixOrchestrator:
         anthropic_p = _resolve_provider_key(user_providers, "anthropic")
         openrouter_p = _resolve_provider_key(user_providers, "openrouter")
         bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+        deepseek_p = _resolve_provider_key(user_providers, "deepseek")
+        gemini_p = _resolve_provider_key(user_providers, "gemini")
+        glm_p = _resolve_provider_key(user_providers, "glm")
+        kimi_p = _resolve_provider_key(user_providers, "kimi")
+        qwen_p = _resolve_provider_key(user_providers, "qwen")
+        xai_p = _resolve_provider_key(user_providers, "xai")
+        mistral_p = _resolve_provider_key(user_providers, "mistral")
 
         return setup_llm(
             model,
             openai_api_key=(openai_p or {}).get("apiKey"),
             anthropic_api_key=(anthropic_p or {}).get("apiKey"),
             openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+            deepseek_api_key=(deepseek_p or {}).get("apiKey"),
+            gemini_api_key=(gemini_p or {}).get("apiKey"),
+            glm_api_key=(glm_p or {}).get("apiKey"),
+            kimi_api_key=(kimi_p or {}).get("apiKey"),
+            qwen_api_key=(qwen_p or {}).get("apiKey"),
+            xai_api_key=(xai_p or {}).get("apiKey"),
+            mistral_api_key=(mistral_p or {}).get("apiKey"),
             aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
             aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
             aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",

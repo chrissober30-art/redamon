@@ -4,6 +4,7 @@ import type { PlanWaveItem } from '../AgentTimeline'
 import type { TodoItem } from '@/lib/websocket-types'
 import { PHASE_CONFIG, formatModelDisplay } from '../phaseConfig'
 import type { Phase } from '../types'
+import { downloadStreaming } from '../../../utils/exportHelpers'
 
 interface DownloadMarkdownDeps {
   chatItems: ChatItem[]
@@ -16,7 +17,7 @@ interface DownloadMarkdownDeps {
 export function useDownloadMarkdown(deps: DownloadMarkdownDeps) {
   const { chatItems, currentPhase, iterationCount, modelName, todoList } = deps
 
-  const handleDownloadMarkdown = useCallback(() => {
+  const handleDownloadMarkdown = useCallback(async () => {
     if (chatItems.length === 0) return
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -353,14 +354,21 @@ export function useDownloadMarkdown(deps: DownloadMarkdownDeps) {
       }
     })
 
-    // Download
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `redamon-session-${timestamp}.md`
-    a.click()
-    URL.revokeObjectURL(url)
+    // Stream lines straight to disk (showSaveFilePicker on Chrome / Edge)
+    // so very long sessions never need to fit the whole transcript in
+    // browser memory before download.
+    async function* sessionChunks(): AsyncGenerator<string> {
+      for (let i = 0; i < lines.length; i++) {
+        yield i === 0 ? lines[i] : '\n' + lines[i]
+        // Yield to UI every 1000 lines so massive sessions stay responsive.
+        if (i > 0 && i % 1000 === 0) await new Promise(r => setTimeout(r, 0))
+      }
+    }
+    await downloadStreaming(
+      `redamon-session-${timestamp}.md`,
+      'text/markdown;charset=utf-8',
+      () => sessionChunks(),
+    )
   }, [chatItems, currentPhase, iterationCount, modelName, todoList])
 
   return { handleDownloadMarkdown }

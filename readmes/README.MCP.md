@@ -2,6 +2,10 @@
 
 MCP (Model Context Protocol) servers for agentic penetration testing. These servers expose security tools to AI agents via the MCP protocol, enabling autonomous vulnerability discovery and exploitation.
 
+This document describes the **five system MCP servers** that ship inside the kali-sandbox container (`network_recon`, `nmap`, `nuclei`, `metasploit`, `playwright`) and back the agent's built-in pentest toolset.
+
+> **Adding your own MCP servers via the UI** (Shodan, GitHub, Censys, your own internal MCPs, ...) is a separate user-facing feature called **MCP Tool Plugins**. Open Global Settings → MCP Tool Plugins tab. 39 prefilled presets are available for one-click setup. Plugins added there auto-appear in every project's Tool Matrix and in the agent's system prompt within ~1 second of save — no rebuild, no migration. See the **[MCP Tool Plugins wiki page](https://github.com/samugit83/redamon/wiki/MCP-Tool-Plugins)** for the full operator manual covering form fields, the live discovery flow, the validation rules, and the storage / security model.
+
 ## Architecture
 
 ### Folder Structure
@@ -178,6 +182,7 @@ Combined HTTP client and port scanner in a single server.
 | `execute_curl(args)` | Run curl with any CLI arguments (60s timeout) |
 | `execute_naabu(args)` | Run naabu with any CLI arguments (300s timeout) |
 | `execute_wpscan(args)` | Run WPScan WordPress vulnerability scanner with any CLI arguments (600s timeout) |
+| `cve_intel(args, api_key="")` | Run ProjectDiscovery `vulnx` for structured CVE intelligence (NVD + KEV + EPSS + PoC + Nuclei templates). Subcommands: `id`, `search`, `filters`, `analyze`, `healthcheck`. The optional `api_key` is silently injected by the executor from per-user Global Settings; LLM never sees it (60s timeout) |
 
 **Curl Examples:**
 ```python

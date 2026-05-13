@@ -276,18 +276,20 @@ class TestFunctionSignatures(unittest.TestCase):
             self.assertIn("config", params, f"{fn.__name__} missing 'config' parameter")
 
     def test_graph_builder_signatures(self):
-        """Graph builder functions should accept domain, user_id, project_id."""
+        """Graph builder functions should accept domain, user_id, project_id,
+        plus the include_root_domain scope flag (mirrors full pipeline)."""
         from partial_recon import (
             _build_recon_data_from_graph,
             _build_port_scan_data_from_graph,
             _build_http_probe_data_from_graph,
             _build_vuln_scan_data_from_graph,
         )
+        expected = ["domain", "user_id", "project_id", "include_root_domain"]
         for fn in [_build_recon_data_from_graph, _build_port_scan_data_from_graph,
                     _build_http_probe_data_from_graph, _build_vuln_scan_data_from_graph]:
             sig = inspect.signature(fn)
             params = list(sig.parameters.keys())
-            self.assertEqual(params, ["domain", "user_id", "project_id"],
+            self.assertEqual(params, expected,
                              f"{fn.__name__} has wrong parameters: {params}")
 
     def test_classify_ip_signature(self):

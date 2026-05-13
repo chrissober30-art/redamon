@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, Search, AlertTriangle } from 'lucide-react'
-import { Toggle } from '@/components/ui'
+import { Toggle, WikiInfoButton } from '@/components/ui'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 import Link from 'next/link'
@@ -28,6 +28,7 @@ export function TrufflehogSection({ data, updateField, hasGithubToken = false }:
         <h2 className={styles.sectionTitle}>
           <Search size={16} />
           TruffleHog Secret Scanner
+          <WikiInfoButton target="Trufflehog" />
           <span className={styles.badgePassive}>Passive</span>
         </h2>
         <ChevronDown

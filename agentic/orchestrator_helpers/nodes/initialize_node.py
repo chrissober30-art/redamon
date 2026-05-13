@@ -74,7 +74,7 @@ async def _run_scope_guardrail(llm, user_id, project_id, session_id) -> dict | N
 
     Returns a state update dict if blocked, or None if allowed.
     """
-    from guardrail import check_target_allowed
+    from orchestrator_helpers.guardrail import check_target_allowed
 
     target_domain = get_setting('TARGET_DOMAIN', '')
     ip_mode = get_setting('IP_MODE', False)
@@ -195,7 +195,7 @@ async def initialize_node(state: AgentState, config, *, llm, neo4j_creds) -> dic
     # Hard guardrail: deterministic, non-disableable — always blocks government/public domains
     # Runs unconditionally regardless of AGENT_GUARDRAIL_ENABLED setting
     if not state.get("execution_trace") and not state.get("_guardrail_blocked"):
-        from hard_guardrail import is_hard_blocked
+        from orchestrator_helpers.hard_guardrail import is_hard_blocked
         target_domain = get_setting('TARGET_DOMAIN', '')
         ip_mode = get_setting('IP_MODE', False)
         if not ip_mode and target_domain:

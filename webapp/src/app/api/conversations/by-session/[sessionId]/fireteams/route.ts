@@ -54,7 +54,13 @@ export async function POST(
             memberIdKey: m.memberIdKey,
             name: m.name,
             task: m.task ?? '',
-            skills: m.skills ?? [],
+            // Agent now emits the primary toolbox under `tools` (canonical).
+            // The DB column is still called `skills` (legacy, internal — UI's
+            // `member.tools` already means executed tool calls, so renaming
+            // the column would force a wider refactor). Map across boundary:
+            // accept `tools` from the agent, fall back to `skills` if some
+            // legacy payload sneaks in.
+            skills: m.tools ?? m.skills ?? [],
             status: 'running',
           })),
         },

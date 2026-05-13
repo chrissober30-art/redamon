@@ -40,6 +40,7 @@ export function useMultiPartialReconSSE({
   const activeRunIdRef = useRef(activeRunId)
   const onLogRef = useRef(onLog)
   const onCompleteRef = useRef(onComplete)
+  const seenKeysByRun = useRef<Record<string, Set<string>>>({})
   const maxReconnectAttempts = 5
 
   // Keep ref in sync
@@ -63,6 +64,7 @@ export function useMultiPartialReconSSE({
       delete next[runId]
       return next
     })
+    delete seenKeysByRun.current[runId]
   }, [])
 
   // Connect/disconnect SSE based on activeRunId
@@ -95,6 +97,12 @@ export function useMultiPartialReconSSE({
         reconnectAttempts.current = 0
       }
 
+      // Safety net dedup: backend resumes via Docker `since=` on reconnect, but
+      // that's second-granular, so a replay boundary line may still slip through.
+      // Keep a bounded Set of recently-seen (timestamp|log) keys per run.
+      const seenKeysRef = seenKeysByRun.current[runId] ?? new Set<string>()
+      seenKeysByRun.current[runId] = seenKeysRef
+
       eventSource.addEventListener('log', (event) => {
         try {
           const eventData = (event as MessageEvent).data
@@ -108,6 +116,17 @@ export function useMultiPartialReconSSE({
             phaseNumber: data.phaseNumber,
             isPhaseStart: data.isPhaseStart,
             level: data.level || 'info',
+          }
+
+          const dedupKey = `${logEvent.timestamp}|${logEvent.log}`
+          if (seenKeysRef.has(dedupKey)) {
+            return
+          }
+          seenKeysRef.add(dedupKey)
+          // Bound memory: keep only the most recent ~1000 keys
+          if (seenKeysRef.size > 1000) {
+            const first = seenKeysRef.values().next().value
+            if (first !== undefined) seenKeysRef.delete(first)
           }
 
           // Always notify upstream (used to drive graph refetches). Independent

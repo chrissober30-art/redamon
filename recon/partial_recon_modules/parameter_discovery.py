@@ -7,9 +7,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from recon.partial_recon_modules.helpers import _is_valid_url, _is_valid_hostname
+from recon.partial_recon_modules.helpers import _is_valid_url, _is_valid_hostname, _should_include_root_domain
 from recon.partial_recon_modules.graph_builders import _build_http_probe_data_from_graph
 from recon.partial_recon_modules.user_inputs import _create_user_subdomains_in_graph
+from recon.helpers import build_target_urls, extract_targets_from_recon
 
 
 def run_paramspider(config: dict) -> None:
@@ -255,7 +256,10 @@ def run_kiterunner(config: dict) -> None:
     include_graph = config.get("include_graph_targets", True)
     if include_graph:
         print(f"[*][Partial Recon] Querying graph for targets (BaseURLs)...")
-        recon_data = _build_http_probe_data_from_graph(domain, user_id, project_id)
+        recon_data = _build_http_probe_data_from_graph(
+            domain, user_id, project_id,
+            include_root_domain=_should_include_root_domain(settings),
+        )
     else:
         print(f"[*][Partial Recon] Skipping graph targets (user opted out)")
         recon_data = {
@@ -280,18 +284,22 @@ def run_kiterunner(config: dict) -> None:
                     "content_type": "text/html",
                 }
 
-    # Build target_urls list from http_probe.by_url (same logic as resource_enum.py)
-    target_urls = []
+    # Union target-builder: BaseURLs ∪ uncovered Subdomains ∪ user URLs.
+    # New subdomains get http(s)://<sub> fallback; httpx-covered hosts keep
+    # only the verified scheme.
+    ips, hostnames, _ = extract_targets_from_recon(recon_data)
+    target_urls = build_target_urls(hostnames, ips, recon_data, scan_all_ips=False)
+
     target_domains = set()
-    for url, url_data in recon_data["http_probe"]["by_url"].items():
-        status_code = url_data.get("status_code")
-        if status_code and int(status_code) < 500:
-            target_urls.append(url)
-            host = url_data.get("host", "")
+    from urllib.parse import urlparse
+    for url in target_urls:
+        try:
+            host = urlparse(url).hostname
             if host:
                 target_domains.add(host)
+        except Exception:
+            pass
 
-    # Ensure all target hostnames are in subdomains list for graph scope filtering
     existing_subs = set(recon_data.get("subdomains", []))
     for host in target_domains:
         if host not in existing_subs:
@@ -299,8 +307,8 @@ def run_kiterunner(config: dict) -> None:
     recon_data["subdomains"] = list(existing_subs)
 
     if not target_urls:
-        print("[!][Partial Recon] No URLs to scan (graph has no BaseURLs and no valid user URLs provided).")
-        print("[!][Partial Recon] Run HTTP Probing (Httpx) first, or provide URLs manually.")
+        print("[!][Partial Recon] No URLs to scan (graph has no BaseURLs, Subdomains, or DNS records).")
+        print("[!][Partial Recon] Run Subdomain Discovery or HTTP Probing first, or provide URLs manually.")
         sys.exit(1)
 
     print(f"[+][Partial Recon] Found {len(target_urls)} URLs to scan")

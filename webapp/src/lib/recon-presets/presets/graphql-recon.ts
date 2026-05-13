@@ -133,6 +133,14 @@ Use \`API Security Audit\` if you also need heavy REST endpoint discovery via Ki
     // Banner grabbing stays off -- port banners aren't GraphQL signals
     bannerGrabEnabled: false,
 
+    // --- VHost & SNI: GraphQL endpoints often live on internal vhosts (admin/internal-api/graphql) ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+    vhostSniInjectDiscovered: true,     // newly discovered URLs feed the GraphQL endpoint discovery
+
     // --- Katana: deep crawl (GraphQL endpoints are often referenced deep in JS) ---
     katanaEnabled: true,
     katanaDepth: 3,

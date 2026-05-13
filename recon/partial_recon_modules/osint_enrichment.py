@@ -7,7 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from recon.partial_recon_modules.helpers import _classify_ip, _is_ip_or_cidr
+from recon.partial_recon_modules.helpers import _classify_ip, _is_ip_or_cidr, _should_include_root_domain
 from recon.partial_recon_modules.graph_builders import _build_recon_data_from_graph
 
 
@@ -65,7 +65,10 @@ def run_shodan(config: dict) -> None:
     # Build combined_result from graph (IPs + subdomains)
     if include_graph:
         print(f"[*][Partial Recon] Querying graph for targets (IPs and subdomains)...")
-        combined_result = _build_recon_data_from_graph(domain, user_id, project_id)
+        combined_result = _build_recon_data_from_graph(
+            domain, user_id, project_id,
+            include_root_domain=_should_include_root_domain(settings),
+        )
     else:
         print(f"[*][Partial Recon] Skipping graph targets (user opted out)")
         combined_result = {
@@ -414,7 +417,10 @@ def run_osint_enrichment(config: dict) -> None:
 
     # Build combined_result from graph (IPs + subdomains)
     if include_graph:
-        combined_result = _build_recon_data_from_graph(domain, user_id, project_id)
+        combined_result = _build_recon_data_from_graph(
+            domain, user_id, project_id,
+            include_root_domain=_should_include_root_domain(settings),
+        )
     else:
         combined_result = {
             "domain": domain,

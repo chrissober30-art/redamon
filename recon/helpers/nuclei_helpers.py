@@ -7,7 +7,7 @@ Functions for building Nuclei commands, parsing output, and detecting false posi
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 # Import volume constant from docker helpers
 from .docker_helpers import NUCLEI_TEMPLATES_VOLUME
@@ -63,20 +63,34 @@ def build_nuclei_command(
     follow_redirects: bool = False,
     max_redirects: int = 0,
     interactsh: bool = True,
+    force_dast_pass: bool = False,
 ) -> List[str]:
     """
     Build nuclei Docker command with all configured parameters.
-    
+
     Args:
         targets_file: Path to file containing target URLs
         output_file: Path for JSON output
         docker_image: Nuclei Docker image to use
         use_proxy: Whether to use Tor proxy
+        force_dast_pass: When True, forces -dast and drops tag/template
+            filters that would otherwise empty-intersect with the DAST set
+            (built-in DAST templates carry tags like xss/sqli/ssti, not the
+            detection-class tags users typically configure).
         ... (configuration parameters)
-        
+
     Returns:
         Command as list of arguments
     """
+    if force_dast_pass:
+        dast_mode = True
+        templates = None
+        exclude_templates = None
+        custom_templates = None
+        selected_custom_templates = None
+        tags = None
+        exclude_tags = None
+        new_templates_only = False
     # Docker command with volume mounts
     # Convert container paths to host paths for sibling container volume mounts
     targets_host_path = get_host_path(str(Path(targets_file).parent))
@@ -108,6 +122,8 @@ def build_nuclei_command(
         "-silent",
         "-nc",
         "-duc",  # Disable automatic update check
+        "-stats",
+        "-stats-interval", "30",  # Progress heartbeat every 30s so long scans aren't silent
     ])
     
     # Severity filter
@@ -127,14 +143,47 @@ def build_nuclei_command(
         for template in custom_templates:
             cmd.extend(["-t", template])
 
-    # Include individually selected custom templates (alongside built-in)
-    if selected_custom_templates and os.environ.get("HOST_CUSTOM_TEMPLATES_PATH"):
-        # If no specific templates were requested, we must explicitly include
-        # the built-in templates too — otherwise nuclei only scans the custom ones
-        if not templates:
+    # Built-in template pool + custom selection -- new semantics:
+    #   tags is now the gate that decides whether the built-in pool is loaded.
+    #     - tags non-empty: load /root/nuclei-templates/ (filtered by -tags below)
+    #                       + any selected custom templates alongside.
+    #     - tags empty:     load ONLY the selected custom templates (no built-in pool).
+    #                       If no custom is selected either, the caller is expected
+    #                       to have refused before reaching here -- omitting -t lets
+    #                       nuclei fall back to its default directory.
+    host_custom_templates = os.environ.get("HOST_CUSTOM_TEMPLATES_PATH", "")
+    custom_selected = bool(selected_custom_templates) and bool(host_custom_templates)
+    explicit_t_paths = bool(templates) or bool(custom_templates)
+
+    if custom_selected:
+        if tags and not explicit_t_paths:
+            # Tags filter present -> include the built-in pool so it has something to match.
             cmd.extend(["-t", "/root/nuclei-templates/"])
+        # When tags is empty here, we deliberately skip the built-in pool so the
+        # scan runs ONLY the custom templates the user picked.
         for tpl_path in selected_custom_templates:
-            cmd.extend(["-t", f"/custom-templates/{tpl_path}"])
+            # Nuclei v3+ only recognizes `.yaml` as a template extension; a `.yml`
+            # path is interpreted as a path-list file (one template path per
+            # line) and the scan fatals with "no templates provided for scan".
+            # If the file on disk is .yml but a .yaml sibling exists, prefer
+            # the .yaml. Otherwise pass-through and let nuclei's own error
+            # surface (the upload handler normalizes new uploads to .yaml).
+            normalized_path = tpl_path
+            if tpl_path.lower().endswith(".yml"):
+                yaml_sibling = tpl_path[:-4] + ".yaml"
+                yaml_disk_path = os.path.join(host_custom_templates, yaml_sibling)
+                if os.path.exists(yaml_disk_path):
+                    normalized_path = yaml_sibling
+                else:
+                    print(
+                        f"[!][Nuclei] Custom template '{tpl_path}' uses .yml extension. "
+                        "Nuclei v3+ requires .yaml for templates (a .yml is read as "
+                        "a path-list file). Rename to .yaml or re-upload via the UI."
+                    )
+            cmd.extend(["-t", f"/custom-templates/{normalized_path}"])
+    elif tags and not explicit_t_paths:
+        # Tags-only scan: point nuclei at the built-in pool explicitly.
+        cmd.extend(["-t", "/root/nuclei-templates/"])
 
     # Tags
     if tags:
@@ -197,25 +246,95 @@ def build_nuclei_command(
 # False Positive Detection
 # =============================================================================
 
+# Per-scan AI classifier context for the WAF/block-page response filter.
+# Initialized once at the top of run_vuln_scan() and consumed by
+# is_false_positive(). A module-level dict keeps the call signature of
+# is_false_positive() unchanged while still letting the AI cascade fall
+# back deterministically when the flag is off.
+_FP_AI_CTX: dict = {
+    "enabled": False,
+    "model": "",
+    "user_id": "",
+    "project_id": "",
+    "cache": None,  # populated when enabled
+}
+
+# Confidence threshold required to override the static-negative verdict.
+# Mirrors the WAF classifier threshold so behavior is consistent across
+# the two cascades.
+_FP_AI_BLOCKED_THRESHOLD = 70
+
+# Status codes commonly returned by WAFs/rate-limiters. When a finding's
+# response carries one of these AND the static keyword check missed, we
+# call the AI to disambiguate. Pure 200 responses bypass the AI call --
+# they're unlikely to be block pages and the cost would be wasted.
+_FP_AI_SUSPICIOUS_STATUSES = ("403", "406", "418", "429", "503", "451")
+
+
+def set_fp_ai_ctx(enabled: bool, model: str, user_id: str, project_id: str) -> None:
+    """Initialize the per-scan AI cascade context. Called from run_vuln_scan()
+    based on the NUCLEI_AI_RESPONSE_FILTER setting."""
+    _FP_AI_CTX["enabled"] = bool(enabled and model)
+    _FP_AI_CTX["model"] = model or ""
+    _FP_AI_CTX["user_id"] = user_id or ""
+    _FP_AI_CTX["project_id"] = project_id or ""
+    _FP_AI_CTX["cache"] = {} if _FP_AI_CTX["enabled"] else None
+
+
+def _classify_fp_ai(response_text: str, template_id: str, tags: list) -> Optional[dict]:
+    """Lazy wrapper around the Nuclei FP AI classifier. Returns None if AI is
+    not enabled or the classifier returns its safe fallback (so callers can
+    keep the static behavior)."""
+    if not _FP_AI_CTX["enabled"] or not response_text:
+        return None
+    try:
+        from recon.helpers.ai_planner.nuclei_response_filter import classify_nuclei_response
+    except Exception as exc:
+        print(f"[!][Nuclei-FP-AI] Cannot import nuclei_response_filter: {exc}")
+        return None
+    result = classify_nuclei_response(
+        response_text=response_text,
+        template_id=template_id,
+        tags=tags,
+        model=_FP_AI_CTX["model"],
+        cache=_FP_AI_CTX["cache"],
+        user_id=_FP_AI_CTX["user_id"],
+        project_id=_FP_AI_CTX["project_id"],
+    )
+    if result.get("source") == "ai_unavailable":
+        return None
+    return result
+
+
 def is_false_positive(finding: dict) -> tuple:
     """
     Detect common false positive patterns in nuclei findings.
-    
+
     False positive indicators:
     1. Rate limiting (429 status) - timing-based attacks become unreliable
     2. WAF/firewall blocks - response doesn't reflect actual vulnerability
     3. Generic error pages - timing variations due to error handling
-    
+
+    When the AI cascade is enabled (per-scan via set_fp_ai_ctx), responses
+    that the static keyword list missed but still LOOK like block pages
+    (suspicious status code + small body) get a second pass through the
+    LLM. Confidence >= _FP_AI_BLOCKED_THRESHOLD flips the verdict to
+    "false positive" so rebranded WAF blocks no longer ship as findings.
+
     Args:
         finding: Raw nuclei JSON output line
-        
+
     Returns:
         Tuple of (is_false_positive: bool, reason: str or None)
     """
-    response = finding.get("response", "")
-    template_id = finding.get("template-id", "")
-    info = finding.get("info", {})
-    tags = info.get("tags", [])
+    # Coerce None to empty string -- Nuclei sometimes emits {"response": null}
+    # for findings that didn't capture a response (DNS templates, e.g.).
+    # Without this, response.lower() below raises AttributeError and crashes
+    # the JSONL parsing loop in _execute_nuclei_pass.
+    response = finding.get("response") or ""
+    template_id = finding.get("template-id") or ""
+    info = finding.get("info") or {}
+    tags = info.get("tags") or []
     
     # Patterns that indicate false positives
     rate_limit_indicators = [
@@ -266,7 +385,21 @@ def is_false_positive(finding: dict) -> tuple:
                 # 403 with WAF indicators likely means WAF blocked the payload, not a real vuln
                 if "403" in response[:50]:
                     return True, f"WAF/Firewall block detected ('{indicator}') - payload was blocked, not executed"
-    
+
+    # AI cascade: when the keyword list missed but the response shape still
+    # looks like a block page (suspicious status code, injection-class tag),
+    # ask the LLM to disambiguate. Only runs when WAF rebranding likely
+    # bypassed the static keyword match -- pure 200 responses skip the AI
+    # call to keep cost bounded.
+    if is_injection and _FP_AI_CTX["enabled"]:
+        head = response[:50] if response else ""
+        looks_suspicious = any(code in head for code in _FP_AI_SUSPICIOUS_STATUSES)
+        if looks_suspicious:
+            ai_result = _classify_fp_ai(response, template_id, tags)
+            if ai_result and ai_result.get("is_blocked") and ai_result.get("confidence", 0) >= _FP_AI_BLOCKED_THRESHOLD:
+                reason = ai_result.get("reason") or "WAF block fingerprint"
+                return True, f"AI: {reason} (conf={ai_result.get('confidence')})"
+
     return False, None
 
 

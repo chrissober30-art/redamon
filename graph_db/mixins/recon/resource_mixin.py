@@ -393,25 +393,63 @@ class ResourceMixin:
                 except Exception as e:
                     stats["errors"].append(f"Domain update failed: {e}")
 
-            # Connect orphaned BaseURLs to their Subdomain node
+            # Connect orphaned BaseURLs to their Subdomain node.
             # BaseURLs created by resource_enum may not have a Service -[:SERVES_URL]-> link
             # if httpx didn't probe that URL (e.g., port 80 redirected to HTTPS).
-            # Link them to the Subdomain to prevent disconnected graph clusters.
-            orphan_result = session.run(
-                """
-                MATCH (bu:BaseURL {user_id: $user_id, project_id: $project_id})
-                WHERE NOT (bu)<-[:SERVES_URL]-()
-                MATCH (sub:Subdomain {user_id: $user_id, project_id: $project_id})
-                WHERE bu.url CONTAINS sub.name
-                MERGE (sub)-[:HAS_BASE_URL]->(bu)
-                RETURN count(*) AS linked
-                """,
-                user_id=user_id, project_id=project_id
-            )
-            orphans_linked = orphan_result.single()["linked"]
-            if orphans_linked > 0:
-                print(f"[+][graph-db] Linked {orphans_linked} orphaned BaseURL(s) to Subdomain")
-                stats["relationships_created"] += orphans_linked
+            # Host match is exact (via apoc-free URL host parsing) to avoid the
+            # CONTAINS substring trap (where "https://api.example.com" wrongly
+            # matches Subdomain "example.com").
+            try:
+                orphan_result = session.run(
+                    """
+                    MATCH (bu:BaseURL {user_id: $user_id, project_id: $project_id})
+                    WHERE NOT (bu)<-[:SERVES_URL]-()
+                      AND NOT (:Subdomain)-[:HAS_BASE_URL]->(bu)
+                    WITH bu,
+                         split(split(replace(replace(bu.url, 'https://', ''), 'http://', ''), '/')[0], ':')[0] AS bu_host
+                    MATCH (sub:Subdomain {user_id: $user_id, project_id: $project_id})
+                    WHERE sub.name = bu_host
+                    MERGE (sub)-[:HAS_BASE_URL]->(bu)
+                    RETURN count(*) AS linked
+                    """,
+                    user_id=user_id, project_id=project_id
+                )
+                orphans_linked = orphan_result.single()["linked"]
+                if orphans_linked > 0:
+                    print(f"[+][graph-db] Linked {orphans_linked} orphaned BaseURL(s) to Subdomain")
+                    stats["relationships_created"] += orphans_linked
+            except Exception as e:
+                stats["errors"].append(f"Orphan BaseURL cleanup failed: {e}")
+
+            # Apex / root-domain pass.
+            # Crawlers and Nuclei templates that target the bare domain produce
+            # URLs like https://example.com -- the host is the Domain itself,
+            # not a Subdomain. The Subdomain-only cleanup above can't link
+            # those, so we attach them directly to the Domain node. Skips
+            # BaseURLs already attached via Subdomain or via the httpx
+            # Service -[:SERVES_URL]-> path.
+            try:
+                apex_result = session.run(
+                    """
+                    MATCH (bu:BaseURL {user_id: $user_id, project_id: $project_id})
+                    WHERE NOT (bu)<-[:SERVES_URL]-()
+                      AND NOT (:Subdomain)-[:HAS_BASE_URL]->(bu)
+                      AND NOT (:Domain)-[:HAS_BASE_URL]->(bu)
+                    WITH bu,
+                         split(split(replace(replace(bu.url, 'https://', ''), 'http://', ''), '/')[0], ':')[0] AS bu_host
+                    MATCH (d:Domain {user_id: $user_id, project_id: $project_id})
+                    WHERE d.name = bu_host
+                    MERGE (d)-[:HAS_BASE_URL]->(bu)
+                    RETURN count(*) AS linked
+                    """,
+                    user_id=user_id, project_id=project_id
+                )
+                apex_linked = apex_result.single()["linked"]
+                if apex_linked > 0:
+                    print(f"[+][graph-db] Linked {apex_linked} apex BaseURL(s) to Domain")
+                    stats["relationships_created"] += apex_linked
+            except Exception as e:
+                stats["errors"].append(f"Apex BaseURL cleanup failed: {e}")
 
             print(f"[+][graph-db] Created {stats['endpoints_created']} Endpoint nodes")
             print(f"[+][graph-db] Created {stats['parameters_created']} Parameter nodes")

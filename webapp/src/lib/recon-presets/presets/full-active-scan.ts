@@ -212,6 +212,13 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
     nucleiScanAllIps: true,
     nucleiInteractsh: true,
 
+    // --- VHost & SNI: full hidden vhost discovery ---
+    vhostSniEnabled: true,
+    vhostSniTestL7: true,
+    vhostSniTestL4: true,
+    vhostSniUseDefaultWordlist: true,
+    vhostSniUseGraphCandidates: true,
+
     // --- Subdomain Takeover: all layers on ---
     subdomainTakeoverEnabled: true,
     subjackEnabled: true,

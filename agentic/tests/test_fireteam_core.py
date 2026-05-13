@@ -187,15 +187,15 @@ class MutexGroupValidationTests(unittest.TestCase):
 
     def test_no_conflicts_passes(self):
         plan = [
-            {"name": "A", "skills": ["xss"]},
-            {"name": "B", "skills": ["sql_injection"]},
+            {"name": "A", "tools": ["xss"]},
+            {"name": "B", "tools": ["sql_injection"]},
         ]
         self.assertIsNone(self._validate(plan))
 
     def test_two_metasploit_members_rejected(self):
         plan = [
-            {"name": "A", "skills": ["metasploit"]},
-            {"name": "B", "skills": ["metasploit"]},
+            {"name": "A", "tools": ["metasploit"]},
+            {"name": "B", "tools": ["metasploit"]},
         ]
         err = self._validate(plan)
         self.assertIsNotNone(err)
@@ -203,7 +203,7 @@ class MutexGroupValidationTests(unittest.TestCase):
 
     def test_single_browser_claimer_ok(self):
         plan = [
-            {"name": "Web Tester", "skills": ["browser"]},
+            {"name": "Web Tester", "tools": ["browser"]},
         ]
         self.assertIsNone(self._validate(plan))
 
@@ -213,9 +213,9 @@ class MutexGroupValidationTests(unittest.TestCase):
         # unblock multi-member recon waves where several specialists all need
         # to render pages.
         plan = [
-            {"name": "Auth Hunter", "skills": ["playwright", "curl"]},
-            {"name": "Surface Mapper", "skills": ["playwright", "curl"]},
-            {"name": "Header Analyst", "skills": ["playwright", "curl"]},
+            {"name": "Auth Hunter", "tools": ["playwright", "curl"]},
+            {"name": "Surface Mapper", "tools": ["playwright", "curl"]},
+            {"name": "Header Analyst", "tools": ["playwright", "curl"]},
         ]
         self.assertIsNone(self._validate(plan))
 
@@ -477,7 +477,7 @@ class FireteamPlanParsingTests(unittest.TestCase):
     def test_valid_fireteam_plan_parses(self):
         raw = '''{"thought": "t", "reasoning": "r", "action": "deploy_fireteam",
                  "fireteam_plan": {"members": [
-                     {"name": "Web", "task": "Probe HTTP", "skills": ["xss"], "max_iterations": 20}
+                     {"name": "Web", "task": "Probe HTTP", "tools": ["xss"], "max_iterations": 20}
                  ], "plan_rationale": "web recon"}}'''
         decision, err = self._parse(raw)
         self.assertIsNone(err)
@@ -888,7 +888,7 @@ class MemberInlineWritesTests(unittest.IsolatedAsyncioTestCase):
             "parent_target_info": {},
             "member_name": "Web Tester", "member_id": "member-0-abc",
             "fireteam_id": "fteam-1",
-            "skills": ["xss"], "task": "test",
+            "tools": ["xss"], "task": "test",
             "execution_trace": [],
             "target_info": {}, "chain_findings_memory": [],
             "chain_failures_memory": [],

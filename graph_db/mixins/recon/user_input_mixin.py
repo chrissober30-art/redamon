@@ -584,6 +584,41 @@ class UserInputMixin:
                     "source": "graph" if record["domain"] else "settings",
                 }
 
+            elif tool_id == "VhostSni":
+                # VHost & SNI needs hostnames + IPs + ports. Returns a name list
+                # for the dropdown (subdomains) AND the count of co-resident
+                # ExternalDomains so the modal can hint about candidate richness.
+                result = session.run(
+                    """
+                    OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+                    OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)
+                    OPTIONAL MATCH (s)-[:RESOLVES_TO]->(i:IP)
+                    OPTIONAL MATCH (i)-[:HAS_PORT]->(p:Port)
+                    OPTIONAL MATCH (s)-[:HAS_BASEURL]->(bu:BaseURL)
+                    OPTIONAL MATCH (ed:ExternalDomain {user_id: $uid, project_id: $pid})
+                    WITH d, collect(DISTINCT s.name) AS subdomains,
+                         count(DISTINCT i) AS ip_count,
+                         count(DISTINCT p) AS port_count,
+                         count(DISTINCT bu) AS baseurl_count,
+                         count(DISTINCT ed) AS external_count
+                    RETURN d.name AS domain, subdomains,
+                           size(subdomains) AS sub_count,
+                           ip_count, port_count, baseurl_count, external_count
+                    """,
+                    uid=user_id, pid=project_id,
+                )
+                record = result.single()
+                return {
+                    "domain": record["domain"] if record["domain"] else None,
+                    "existing_subdomains": record["subdomains"] or [],
+                    "existing_subdomains_count": record["sub_count"] or 0,
+                    "existing_ips_count": record["ip_count"] or 0,
+                    "existing_ports_count": record["port_count"] or 0,
+                    "existing_baseurls_count": record["baseurl_count"] or 0,
+                    "existing_external_domains_count": record["external_count"] or 0,
+                    "source": "graph" if record["domain"] else "settings",
+                }
+
             elif tool_id == "OsintEnrichment":
                 # Get domain, subdomain names (for dropdown), and IP count for OSINT enrichment
                 result = session.run(

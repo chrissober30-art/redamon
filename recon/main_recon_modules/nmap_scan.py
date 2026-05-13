@@ -379,6 +379,21 @@ def run_nmap_scan(recon_data: dict, output_file: Path = None, settings: dict = N
         print("[-][Nmap] Disabled -- skipping")
         return recon_data
 
+    from recon.helpers import print_effective_settings
+    print_effective_settings(
+        "Nmap",
+        settings,
+        keys=[
+            ("NMAP_ENABLED", "Toggle"),
+            ("NMAP_VERSION_DETECTION", "Detection"),
+            ("NMAP_SCRIPT_SCAN", "Detection"),
+            ("NMAP_TIMING_TEMPLATE", "Timing"),
+            ("NMAP_HOST_TIMEOUT", "Timing"),
+            ("NMAP_TIMEOUT", "Timing"),
+            ("NMAP_PARALLELISM", "Performance"),
+        ],
+    )
+
     NMAP_VERSION_DETECTION = settings.get('NMAP_VERSION_DETECTION', True)
     NMAP_SCRIPT_SCAN = settings.get('NMAP_SCRIPT_SCAN', True)
     NMAP_TIMING = settings.get('NMAP_TIMING_TEMPLATE', 'T3')

@@ -48,8 +48,52 @@ async def _pty_session(ws):
         logger.info("Terminal session ended (active: %d)", _active_sessions)
 
 
+async def _read_init_frame(ws, timeout: float = 0.5):
+    """
+    Try to read an optional `init` JSON frame from the browser before forking.
+
+    Expected shape: {"type": "init", "user_id": "...", "project_id": "..."}.
+    Returns (tenant_env, replay_bytes):
+      - tenant_env: dict of env vars to inject into the shell (may be empty)
+      - replay_bytes: the first frame's raw bytes if it was NOT an init frame,
+        so the PTY loop can replay it (preserves backward compat with clients
+        that don't send init).
+    """
+    tenant_env: dict = {}
+    replay: bytes = b""
+    try:
+        first = await asyncio.wait_for(ws.recv(), timeout=timeout)
+    except (asyncio.TimeoutError, Exception):
+        return tenant_env, replay
+
+    if isinstance(first, str):
+        try:
+            msg = json.loads(first)
+            if isinstance(msg, dict) and msg.get("type") == "init":
+                user_id = str(msg.get("user_id", "")).strip()
+                project_id = str(msg.get("project_id", "")).strip()
+                if user_id:
+                    tenant_env["REDAMON_USER_ID"] = user_id
+                if project_id:
+                    tenant_env["REDAMON_PROJECT_ID"] = project_id
+                logger.info(
+                    "Init frame received (user=%s project=%s)",
+                    user_id or "<none>", project_id or "<none>",
+                )
+                return tenant_env, replay
+        except (json.JSONDecodeError, TypeError):
+            pass
+        replay = first.encode("utf-8")
+    elif isinstance(first, (bytes, bytearray)):
+        replay = bytes(first)
+
+    return tenant_env, replay
+
+
 async def _run_pty_session(ws):
     """Run the actual PTY session for a WebSocket connection."""
+    tenant_env, replay_bytes = await _read_init_frame(ws)
+
     master_fd, slave_fd = pty.openpty()
     pid = os.fork()
 
@@ -71,6 +115,7 @@ async def _run_pty_session(ws):
         env["TERM"] = "xterm-256color"
         env["SHELL"] = "/bin/bash"
         env["PS1"] = r"\[\033[1;31m\]redamon\[\033[0m\]@\[\033[1;36m\]kali\[\033[0m\]:\[\033[1;33m\]\w\[\033[0m\]$ "
+        env.update(tenant_env)
 
         os.execvpe("/bin/bash", ["/bin/bash", "--login"], env)
         # Never reached
@@ -81,6 +126,14 @@ async def _run_pty_session(ws):
 
     # Set initial terminal size
     _set_pty_size(master_fd, 24, 80)
+
+    # If the first frame was not an init message, replay it to the shell so
+    # non-webapp clients (e.g. wscat) keep working.
+    if replay_bytes:
+        try:
+            os.write(master_fd, replay_bytes)
+        except OSError as e:
+            logger.debug("Replay write failed: %s", e)
 
     close_event = asyncio.Event()
 

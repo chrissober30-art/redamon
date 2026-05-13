@@ -545,6 +545,7 @@ async def start_partial_recon(project_id: str, request: PartialReconStartRequest
             tool_id=request.tool_id,
             config=config,
             recon_path=RECON_PATH,
+            custom_templates_path=CUSTOM_TEMPLATES_PATH,
         )
         return state
     except ValueError as e:

@@ -3,6 +3,7 @@
 import { memo } from 'react'
 import { AlertTriangle, Link, Terminal } from 'lucide-react'
 import { ExternalLink } from '@/components/ui'
+import { capecToUrl, cveToUrl, cweToUrl, ipToUrl } from '@/lib/url-utils'
 import type { Remediation } from '@/lib/cypherfix-types'
 import styles from './RemediationDetail.module.css'
 
@@ -33,7 +34,13 @@ export const EvidenceSection = memo(function EvidenceSection({ remediation }: Ev
                 <span className={styles.assetType}>{asset.type}</span>
                 <span className={styles.assetName}>{asset.name}</span>
                 {asset.url && <span className={styles.assetUrl}><ExternalLink href={asset.url}>{asset.url}</ExternalLink></span>}
-                {asset.ip && <span className={styles.assetIp}>{asset.ip}{asset.port ? `:${asset.port}` : ''}</span>}
+                {asset.ip && (
+                  <span className={styles.assetIp}>
+                    <ExternalLink href={ipToUrl(asset.ip, asset.port ?? undefined)}>
+                      {asset.ip}{asset.port ? `:${asset.port}` : ''}
+                    </ExternalLink>
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -46,13 +53,13 @@ export const EvidenceSection = memo(function EvidenceSection({ remediation }: Ev
           <h5 className={styles.subsectionTitle}>Identifiers</h5>
           <div className={styles.identifiers}>
             {remediation.cveIds.map(id => (
-              <span key={id} className={styles.cveTag}>{id}</span>
+              <span key={id} className={styles.cveTag}><ExternalLink href={cveToUrl(id)}>{id}</ExternalLink></span>
             ))}
             {remediation.cweIds.map(id => (
-              <span key={id} className={styles.cweTag}>{id}</span>
+              <span key={id} className={styles.cweTag}><ExternalLink href={cweToUrl(id)}>{id}</ExternalLink></span>
             ))}
             {remediation.capecIds.map(id => (
-              <span key={id} className={styles.capecTag}>{id}</span>
+              <span key={id} className={styles.capecTag}><ExternalLink href={capecToUrl(id)}>{id}</ExternalLink></span>
             ))}
           </div>
         </div>

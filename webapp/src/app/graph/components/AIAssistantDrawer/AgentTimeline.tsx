@@ -151,12 +151,11 @@ export interface AgentTimelineProps {
   missingApiKeys?: Set<string>
   onAddApiKey?: (toolId: string) => void
   onToolConfirmation?: (itemId: string, decision: 'approve' | 'reject') => void
-  toolConfirmationDisabled?: boolean
   /** Cancel a single running tool card. Receives the tool's item.id. */
   onToolStop?: (itemId: string) => void
 }
 
-export function AgentTimeline({ items, isStreaming, onItemExpand, missingApiKeys, onAddApiKey, onToolConfirmation, toolConfirmationDisabled, onToolStop }: AgentTimelineProps) {
+export function AgentTimeline({ items, isStreaming, onItemExpand, missingApiKeys, onAddApiKey, onToolConfirmation, onToolStop }: AgentTimelineProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
 
   const toggleExpand = (itemId: string) => {
@@ -213,7 +212,6 @@ export function AgentTimeline({ items, isStreaming, onItemExpand, missingApiKeys
                 onAddApiKey={onAddApiKey}
                 onApprove={item.status === 'pending_approval' ? () => onToolConfirmation?.(item.id, 'approve') : undefined}
                 onReject={item.status === 'pending_approval' ? () => onToolConfirmation?.(item.id, 'reject') : undefined}
-                confirmationDisabled={toolConfirmationDisabled}
                 onToolStop={onToolStop}
               />
             ) : item.type === 'fireteam' ? (
@@ -222,7 +220,6 @@ export function AgentTimeline({ items, isStreaming, onItemExpand, missingApiKeys
                 missingApiKeys={missingApiKeys}
                 onAddApiKey={onAddApiKey}
                 onToolConfirmation={onToolConfirmation}
-                toolConfirmationDisabled={toolConfirmationDisabled}
                 onToolStop={onToolStop}
               />
             ) : (
@@ -234,7 +231,6 @@ export function AgentTimeline({ items, isStreaming, onItemExpand, missingApiKeys
                 onAddApiKey={onAddApiKey ? () => onAddApiKey(item.tool_name) : undefined}
                 onApprove={item.status === 'pending_approval' ? () => onToolConfirmation?.(item.id, 'approve') : undefined}
                 onReject={item.status === 'pending_approval' ? () => onToolConfirmation?.(item.id, 'reject') : undefined}
-                confirmationDisabled={toolConfirmationDisabled}
                 onStop={onToolStop ? () => onToolStop(item.id) : undefined}
               />
             )}

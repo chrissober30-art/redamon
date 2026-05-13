@@ -1,13 +1,15 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { RedZoneTableShell } from './RedZoneTableShell'
 import { useRedZoneTable } from './useRedZoneTable'
-import { exportRedZoneXlsx } from './exportXlsx'
+import type { RedZoneExportConfig } from './exportCsv'
 import {
   Mono,
   Truncated,
   ListCell,
+  UrlCell,
+  HostCell,
   filterRowsByText,
 } from './formatters'
 import rowStyles from './RedZoneTableRow.module.css'
@@ -72,7 +74,8 @@ export const WebInitAccessTable = memo(function WebInitAccessTable({ projectId }
   const filtered = useMemo(() => filterRowsByText(rows, search), [rows, search])
   const sliced = useMemo(() => filtered.slice(0, limit), [filtered, limit])
 
-  const handleExport = useCallback(() => {
+  const exportConfig = useMemo<RedZoneExportConfig | undefined>(() => {
+    if (rows.length === 0) return undefined
     const flat = filtered.map(r => ({
       baseUrl: r.baseUrl,
       subdomain: r.subdomain,
@@ -92,10 +95,11 @@ export const WebInitAccessTable = memo(function WebInitAccessTable({ projectId }
       'Referrer-Policy': r.headerGrid['Referrer-Policy'],
       'Permissions-Policy': r.headerGrid['Permissions-Policy'],
     }))
-    exportRedZoneXlsx(
-      flat,
-      'Web-Init-Access',
-      [
+    return {
+      rows: flat,
+      sheetName: 'Web-Init-Access',
+      fileSlug: 'redzone-web-init-access',
+      columns: [
         { key: 'baseUrl', header: 'BaseURL' },
         { key: 'subdomain', header: 'Subdomain' },
         { key: 'scheme', header: 'Scheme' },
@@ -114,9 +118,8 @@ export const WebInitAccessTable = memo(function WebInitAccessTable({ projectId }
         { key: 'Referrer-Policy', header: 'Referrer-Policy' },
         { key: 'Permissions-Policy', header: 'Permissions-Policy' },
       ],
-      'redzone-web-init-access',
-    )
-  }, [filtered])
+    }
+  }, [filtered, rows.length])
 
   return (
     <RedZoneTableShell
@@ -125,7 +128,7 @@ export const WebInitAccessTable = memo(function WebInitAccessTable({ projectId }
       search={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search BaseURL, subdomain, vuln, auth path..."
-      onExport={rows.length > 0 ? handleExport : undefined}
+      exportConfig={exportConfig}
       onRefresh={refetch}
       isLoading={isLoading}
       error={error}
@@ -148,8 +151,8 @@ export const WebInitAccessTable = memo(function WebInitAccessTable({ projectId }
         <tbody>
           {sliced.map((r, i) => (
             <tr key={`${r.baseUrl}-${i}`}>
-              <td><Truncated text={r.baseUrl} max={260} /></td>
-              <td><Truncated text={r.subdomain} max={160} /></td>
+              <td><UrlCell url={r.baseUrl} max={260} /></td>
+              <td>{r.subdomain ? <HostCell host={r.subdomain} /> : <Truncated text={r.subdomain} max={160} />}</td>
               <td>
                 {r.authEndpointCount > 0 ? (
                   <span title={r.authEndpointPaths.slice(0, 5).join('\n')}>

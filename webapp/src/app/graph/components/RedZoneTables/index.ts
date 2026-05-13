@@ -1,6 +1,7 @@
 export { RedZoneTableShell } from './RedZoneTableShell'
 export { useRedZoneTable } from './useRedZoneTable'
-export { exportRedZoneXlsx } from './exportXlsx'
+export { exportRedZoneCsv, exportRedZoneJson, exportRedZoneMarkdown } from './exportCsv'
+export type { RedZoneExportConfig, RedZoneExportColumn } from './exportCsv'
 export {
   SeverityBadge,
   Mono,
