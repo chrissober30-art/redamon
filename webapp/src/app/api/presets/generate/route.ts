@@ -6,6 +6,15 @@ import { reconPresetSchema, extractJson, RECON_PARAMETER_CATALOG } from '@/lib/r
 // POST /api/presets/generate
 // Calls the user's configured LLM to generate a recon preset from a natural
 // language description.  Validates the output with Zod before returning.
+//
+// Provider resolution mirrors the agent chat path
+// (agentic/orchestrator_helpers/llm_setup.py + agentic/api.py:_pick_custom_provider):
+//   - "custom/<id>"        → lookup UserLlmProvider by id, use modelIdentifier
+//   - "openrouter/...","bedrock/...","deepseek/...", etc. → match providerType
+//   - "claude-*"           → anthropic
+//   - everything else      → openai
+// This is what makes "Generate Recon Preset with AI" work with any configured
+// provider — including OpenAI-compatible deployments like Microsoft Foundry.
 // ---------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = `You are a recon pipeline configuration expert for RedAmon, an AI-powered red-team reconnaissance platform.
@@ -27,13 +36,22 @@ AVAILABLE PARAMETERS:
 ${RECON_PARAMETER_CATALOG}
 `
 
+type Resolved =
+  | { kind: 'custom'; providerId: string }
+  | { kind: 'builtin'; providerType: string; modelId: string }
+
 /**
- * Resolve provider type from model name, mirroring the Python logic in
- * agentic/orchestrator_helpers/llm_setup.py:parse_model_provider()
+ * Resolve a model string to either a specific custom provider id or a builtin
+ * provider type + api model id. Mirrors agent backend semantics:
+ * - "custom/<cuid>" is a *provider id* (NOT an api model name). The actual
+ *   api model name lives in UserLlmProvider.modelIdentifier.
+ * - All other prefixes encode the api model name after the prefix.
  */
-function resolveProviderType(model: string): { providerType: string; modelId: string } {
+function resolveModel(model: string): Resolved {
+  if (model.startsWith('custom/')) {
+    return { kind: 'custom', providerId: model.slice('custom/'.length) }
+  }
   const prefixMap: Record<string, string> = {
-    'custom/': 'openai_compatible',
     'openrouter/': 'openrouter',
     'bedrock/': 'bedrock',
     'deepseek/': 'deepseek',
@@ -46,19 +64,18 @@ function resolveProviderType(model: string): { providerType: string; modelId: st
   }
   for (const [prefix, type] of Object.entries(prefixMap)) {
     if (model.startsWith(prefix)) {
-      return { providerType: type, modelId: model.slice(prefix.length) }
+      return { kind: 'builtin', providerType: type, modelId: model.slice(prefix.length) }
     }
   }
   if (model.startsWith('claude-')) {
-    return { providerType: 'anthropic', modelId: model }
+    return { kind: 'builtin', providerType: 'anthropic', modelId: model }
   }
-  // Default: OpenAI
-  return { providerType: 'openai', modelId: model }
+  return { kind: 'builtin', providerType: 'openai', modelId: model }
 }
 
 /**
- * Returns the OpenAI-compatible base URL for each provider type. Stays in sync
- * with agentic/orchestrator_helpers/llm_setup.py setup_llm branches.
+ * Returns the OpenAI-compatible base URL for each builtin provider type.
+ * Mirrors agentic/orchestrator_helpers/llm_setup.py setup_llm branches.
  */
 function defaultBaseUrlFor(providerType: string): string {
   switch (providerType) {
@@ -75,41 +92,57 @@ function defaultBaseUrlFor(providerType: string): string {
   }
 }
 
+interface OpenAICompatOptions {
+  baseUrl: string
+  apiKey: string
+  modelId: string
+  systemPrompt: string
+  userPrompt: string
+  extraHeaders?: Record<string, string>
+  timeout?: number
+  temperature?: number
+  maxTokens?: number
+  sslVerify?: boolean
+}
+
 /**
- * Call an OpenAI-compatible chat completions endpoint.
+ * Call an OpenAI-compatible chat completions endpoint. Honors the provider's
+ * temperature/maxTokens/headers/sslVerify so behavior matches what the agent
+ * chat does for the same provider record.
  */
-async function callOpenAICompatible(
-  baseUrl: string,
-  apiKey: string,
-  modelId: string,
-  systemPrompt: string,
-  userPrompt: string,
-  extraHeaders?: Record<string, string>,
-  timeout?: number,
-): Promise<string> {
+async function callOpenAICompatible(opts: OpenAICompatOptions): Promise<string> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), (timeout || 120) * 1000)
+  const timer = setTimeout(() => controller.abort(), (opts.timeout || 120) * 1000)
+
+  const init: RequestInit & { dispatcher?: unknown } = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${opts.apiKey}`,
+      ...opts.extraHeaders,
+    },
+    body: JSON.stringify({
+      model: opts.modelId,
+      messages: [
+        { role: 'system', content: opts.systemPrompt },
+        { role: 'user', content: opts.userPrompt },
+      ],
+      temperature: opts.temperature ?? 0.3,
+      max_tokens: opts.maxTokens ?? 4096,
+      response_format: { type: 'json_object' },
+    }),
+    signal: controller.signal,
+  }
+
+  // SSL bypass for internal endpoints with self-signed certs (mirrors
+  // llm_setup.py's `if not custom_llm_config.get("sslVerify", True)` branch).
+  if (opts.sslVerify === false) {
+    const { Agent } = await import('undici')
+    init.dispatcher = new Agent({ connect: { rejectUnauthorized: false } })
+  }
 
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        ...extraHeaders,
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-        response_format: { type: 'json_object' },
-      }),
-      signal: controller.signal,
-    })
+    const res = await fetch(`${opts.baseUrl}/chat/completions`, init)
 
     if (!res.ok) {
       const errText = await res.text().catch(() => 'Unknown error')
@@ -132,6 +165,8 @@ async function callAnthropic(
   systemPrompt: string,
   userPrompt: string,
   timeout?: number,
+  maxTokens?: number,
+  temperature?: number,
 ): Promise<string> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), (timeout || 120) * 1000)
@@ -148,8 +183,8 @@ async function callAnthropic(
         model: modelId,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
-        max_tokens: 4096,
-        temperature: 0.3,
+        max_tokens: maxTokens ?? 4096,
+        temperature: temperature ?? 0.3,
       }),
       signal: controller.signal,
     })
@@ -160,7 +195,6 @@ async function callAnthropic(
     }
 
     const data = await res.json()
-    // Anthropic returns content as an array of blocks
     const textBlock = data.content?.find((b: { type: string }) => b.type === 'text')
     return textBlock?.text ?? ''
   } finally {
@@ -187,75 +221,126 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 })
     }
 
-    // 1. Resolve provider type from model name
-    const { providerType, modelId } = resolveProviderType(model)
+    const resolved = resolveModel(model)
 
-    if (providerType === 'bedrock') {
+    if (resolved.kind === 'builtin' && resolved.providerType === 'bedrock') {
       return NextResponse.json(
-        { error: 'AWS Bedrock is not yet supported for preset generation. Please configure an OpenAI, Anthropic, or OpenRouter provider.' },
+        { error: 'AWS Bedrock is not yet supported for preset generation. Use an OpenAI, Anthropic, OpenAI-Compatible, or other provider.' },
         { status: 400 },
       )
     }
 
-    // 2. Find matching provider in user's configured LLM providers
-    const providers = await prisma.userLlmProvider.findMany({
-      where: { userId },
-    })
+    const providers = await prisma.userLlmProvider.findMany({ where: { userId } })
 
-    const provider = providers.find((p) => p.providerType === providerType)
-
-    if (!provider) {
-      const friendlyNames: Record<string, string> = {
-        anthropic: 'Anthropic',
-        openai: 'OpenAI',
-        openrouter: 'OpenRouter',
-        openai_compatible: 'OpenAI-Compatible',
-        deepseek: 'DeepSeek',
-        gemini: 'Google Gemini',
-        glm: 'GLM (Zhipu AI)',
-        kimi: 'Kimi (Moonshot)',
-        qwen: 'Qwen (Alibaba)',
-        xai: 'xAI (Grok)',
-        mistral: 'Mistral AI',
-      }
-      return NextResponse.json(
-        {
-          error: `No ${friendlyNames[providerType] || providerType} provider configured. Add one in Global Settings to use model "${model}".`,
-        },
-        { status: 400 },
-      )
-    }
-
-    // 3. Call the LLM
     let rawResponse: string
 
-    if (providerType === 'anthropic') {
-      rawResponse = await callAnthropic(
-        provider.apiKey,
-        modelId,
-        SYSTEM_PROMPT,
-        prompt.trim(),
-        provider.timeout,
-      )
-    } else {
-      // OpenAI-compatible: openai, openrouter, deepseek, gemini, glm, kimi,
-      // qwen, xai, mistral, and user-defined openai_compatible. Per-provider
-      // user override (provider.baseUrl) wins over the registry default.
-      const baseUrl = (provider.baseUrl || defaultBaseUrlFor(providerType)).replace(/\/+$/, '')
+    if (resolved.kind === 'custom') {
+      // Lookup by provider id (the suffix in "custom/<id>" is a CUID, not a
+      // model name). The actual api model name is on the provider record.
+      const provider = providers.find((p) => p.id === resolved.providerId)
+      if (!provider) {
+        return NextResponse.json(
+          {
+            error: `No custom provider with id "${resolved.providerId}" found. Reconfigure the LLM Model in Agent Behaviour, or add the provider in Global Settings.`,
+          },
+          { status: 400 },
+        )
+      }
+
+      const apiModel = provider.modelIdentifier?.trim()
+      if (!apiModel) {
+        return NextResponse.json(
+          {
+            error: `Custom provider "${provider.name}" has no Model Identifier set. Open Global Settings → LLM Providers and configure it.`,
+          },
+          { status: 400 },
+        )
+      }
+
+      // custom/ is only emitted by the agent for openai_compatible providers
+      // (see agentic/orchestrator_helpers/model_providers.py). Route through
+      // the OpenAI-compatible client.
+      const baseUrl = (provider.baseUrl || '').replace(/\/+$/, '')
+      if (!baseUrl) {
+        return NextResponse.json(
+          {
+            error: `Custom provider "${provider.name}" has no Base URL set. Open Global Settings → LLM Providers and configure it.`,
+          },
+          { status: 400 },
+        )
+      }
 
       const extraHeaders = (provider.defaultHeaders && typeof provider.defaultHeaders === 'object')
         ? provider.defaultHeaders as Record<string, string>
         : undefined
 
-      rawResponse = await callOpenAICompatible(
+      rawResponse = await callOpenAICompatible({
         baseUrl,
-        provider.apiKey,
-        modelId,
-        SYSTEM_PROMPT,
-        prompt.trim(),
+        apiKey: provider.apiKey,
+        modelId: apiModel,
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: prompt.trim(),
         extraHeaders,
-        provider.timeout,
-      )
+        timeout: provider.timeout,
+        temperature: provider.temperature,
+        maxTokens: provider.maxTokens,
+        sslVerify: provider.sslVerify,
+      })
+    } else {
+      const { providerType, modelId } = resolved
+      const provider = providers.find((p) => p.providerType === providerType)
+
+      if (!provider) {
+        const friendlyNames: Record<string, string> = {
+          anthropic: 'Anthropic',
+          openai: 'OpenAI',
+          openrouter: 'OpenRouter',
+          deepseek: 'DeepSeek',
+          gemini: 'Google Gemini',
+          glm: 'GLM (Zhipu AI)',
+          kimi: 'Kimi (Moonshot)',
+          qwen: 'Qwen (Alibaba)',
+          xai: 'xAI (Grok)',
+          mistral: 'Mistral AI',
+        }
+        return NextResponse.json(
+          {
+            error: `No ${friendlyNames[providerType] || providerType} provider configured. Add one in Global Settings to use model "${model}".`,
+          },
+          { status: 400 },
+        )
+      }
+
+      if (providerType === 'anthropic') {
+        rawResponse = await callAnthropic(
+          provider.apiKey,
+          modelId,
+          SYSTEM_PROMPT,
+          prompt.trim(),
+          provider.timeout,
+          provider.maxTokens,
+          provider.temperature,
+        )
+      } else {
+        const baseUrl = (provider.baseUrl || defaultBaseUrlFor(providerType)).replace(/\/+$/, '')
+
+        const extraHeaders = (provider.defaultHeaders && typeof provider.defaultHeaders === 'object')
+          ? provider.defaultHeaders as Record<string, string>
+          : undefined
+
+        rawResponse = await callOpenAICompatible({
+          baseUrl,
+          apiKey: provider.apiKey,
+          modelId,
+          systemPrompt: SYSTEM_PROMPT,
+          userPrompt: prompt.trim(),
+          extraHeaders,
+          timeout: provider.timeout,
+          temperature: provider.temperature,
+          maxTokens: provider.maxTokens,
+          sslVerify: provider.sslVerify,
+        })
+      }
     }
 
     if (!rawResponse) {
@@ -265,7 +350,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 4. Parse JSON from response
     const jsonStr = extractJson(rawResponse)
     let parsed: unknown
     try {
@@ -277,7 +361,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 5. Validate with Zod
     const result = reconPresetSchema.safeParse(parsed)
     if (!result.success) {
       const issues = result.error.issues.slice(0, 5).map((i) => `${i.path.join('.')}: ${i.message}`)
@@ -294,7 +377,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
 
-    // Distinguish abort (timeout) from other errors
     if (error instanceof Error && error.name === 'AbortError') {
       return NextResponse.json(
         { error: 'LLM request timed out. Try a simpler description or check your provider settings.' },

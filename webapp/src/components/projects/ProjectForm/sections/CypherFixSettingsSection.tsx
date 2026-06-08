@@ -49,7 +49,12 @@ export function CypherFixSettingsSection({ data, updateField }: CypherFixSetting
 
   // Fetch models on mount
   useEffect(() => {
-    fetch('/api/models')
+    fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      cache: 'no-store',
+    })
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch')
         return r.json()

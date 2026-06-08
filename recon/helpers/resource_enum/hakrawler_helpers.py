@@ -38,10 +38,10 @@ def _crawl_single_url(
     filtered_count = 0
     external_entries = []
 
-    cmd = ["docker", "run", "--rm", "-i"]
-
-    if use_proxy:
-        cmd.extend(["--network", "host"])
+    # --net=host is ALWAYS passed so Hakrawler can reach loopback / local-lab
+    # targets. See recon/helpers/resource_enum/katana_helpers.py for the long
+    # comment on why sibling docker containers can't see 127.0.0.1 otherwise.
+    cmd = ["docker", "run", "--rm", "--net=host", "-i"]
 
     cmd.append(docker_image)
 

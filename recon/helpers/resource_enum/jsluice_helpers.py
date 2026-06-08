@@ -11,10 +11,219 @@ import shutil
 import ssl
 import subprocess
 import urllib.request
+import uuid
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+DEFAULT_JSLUICE_EXCLUDE_PATTERNS = [
+    '/_next/image', '/_next/static', '/_next/data', '/__nextjs',
+    '/_nuxt/', '/__nuxt',
+    '/runtime.', '/polyfills.', '/vendor.',
+    '/webpack', '/chunk.', '.chunk.js', '.bundle.js', 'hot-update',
+    '/static/', '/public/', '/dist/', '/build/', '/lib/', '/vendor/', '/node_modules/',
+    '.js', '.mjs', '.map', '.css', '.scss', '.sass', '.less',
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.avif',
+    '.woff', '.woff2', '.ttf', '.eot', '.otf',
+    '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm',
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.zip', '.rar', '.7z', '.tar', '.gz',
+    '/rxjs/', '/react/', '/angular/', '/lodash/', '/zone.js/',
+]
+
+
+def _split_exclude_patterns(exclude_patterns: List[str]) -> Tuple[List[str], List[str]]:
+    """
+    Split deny-list patterns into (extension suffixes, substring patterns).
+
+    Extensions are matched against the path suffix only (e.g. `.js` matches
+    `/app/main.js` but not `/api/users.json`). Everything else uses substring
+    match against the URL path + query.
+    """
+    extensions = []
+    substrings = []
+    for raw in exclude_patterns:
+        if not raw:
+            continue
+        pat = raw.lower()
+        # An extension pattern starts with '.' and contains no slash.
+        if pat.startswith('.') and '/' not in pat:
+            extensions.append(pat)
+        else:
+            substrings.append(pat)
+    return extensions, substrings
+
+
+def _create_temp_dir(prefix: str = "jsluice_verify") -> Path:
+    """Create a temp directory under /tmp/redamon for Docker-in-Docker compatibility."""
+    temp_dir = Path(f"/tmp/redamon/.{prefix}_{uuid.uuid4().hex[:8]}")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return temp_dir
+
+
+def _cleanup_temp_dir(temp_dir: Path):
+    """Clean up a temp directory."""
+    try:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+    except Exception:
+        pass
+
+
+def filter_jsluice_url(url: str, exclude_patterns: List[str]) -> bool:
+    """
+    Return True when a jsluice URL should be probed.
+
+    jsluice often extracts library, bundle, sourcemap, and static asset paths
+    from JavaScript source. These are filtered before HTTP validation to avoid
+    spending probe budget on obvious non-application endpoints.
+    """
+    if not url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+        path_lower = (parsed.path or "").lower()
+        query_lower = (parsed.query or "").lower()
+        haystack = f"{path_lower} {query_lower}"
+
+        extensions, substrings = _split_exclude_patterns(exclude_patterns)
+
+        # Extensions match the path suffix only — `.js` must not drop `.json`.
+        if any(path_lower.endswith(ext) for ext in extensions):
+            return False
+
+        if any(sub in haystack for sub in substrings):
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
+def verify_jsluice_urls(
+    urls: List[str],
+    docker_image: str,
+    threads: int,
+    timeout: int,
+    rate_limit: int,
+    accept_status: List[int],
+    exclude_patterns: List[str] = None,
+    use_proxy: bool = False,
+) -> Tuple[Set[str], Dict[str, int]]:
+    """
+    Verify jsluice-discovered URLs are live using httpx.
+
+    This verifier fails closed: if probing fails or times out, unverified
+    jsluice URLs are not returned for graph publication.
+    """
+    exclude_patterns = exclude_patterns or []
+    stats = {
+        "jsluice_verify_total": len(urls),
+        "jsluice_verify_candidates": 0,
+        "jsluice_skipped_blacklist": 0,
+        "jsluice_verified": 0,
+        "jsluice_skipped_unverified": 0,
+    }
+
+    if not urls:
+        return set(), stats
+
+    candidates = []
+    for url in sorted(set(urls)):
+        if filter_jsluice_url(url, exclude_patterns):
+            candidates.append(url)
+        else:
+            stats["jsluice_skipped_blacklist"] += 1
+
+    stats["jsluice_verify_candidates"] = len(candidates)
+    if not candidates:
+        stats["jsluice_skipped_unverified"] = 0
+        print(f"[*][jsluice] Verification skipped: all {len(urls)} URLs matched noise filters")
+        return set(), stats
+
+    print(f"\n[*][jsluice] Verifying {len(candidates)} jsluice URLs...")
+    if stats["jsluice_skipped_blacklist"]:
+        print(f"[*][jsluice] Skipped {stats['jsluice_skipped_blacklist']} URLs via noise filters")
+
+    temp_dir = _create_temp_dir("jsluice_verify")
+    try:
+        urls_file = temp_dir / "urls.txt"
+        output_file = temp_dir / "verified.json"
+
+        with open(urls_file, 'w') as f:
+            for url in candidates:
+                f.write(f"{url}\n")
+
+        # --net=host is ALWAYS passed so the httpx verifier can reach loopback /
+        # local-lab targets. See recon/helpers/resource_enum/katana_helpers.py
+        # for the long comment on sibling-container network isolation.
+        cmd = [
+            "docker", "run", "--rm", "--net=host",
+            "-v", f"{temp_dir}:/data",
+            docker_image,
+            "-l", "/data/urls.txt",
+            "-o", "/data/verified.json",
+            "-json",
+            "-silent",
+            "-nc",
+            "-t", str(threads),
+            "-timeout", str(timeout),
+            "-rl", str(rate_limit),
+        ]
+
+        if use_proxy:
+            cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            print("[!][jsluice] URL verification timeout; dropping unverified jsluice URLs")
+            stats["jsluice_skipped_unverified"] = len(candidates)
+            return set(), stats
+        except Exception as e:
+            print(f"[!][jsluice] URL verification error: {e}; dropping unverified jsluice URLs")
+            stats["jsluice_skipped_unverified"] = len(candidates)
+            return set(), stats
+
+        if proc.returncode != 0:
+            stderr_tail = (proc.stderr or "").strip().splitlines()[-3:]
+            print(
+                f"[!][jsluice] httpx exited with code {proc.returncode}; "
+                f"dropping unverified jsluice URLs. stderr: {' | '.join(stderr_tail)}"
+            )
+            stats["jsluice_skipped_unverified"] = len(candidates)
+            return set(), stats
+
+        verified = set()
+        accept_codes = {int(code) for code in accept_status}
+
+        if output_file.exists():
+            with open(output_file, 'r') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                    except json.JSONDecodeError:
+                        continue
+
+                    url = entry.get('url', '')
+                    status = entry.get('status_code') or entry.get('status-code')
+                    try:
+                        status = int(status)
+                    except (TypeError, ValueError):
+                        continue
+
+                    if url and status in accept_codes:
+                        verified.add(url)
+
+        stats["jsluice_verified"] = len(verified)
+        stats["jsluice_skipped_unverified"] = len(candidates) - len(verified)
+        print(f"[+][jsluice] Verified: {len(verified)}/{len(candidates)} URLs are live")
+        return verified, stats
+    finally:
+        _cleanup_temp_dir(temp_dir)
 
 
 def _extract_urls_for_base(base_url, file_entries, concurrency, timeout, allowed_hosts):

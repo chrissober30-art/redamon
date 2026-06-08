@@ -31,6 +31,7 @@ function buildSummary(params: Record<string, unknown>) {
     bannerGrabEnabled: 'Banner Grab',
     katanaEnabled: 'Katana',
     hakrawlerEnabled: 'Hakrawler',
+    zapAjaxSpiderEnabled: 'ZAP Ajax Spider',
     jsluiceEnabled: 'jsluice',
     jsReconEnabled: 'JS Recon',
     ffufEnabled: 'ffuf',

@@ -30,6 +30,20 @@ def _route_after_member_think(state: FireteamMemberState) -> str:
     decision = state.get("_decision") or {}
     action = decision.get("action")
 
+    # Iteration budget cap (post-think). Strict-greater so the LLM gets one
+    # extra call to analyze the last dispatched wave: with max_iterations=N,
+    # the Nth think call plans wave N, execute_plan runs wave N, and the
+    # (N+1)th think call analyzes wave N's output. After that call,
+    # current_iteration=N+1 > N and we route to completion. The strict-greater
+    # accounts for the member's wave-then-analyze cadence: the root agent
+    # fuses analysis+planning in one LLM call and uses >= at
+    # orchestrator.py:_route_after_think, while the member's analysis happens
+    # in the LLM call AFTER the wave executes.
+    current_iter = state.get("current_iteration", 0)
+    max_iter = state.get("max_iterations", 15)
+    if current_iter > max_iter:
+        return "fireteam_complete"
+
     if state.get("_pending_confirmation"):
         return "fireteam_await_confirmation"
 

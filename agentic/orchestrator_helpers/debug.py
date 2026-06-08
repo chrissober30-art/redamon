@@ -28,4 +28,4 @@ def save_graph_image(graph, base_dir: str = None) -> None:
 
         logger.info(f"Graph structure image saved to {image_path}")
     except Exception as e:
-        logger.warning(f"Could not save graph image: {e}")
+        logger.warning(f"Could not save graph image: {type(e).__name__}: {e}")

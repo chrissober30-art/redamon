@@ -222,6 +222,20 @@ async def _execute_single_step(
         step["error_message"] = step.get("error_message") or embedded_err
         step["error_embedded"] = True
 
+    # Diagnostic classification: distinguishes a shell-quoting glitch from a
+    # real 4xx from a 5xx-in-3ms parse-time crash. Surfaced in chain context
+    # so the LLM stops treating "five different failure modes" as one
+    # uniform "FAILED" and stops marking vector classes tested on the basis
+    # of failures that never reached the target.
+    from orchestrator_helpers.error_class import classify_error_class
+    step["error_class"] = classify_error_class(
+        success=step.get("success", False),
+        tool_output=step.get("tool_output"),
+        error_message=step.get("error_message"),
+        duration_ms=step.get("duration_ms"),
+        tool_name=tool_name,
+    )
+
     tool_output = step.get("tool_output", "")
 
     # Emit output as chunk for non-streaming tools so frontend shows Raw Output

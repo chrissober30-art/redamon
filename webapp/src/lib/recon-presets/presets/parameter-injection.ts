@@ -121,6 +121,7 @@ Pentesters and bug bounty hunters focused on injection vulnerabilities. Ideal fo
 
     // --- DISABLE Hakrawler ---
     hakrawlerEnabled: false,
+    zapAjaxSpiderEnabled: false,
 
     // --- GAU: enabled with URL verification and method detection ---
     gauEnabled: true,
@@ -146,6 +147,7 @@ Pentesters and bug bounty hunters focused on injection vulnerabilities. Ideal fo
     // --- DISABLE JS Recon ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE ffuf ---
     ffufEnabled: false,
 

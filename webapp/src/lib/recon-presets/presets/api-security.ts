@@ -5,9 +5,9 @@ export const API_SECURITY: ReconPreset = {
   name: 'API Security Audit',
   icon: '',
   image: '/preset-api.svg',
-  shortDescription: 'Focused on REST/GraphQL API surface. Kiterunner, Arjun, ffuf with API extensions, Nuclei API tags.',
+  shortDescription: 'Focused on REST/GraphQL API surface. Katana, ZAP Ajax Spider, Kiterunner, Arjun, ffuf with API extensions, Nuclei API tags.',
   fullDescription: `### Pipeline Goal
-Map and test the API attack surface. This preset combines API-specific endpoint discovery (Kiterunner with large route wordlists), hidden parameter detection (Arjun on all HTTP methods), directory fuzzing with API file extensions, and Nuclei templates targeting API vulnerabilities. Everything else is stripped down to minimize noise and focus on APIs.
+Map and test the API attack surface. This preset combines crawler-driven endpoint discovery (Katana and ZAP Ajax Spider), API-specific endpoint discovery (Kiterunner with large route wordlists), hidden parameter detection (Arjun on all HTTP methods), directory fuzzing with API file extensions, and Nuclei templates targeting API vulnerabilities. Everything else is stripped down to minimize noise and focus on APIs.
 
 ### Who is this for?
 Pentesters and security engineers testing REST APIs, GraphQL endpoints, or microservice architectures. Applications where the primary attack surface is the API layer, not the traditional web frontend. Mobile app backends, SPAs with API-driven architectures, or headless services.
@@ -16,6 +16,7 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
 - Subdomain discovery (all tools) to find API subdomains (api.*, graphql.*, v1.*, etc.)
 - httpx probing with tech detection and response capture
 - Katana depth 2 with JS crawl to discover API endpoints referenced in frontend code
+- ZAP Ajax Spider with bounded browser crawling seeded from base URLs and endpoints
 - Kiterunner with routes-large wordlist for comprehensive API route brute-forcing
 - Arjun on all 5 HTTP methods (GET/POST/PUT/DELETE/PATCH) with 150 max endpoints
 - ffuf with API-specific extensions (.json, .xml, .graphql, .yaml, .wadl, .wsdl) and smart fuzz
@@ -24,7 +25,7 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
 
 ### What it disables
 - Port scanning (Naabu, Masscan, Nmap) -- API testing targets known HTTP endpoints
-- Hakrawler -- Katana covers crawling, Kiterunner handles API-specific discovery
+- Hakrawler -- Katana and ZAP Ajax Spider cover crawling, Kiterunner handles API-specific discovery
 - GAU, ParamSpider -- historical archives less relevant for API testing
 - JS Recon -- deep JS analysis not the focus; jsluice covers endpoint extraction
 - Banner grabbing, Wappalyzer -- not relevant for API-focused testing
@@ -36,11 +37,12 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
 1. Subdomain discovery finds all subdomains, including API-specific ones
 2. httpx probes discovered hosts and captures response bodies for API detection
 3. Katana crawls frontend code to discover API endpoint references
-4. Kiterunner brute-forces API routes using 140k+ Swagger/OpenAPI route patterns
-5. ffuf fuzzes directories with API-specific extensions to find undocumented endpoints
-6. Arjun discovers hidden parameters on all found endpoints across all HTTP methods
-7. jsluice extracts API URLs and secrets from JavaScript files
-8. Nuclei runs API-targeted templates in DAST mode with OOB detection`,
+4. ZAP Ajax Spider performs bounded browser crawling seeded from base URLs and endpoints
+5. Kiterunner brute-forces API routes using 140k+ Swagger/OpenAPI route patterns
+6. ffuf fuzzes directories with API-specific extensions to find undocumented endpoints
+7. Arjun discovers hidden parameters on all found endpoints across all HTTP methods
+8. jsluice extracts API URLs and secrets from JavaScript files
+9. Nuclei runs API-targeted templates in DAST mode with OOB detection`,
   parameters: {
     // Modules: 5 phases. port_scan added to discover non-standard API ports
     // (4000=Apollo/graphql-yoga, 3000=Node dev, 8080=Spring Boot, 5000=Flask/Strawberry)
@@ -131,6 +133,16 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
     katanaTimeout: 1800,
     katanaJsCrawl: true,
 
+    // --- ZAP Ajax Spider: bounded browser crawl seeded from APIs/endpoints ---
+    zapAjaxSpiderEnabled: true,
+    zapAjaxSpiderSeedMode: 'base_urls_and_endpoints',
+    zapAjaxSpiderMaxDuration: 10,
+    zapAjaxSpiderMaxCrawlDepth: 5,
+    zapAjaxSpiderMaxCrawlStates: 100,
+    zapAjaxSpiderNumberOfBrowsers: 1,
+    zapAjaxSpiderMaxUrls: 1000,
+    zapAjaxSpiderParallelism: 3,
+
     // --- DISABLE Hakrawler (Kiterunner handles API discovery) ---
     hakrawlerEnabled: false,
 
@@ -148,6 +160,7 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
     // --- DISABLE JS Recon (jsluice covers endpoint extraction) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- ffuf: API-specific extensions, smart fuzz ---
     ffufEnabled: true,
     ffufThreads: 40,

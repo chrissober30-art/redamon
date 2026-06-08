@@ -15,8 +15,12 @@ export function useModelPicker(userId: string, onModelChange?: (modelId: string)
     let cancelled = false
     setModelsLoading(true)
     setModelsError(false)
-    const params = userId ? `?userId=${userId}` : ''
-    fetch(`/api/models${params}`)
+    fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userId ? { userId } : {}),
+      cache: 'no-store',
+    })
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch')
         return r.json()

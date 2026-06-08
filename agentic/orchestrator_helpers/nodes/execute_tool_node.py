@@ -232,6 +232,18 @@ async def execute_tool_node(
         step_data["error_message"] = step_data.get("error_message") or embedded_err
         step_data["error_embedded"] = True
 
+    # Diagnostic classification: distinguishes a shell-quoting glitch from a
+    # real 4xx from a 5xx-in-3ms parse-time crash. Surfaced in chain context
+    # so the LLM can see WHICH kind of failure happened, not just THAT one did.
+    from orchestrator_helpers.error_class import classify_error_class
+    step_data["error_class"] = classify_error_class(
+        success=step_data.get("success", False),
+        tool_output=step_data.get("tool_output"),
+        error_message=step_data.get("error_message"),
+        duration_ms=step_data.get("duration_ms"),
+        tool_name=tool_name,
+    )
+
     # Detailed logging - tool output
     tool_output = step_data.get("tool_output", "")
     success = step_data.get("success", False)

@@ -153,6 +153,7 @@ Network security teams and pentesters who need to map large external perimeters 
     katanaParallelism: 10,
     katanaConcurrency: 20,
     hakrawlerEnabled: false,
+    zapAjaxSpiderEnabled: false,
     hakrawlerParallelism: 6,
 
     // --- DISABLE archive/passive URL discovery ---
@@ -165,6 +166,7 @@ Network security teams and pentesters who need to map large external perimeters 
     jsluiceEnabled: false,
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory/API fuzzing ---
     ffufEnabled: false,
     kiterunnerEnabled: false,

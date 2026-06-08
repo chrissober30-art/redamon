@@ -3,7 +3,7 @@ Pydantic models for Recon Orchestrator API
 """
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel
 
 
@@ -30,7 +30,7 @@ class ReconState(BaseModel):
     project_id: str
     status: ReconStatus
     current_phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     total_phases: int = 6
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -43,7 +43,7 @@ class ReconLogEvent(BaseModel):
     log: str
     timestamp: datetime
     phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     is_phase_start: bool = False
     is_phase_end: bool = False
     level: str = "info"  # info, warning, error, success, action
@@ -88,7 +88,7 @@ class GvmState(BaseModel):
     project_id: str
     status: GvmStatus
     current_phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     total_phases: int = 4
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -101,7 +101,7 @@ class GvmLogEvent(BaseModel):
     log: str
     timestamp: datetime
     phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     is_phase_start: bool = False
     is_phase_end: bool = False
     level: str = "info"
@@ -135,7 +135,7 @@ class GithubHuntState(BaseModel):
     project_id: str
     status: GithubHuntStatus
     current_phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     total_phases: int = 3
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -148,7 +148,7 @@ class GithubHuntLogEvent(BaseModel):
     log: str
     timestamp: datetime
     phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     is_phase_start: bool = False
     is_phase_end: bool = False
     level: str = "info"
@@ -182,7 +182,7 @@ class TrufflehogState(BaseModel):
     project_id: str
     status: TrufflehogStatus
     current_phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     total_phases: int = 3
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -195,7 +195,7 @@ class TrufflehogLogEvent(BaseModel):
     log: str
     timestamp: datetime
     phase: Optional[str] = None
-    phase_number: Optional[int] = None
+    phase_number: Optional[Union[int, float]] = None
     is_phase_start: bool = False
     is_phase_end: bool = False
     level: str = "info"

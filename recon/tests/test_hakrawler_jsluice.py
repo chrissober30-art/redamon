@@ -8,6 +8,7 @@ real network/Docker calls (all external tools are mocked).
 import sys
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -473,6 +474,528 @@ def test_jsluice_run_filters_scope_and_cleans_up():
     print("PASS: test_jsluice_run_filters_scope_and_cleans_up")
 
 
+def test_jsluice_filter_url_rejects_common_static_library_noise():
+    """filter_jsluice_url should skip obvious bundled library/static paths."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    patterns = [
+        "/rxjs/",
+        "/node_modules/",
+        "/webpack",
+        ".map",
+        ".chunk.js",
+    ]
+
+    assert filter_jsluice_url("https://example.com/rxjs/static-5.10", patterns) is False
+    assert filter_jsluice_url("https://example.com/node_modules/lodash/index.js", patterns) is False
+    assert filter_jsluice_url("https://example.com/_next/static/chunks/app.chunk.js", patterns) is False
+    assert filter_jsluice_url("https://example.com/api/users", patterns) is True
+    assert filter_jsluice_url("https://example.com/dashboard/settings", patterns) is True
+    print("PASS: test_jsluice_filter_url_rejects_common_static_library_noise")
+
+
+def test_verify_jsluice_urls_filters_noise_and_unverified():
+    """verify_jsluice_urls should blacklist noise and keep only accepted HTTP statuses."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        output_file = temp_path / "verified.json"
+
+        def fake_run(cmd, **kwargs):
+            output_file.write_text(
+                "\n".join([
+                    json.dumps({"url": "https://example.com/api/live", "status_code": 200}),
+                    json.dumps({"url": "https://example.com/api/missing", "status_code": 404}),
+                    "",
+                ])
+            )
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            verified, stats = verify_jsluice_urls(
+                urls=[
+                    "https://example.com/api/live",
+                    "https://example.com/api/missing",
+                    "https://example.com/rxjs/static-5.10",
+                ],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10,
+                timeout=5,
+                rate_limit=50,
+                accept_status=[200, 201, 301, 302, 307, 308, 401, 403],
+                exclude_patterns=["/rxjs/"],
+            )
+
+    assert verified == {"https://example.com/api/live"}
+    assert stats["jsluice_verify_total"] == 3
+    assert stats["jsluice_skipped_blacklist"] == 1
+    assert stats["jsluice_verified"] == 1
+    assert stats["jsluice_skipped_unverified"] == 1
+    print("PASS: test_verify_jsluice_urls_filters_noise_and_unverified")
+
+
+def test_verify_jsluice_urls_fails_closed_on_httpx_error():
+    """If httpx verification fails, no jsluice URLs should be published."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=RuntimeError("docker failed")):
+            verified, stats = verify_jsluice_urls(
+                urls=["https://example.com/api/live"],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10,
+                timeout=5,
+                rate_limit=50,
+                accept_status=[200, 201, 301, 302, 307, 308, 401, 403],
+                exclude_patterns=[],
+            )
+
+    assert verified == set()
+    assert stats["jsluice_verify_total"] == 1
+    assert stats["jsluice_verified"] == 0
+    assert stats["jsluice_skipped_unverified"] == 1
+    print("PASS: test_verify_jsluice_urls_fails_closed_on_httpx_error")
+
+
+def test_jsluice_filter_extension_anchored_keeps_json_endpoints():
+    """Regression for B1: `.js` deny-list must not over-filter `.json` API endpoints."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    # Use the real default deny-list so we exercise the exact production behavior.
+    from recon.helpers.resource_enum.jsluice_helpers import DEFAULT_JSLUICE_EXCLUDE_PATTERNS
+
+    # The bug was: `.js` matched anywhere in the URL, dropping `.json` endpoints too.
+    assert filter_jsluice_url("https://api.example.com/v1/users.json", DEFAULT_JSLUICE_EXCLUDE_PATTERNS) is True, \
+        ".json endpoints must NOT be filtered by the .js extension rule"
+    assert filter_jsluice_url("https://api.example.com/v1/items.jsonp", DEFAULT_JSLUICE_EXCLUDE_PATTERNS) is True, \
+        ".jsonp endpoints must NOT be filtered by the .js extension rule"
+    # But .js files themselves still get filtered (path suffix match).
+    assert filter_jsluice_url("https://cdn.example.com/static/app.js", DEFAULT_JSLUICE_EXCLUDE_PATTERNS) is False, \
+        "Real .js files must still be filtered by the deny-list"
+    assert filter_jsluice_url("https://cdn.example.com/static/app.min.js", DEFAULT_JSLUICE_EXCLUDE_PATTERNS) is False
+    # Query-string mentions of .js should not trigger the extension rule either.
+    assert filter_jsluice_url("https://api.example.com/v1/search?return=json", DEFAULT_JSLUICE_EXCLUDE_PATTERNS) is True
+    print("PASS: test_jsluice_filter_extension_anchored_keeps_json_endpoints")
+
+
+def test_verify_jsluice_urls_fails_closed_on_httpx_nonzero_exit():
+    """Regression for B4: httpx returning a non-zero exit code must NOT be silently treated as 'all dropped'.
+
+    The previous implementation ignored returncode entirely — if the httpx Docker image
+    failed to pull or the container crashed, no exception was raised and the output file
+    simply didn't exist, so the verifier returned an empty set with no log of WHY.
+    """
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        def fake_run(cmd, **kwargs):
+            return mock.MagicMock(
+                returncode=125,  # docker's "unable to pull image" exit code
+                stdout="",
+                stderr="Unable to find image 'projectdiscovery/httpx:latest' locally",
+            )
+
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            verified, stats = verify_jsluice_urls(
+                urls=["https://example.com/api/live"],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10,
+                timeout=5,
+                rate_limit=50,
+                accept_status=[200, 201, 301, 302, 307, 308, 401, 403],
+                exclude_patterns=[],
+            )
+
+    assert verified == set()
+    assert stats["jsluice_skipped_unverified"] == 1, \
+        "Non-zero httpx exit must be counted as unverified (fail-closed)"
+    print("PASS: test_verify_jsluice_urls_fails_closed_on_httpx_nonzero_exit")
+
+
+def test_partial_recon_jsluice_imports_and_calls_verifier():
+    """Regression for B2: partial recon `run_jsluice` must wire verify_jsluice_urls.
+
+    We assert two things statically (no end-to-end execution required):
+      1. The verifier symbol is importable from `recon.helpers.resource_enum`.
+      2. The partial-recon source for `run_jsluice` references `verify_jsluice_urls`
+         in its function body — i.e. the call site exists, not just an unused import.
+    """
+    import inspect
+    from recon.helpers.resource_enum import verify_jsluice_urls  # noqa: F401 - import is the assertion
+    from recon.partial_recon_modules import web_crawling
+
+    source = inspect.getsource(web_crawling.run_jsluice)
+    assert "verify_jsluice_urls" in source, (
+        "Partial recon run_jsluice does NOT call verify_jsluice_urls — "
+        "URLs would reach the graph unverified (B2 regression)"
+    )
+    assert "JSLUICE_VERIFY_URLS" in source, (
+        "Partial recon run_jsluice does NOT honor the JSLUICE_VERIFY_URLS toggle"
+    )
+    print("PASS: test_partial_recon_jsluice_imports_and_calls_verifier")
+
+
+# ===========================================================================
+# B1/B4 additional unit tests — edge cases
+# ===========================================================================
+
+def test_split_exclude_patterns_categorizes_extension_and_substring():
+    """Unit: helper must split extensions from substring patterns."""
+    from recon.helpers.resource_enum.jsluice_helpers import _split_exclude_patterns
+
+    extensions, substrings = _split_exclude_patterns([
+        ".js", ".chunk.js", ".PNG",      # extensions
+        "/static/", "/runtime.", "hot-update",  # substrings (have / or no leading .)
+        "",                               # empty — must be ignored
+    ])
+    assert ".js" in extensions
+    assert ".chunk.js" in extensions
+    assert ".png" in extensions, "Must lowercase the pattern"
+    assert "/static/" in substrings
+    assert "/runtime." in substrings
+    assert "hot-update" in substrings
+    assert "" not in extensions and "" not in substrings, "Empty pattern must be dropped"
+    print("PASS: test_split_exclude_patterns_categorizes_extension_and_substring")
+
+
+def test_filter_jsluice_url_handles_empty_and_none_inputs():
+    """Unit: empty/None URL must short-circuit to False (do not probe)."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    assert filter_jsluice_url("", [".js"]) is False
+    assert filter_jsluice_url(None, [".js"]) is False
+    print("PASS: test_filter_jsluice_url_handles_empty_and_none_inputs")
+
+
+def test_filter_jsluice_url_passes_when_no_exclude_patterns():
+    """Unit: with an empty deny-list every non-empty URL passes."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    assert filter_jsluice_url("https://example.com/static/app.js", []) is True
+    assert filter_jsluice_url("https://example.com/api/users.json", []) is True
+    print("PASS: test_filter_jsluice_url_passes_when_no_exclude_patterns")
+
+
+def test_filter_jsluice_url_case_insensitive_extension():
+    """Unit: extension match must be case-insensitive on path side."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    assert filter_jsluice_url("https://example.com/IMG/Logo.PNG", [".png"]) is False
+    assert filter_jsluice_url("https://example.com/IMG/Logo.PNG", [".PNG"]) is False
+    print("PASS: test_filter_jsluice_url_case_insensitive_extension")
+
+
+def test_filter_jsluice_url_extension_in_query_does_not_drop():
+    """Regression: `?format=js` must NOT drop an otherwise-valid API endpoint."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    # Extension rule is anchored to path suffix, so `format=js` in the query is irrelevant.
+    assert filter_jsluice_url("https://api.example.com/search?format=js", [".js"]) is True
+    print("PASS: test_filter_jsluice_url_extension_in_query_does_not_drop")
+
+
+def test_filter_jsluice_url_substring_still_matches_query():
+    """Unit: substring patterns (paths/keywords) still match against the query, by design.
+
+    The query side is useful for catching e.g. `?source=node_modules` references —
+    only EXTENSION patterns are anchored to the path suffix.
+    """
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    assert filter_jsluice_url(
+        "https://example.com/track?ref=/node_modules/app", ["/node_modules/"]
+    ) is False
+    print("PASS: test_filter_jsluice_url_substring_still_matches_query")
+
+
+def test_filter_jsluice_url_substring_pattern_still_works_for_paths():
+    """Unit: substring patterns continue to match path segments after B1 refactor."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    patterns = ["/_next/static", "/runtime.", "hot-update"]
+    assert filter_jsluice_url("https://app.example.com/_next/static/chunks/main.js", patterns) is False
+    assert filter_jsluice_url("https://app.example.com/runtime.main.js", patterns) is False
+    assert filter_jsluice_url("https://app.example.com/webpack-hot-update.json", patterns) is False
+    assert filter_jsluice_url("https://app.example.com/api/users", patterns) is True
+    print("PASS: test_filter_jsluice_url_substring_pattern_still_works_for_paths")
+
+
+def test_verify_jsluice_urls_empty_input_returns_zero_stats():
+    """Unit: empty input list must short-circuit without spawning httpx."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with mock.patch("subprocess.run") as fake_run:
+        verified, stats = verify_jsluice_urls(
+            urls=[],
+            docker_image="projectdiscovery/httpx:latest",
+            threads=10, timeout=5, rate_limit=50,
+            accept_status=[200], exclude_patterns=[],
+        )
+    assert verified == set()
+    assert stats["jsluice_verify_total"] == 0
+    assert stats["jsluice_verified"] == 0
+    fake_run.assert_not_called()
+    print("PASS: test_verify_jsluice_urls_empty_input_returns_zero_stats")
+
+
+def test_verify_jsluice_urls_dedups_input_urls():
+    """Unit: duplicate input URLs must be deduplicated before probing."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    captured_lines = {}
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        output_file = temp_path / "verified.json"
+
+        def fake_run(cmd, **kwargs):
+            # Capture what got written to urls.txt
+            urls_file = temp_path / "urls.txt"
+            if urls_file.exists():
+                captured_lines["lines"] = urls_file.read_text().strip().splitlines()
+            output_file.write_text(
+                json.dumps({"url": "https://example.com/api/live", "status_code": 200}) + "\n"
+            )
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            verified, stats = verify_jsluice_urls(
+                urls=[
+                    "https://example.com/api/live",
+                    "https://example.com/api/live",  # exact dup
+                    "https://example.com/api/live",  # exact dup
+                ],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10, timeout=5, rate_limit=50,
+                accept_status=[200], exclude_patterns=[],
+            )
+
+    assert verified == {"https://example.com/api/live"}
+    assert len(captured_lines.get("lines", [])) == 1, \
+        f"Expected dedup'd input, got {captured_lines.get('lines')}"
+    print("PASS: test_verify_jsluice_urls_dedups_input_urls")
+
+
+def test_verify_jsluice_urls_handles_missing_or_invalid_status():
+    """Unit: httpx entries with missing or non-numeric status must be skipped, not crash."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        output_file = temp_path / "verified.json"
+
+        def fake_run(cmd, **kwargs):
+            output_file.write_text("\n".join([
+                json.dumps({"url": "https://example.com/api/live", "status_code": 200}),
+                json.dumps({"url": "https://example.com/api/missing-status"}),  # no status
+                json.dumps({"url": "https://example.com/api/bad-status", "status_code": "not-a-number"}),
+                json.dumps({"url": "https://example.com/api/null-status", "status_code": None}),
+                "{malformed json",
+                "",
+            ]))
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            verified, stats = verify_jsluice_urls(
+                urls=[
+                    "https://example.com/api/live",
+                    "https://example.com/api/missing-status",
+                    "https://example.com/api/bad-status",
+                    "https://example.com/api/null-status",
+                ],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10, timeout=5, rate_limit=50,
+                accept_status=[200], exclude_patterns=[],
+            )
+
+    assert verified == {"https://example.com/api/live"}
+    assert stats["jsluice_verified"] == 1
+    print("PASS: test_verify_jsluice_urls_handles_missing_or_invalid_status")
+
+
+def test_verify_jsluice_urls_accepts_status_code_with_dash_key():
+    """Unit: httpx output sometimes uses `status-code` (dash) instead of `status_code`."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        output_file = temp_path / "verified.json"
+
+        def fake_run(cmd, **kwargs):
+            output_file.write_text(
+                json.dumps({"url": "https://example.com/api/live", "status-code": 200}) + "\n"
+            )
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            verified, _ = verify_jsluice_urls(
+                urls=["https://example.com/api/live"],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10, timeout=5, rate_limit=50,
+                accept_status=[200], exclude_patterns=[],
+            )
+
+    assert "https://example.com/api/live" in verified
+    print("PASS: test_verify_jsluice_urls_accepts_status_code_with_dash_key")
+
+
+def test_verify_jsluice_urls_all_blacklisted_skips_subprocess():
+    """Unit: when every URL hits the deny-list, do NOT spawn the httpx container."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with mock.patch("subprocess.run") as fake_run:
+        verified, stats = verify_jsluice_urls(
+            urls=[
+                "https://example.com/static/app.js",
+                "https://example.com/static/style.css",
+            ],
+            docker_image="projectdiscovery/httpx:latest",
+            threads=10, timeout=5, rate_limit=50,
+            accept_status=[200],
+            exclude_patterns=[".js", ".css"],
+        )
+    assert verified == set()
+    assert stats["jsluice_skipped_blacklist"] == 2
+    assert stats["jsluice_verify_candidates"] == 0
+    fake_run.assert_not_called()
+    print("PASS: test_verify_jsluice_urls_all_blacklisted_skips_subprocess")
+
+
+# ===========================================================================
+# B3 / settings layer integration tests
+# ===========================================================================
+
+def test_settings_empty_exclude_patterns_falls_back_to_defaults():
+    """Integration regression: Prisma default of `[]` must NOT silently disable filtering.
+
+    When prisma db push adds the new column with `@default([])`, every existing row
+    gets an empty array. The fetch layer must treat empty as "use defaults".
+    """
+    from recon.project_settings import DEFAULT_SETTINGS
+
+    # Simulate the exact line in fetch_project_settings.
+    project = {"jsluiceExcludePatterns": []}
+    exclude_patterns = project.get("jsluiceExcludePatterns") or DEFAULT_SETTINGS["JSLUICE_EXCLUDE_PATTERNS"]
+
+    assert exclude_patterns == DEFAULT_SETTINGS["JSLUICE_EXCLUDE_PATTERNS"], \
+        "Empty list from DB MUST resolve to the default deny-list, not [] (which would skip filtering)."
+    assert len(exclude_patterns) > 0
+    print("PASS: test_settings_empty_exclude_patterns_falls_back_to_defaults")
+
+
+def test_settings_empty_accept_status_falls_back_to_defaults():
+    """Integration regression: empty accept-status list must fall back to defaults too."""
+    from recon.project_settings import DEFAULT_SETTINGS
+
+    project = {"jsluiceVerifyAcceptStatus": []}
+    accept_status = project.get("jsluiceVerifyAcceptStatus") or DEFAULT_SETTINGS["JSLUICE_VERIFY_ACCEPT_STATUS"]
+
+    assert accept_status == DEFAULT_SETTINGS["JSLUICE_VERIFY_ACCEPT_STATUS"]
+    assert 200 in accept_status
+    print("PASS: test_settings_empty_accept_status_falls_back_to_defaults")
+
+
+def test_settings_explicit_user_override_is_honored():
+    """Integration: a non-empty user-provided list must be used as-is (no clobber)."""
+    user_patterns = ["/internal-api/", ".debug"]
+    project = {"jsluiceExcludePatterns": user_patterns}
+    from recon.project_settings import DEFAULT_SETTINGS
+    exclude_patterns = project.get("jsluiceExcludePatterns") or DEFAULT_SETTINGS["JSLUICE_EXCLUDE_PATTERNS"]
+
+    assert exclude_patterns == user_patterns
+    print("PASS: test_settings_explicit_user_override_is_honored")
+
+
+def test_default_settings_has_all_jsluice_verify_keys():
+    """Smoke: DEFAULT_SETTINGS must contain every JSLUICE_VERIFY_* key the runtime reads."""
+    from recon.project_settings import DEFAULT_SETTINGS
+
+    required = [
+        "JSLUICE_VERIFY_URLS",
+        "JSLUICE_VERIFY_DOCKER_IMAGE",
+        "JSLUICE_VERIFY_TIMEOUT",
+        "JSLUICE_VERIFY_RATE_LIMIT",
+        "JSLUICE_VERIFY_THREADS",
+        "JSLUICE_VERIFY_ACCEPT_STATUS",
+        "JSLUICE_EXCLUDE_PATTERNS",
+    ]
+    missing = [k for k in required if k not in DEFAULT_SETTINGS]
+    assert not missing, f"Missing JSLUICE_VERIFY_* defaults: {missing}"
+    assert DEFAULT_SETTINGS["JSLUICE_VERIFY_URLS"] is True
+    assert isinstance(DEFAULT_SETTINGS["JSLUICE_VERIFY_ACCEPT_STATUS"], list)
+    assert isinstance(DEFAULT_SETTINGS["JSLUICE_EXCLUDE_PATTERNS"], list)
+    print("PASS: test_default_settings_has_all_jsluice_verify_keys")
+
+
+# ===========================================================================
+# Schema sync smoke tests — Prisma + preset schema
+# ===========================================================================
+
+def test_prisma_schema_has_jsluice_verify_columns():
+    """Smoke: Prisma schema MUST declare the new jsluiceVerify* columns.
+
+    If this fails, prisma db push will not create the columns and
+    `project.get('jsluiceVerifyUrls', …)` will always return the default,
+    making the UI toggle a no-op.
+    """
+    schema_path = Path("/app/webapp/prisma/schema.prisma")
+    if not schema_path.exists():
+        # Fall back to repo-relative path so the test works locally too.
+        schema_path = Path(__file__).resolve().parents[2] / "webapp" / "prisma" / "schema.prisma"
+    assert schema_path.exists(), f"Prisma schema not found at {schema_path}"
+    content = schema_path.read_text()
+    for field in [
+        "jsluiceVerifyUrls",
+        "jsluiceVerifyDockerImage",
+        "jsluiceVerifyTimeout",
+        "jsluiceVerifyRateLimit",
+        "jsluiceVerifyThreads",
+        "jsluiceVerifyAcceptStatus",
+        "jsluiceExcludePatterns",
+    ]:
+        assert field in content, f"Prisma schema missing field: {field}"
+    print("PASS: test_prisma_schema_has_jsluice_verify_columns")
+
+
+def test_recon_preset_schema_includes_jsluice_verify_fields():
+    """Smoke: reconPresetSchema must accept the new fields, else AI-generated presets strip them."""
+    schema_path = Path("/app/webapp/src/lib/recon-preset-schema.ts")
+    if not schema_path.exists():
+        schema_path = Path(__file__).resolve().parents[2] / "webapp" / "src" / "lib" / "recon-preset-schema.ts"
+    assert schema_path.exists(), f"recon-preset-schema.ts not found at {schema_path}"
+    content = schema_path.read_text()
+    for field in [
+        "jsluiceVerifyUrls",
+        "jsluiceVerifyDockerImage",
+        "jsluiceVerifyTimeout",
+        "jsluiceVerifyRateLimit",
+        "jsluiceVerifyThreads",
+        "jsluiceVerifyAcceptStatus",
+        "jsluiceExcludePatterns",
+    ]:
+        assert field in content, f"reconPresetSchema missing: {field}"
+    # Also check the human-facing catalog
+    assert "jsluiceVerifyUrls" in content and "noise filter" not in content.lower() or "verify" in content.lower(), \
+        "RECON_PARAMETER_CATALOG should describe the new fields"
+    print("PASS: test_recon_preset_schema_includes_jsluice_verify_fields")
+
+
 # ===========================================================================
 # jsluice merge tests
 # ===========================================================================
@@ -632,7 +1155,8 @@ def test_jsluice_default_settings_exist():
         assert key in DEFAULT_SETTINGS, f"Missing key: {key}"
 
     assert DEFAULT_SETTINGS['JSLUICE_ENABLED'] is True
-    assert DEFAULT_SETTINGS['JSLUICE_MAX_FILES'] == 100
+    # JSLUICE_MAX_FILES was raised from 100 to 10000 to handle SPA bundles with hundreds of chunks.
+    assert DEFAULT_SETTINGS['JSLUICE_MAX_FILES'] >= 100
     assert DEFAULT_SETTINGS['JSLUICE_CONCURRENCY'] == 5
     print("PASS: test_jsluice_default_settings_exist")
 

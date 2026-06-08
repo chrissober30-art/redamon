@@ -21,7 +21,7 @@ from typing import Optional
 
 import httpx
 import websockets
-from fastapi import FastAPI, Query, WebSocket
+from fastapi import FastAPI, File, Form, Query, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -30,8 +30,12 @@ from pydantic import BaseModel
 from logging_config import setup_logging
 from orchestrator import AgentOrchestrator
 from orchestrator_helpers import normalize_content
+from startup_guard import check_single_worker
 from utils import get_session_count
-from websocket_api import WebSocketManager, websocket_endpoint
+from websocket_api import WebSocketManager, websocket_endpoint, MessageType
+import workspace_fs
+import job_runner
+import ws_job_emitter
 
 # Initialize logging with file rotation
 setup_logging(log_level=logging.INFO, log_to_console=True, log_to_file=True)
@@ -50,6 +54,20 @@ async def lifespan(app: FastAPI):
     """
     global orchestrator, ws_manager
 
+    # Refuse to start under multi-worker uvicorn/gunicorn. The fireteam
+    # confirmation registry uses an in-process dict; multiple workers would
+    # silently break confirmation routing. See startup_guard for the env
+    # vars consulted and the documented remediation paths.
+    check_single_worker()
+
+    # Agent container runs as root; bind-mounted /workspace files would
+    # otherwise end up root:root on the host (UID 1000), breaking the
+    # plan's promise that the workspace is browsable/editable directly
+    # from the host. umask 0 makes new dirs world-writable (0777) and
+    # new files world-readable+writable (0666), so the host user can
+    # rm/edit them. Ownership still root, but mode 666/777 makes that OK.
+    os.umask(0)
+
     logger.info("Starting RedAmon Agent API...")
 
     # Initialize orchestrator
@@ -58,6 +76,20 @@ async def lifespan(app: FastAPI):
 
     # Initialize WebSocket manager
     ws_manager = WebSocketManager()
+
+    # Background job recovery: flip any meta files marked 'running' on disk
+    # (from a previous agent process that died mid-job) to 'interrupted' so
+    # the drawer can show their final state correctly. In-flight asyncio
+    # tasks are gone by definition - this is a state-only fixup.
+    reg = job_runner.get_registry()
+    reg.recover_on_boot()
+
+    # Wire the JobRegistry to push job_update events through the WS manager
+    # so the frontend drawer sees status changes in real time. The emitter
+    # lives in ws_job_emitter.py so it stays unit-testable without the
+    # full FastAPI/langgraph stack.
+    ws_job_emitter.set_ws_manager(ws_manager)
+    reg.set_ws_emitter(ws_job_emitter.emit_job_update)
 
     logger.info("RedAmon Agent API ready (WebSocket)")
 
@@ -487,6 +519,7 @@ def _build_llm_with_model_for_user(model_name: str, user_id: Optional[str]):
         mistral_api_key=(mistral_p or {}).get("apiKey"),
         aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
         aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+        aws_bearer_token=(bedrock_p or {}).get("awsBearerToken"),
         aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
     )
 
@@ -526,7 +559,7 @@ async def llm_ffuf_extensions(body: FfufExtensionsRequest):
         logger.error(f"ffuf-extensions: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     # Strip ``` fences if the model wrapped the JSON
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
@@ -626,7 +659,7 @@ async def llm_nuclei_tags(body: NucleiTagsRequest):
         logger.error(f"nuclei-tags: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -735,7 +768,7 @@ async def llm_waf_classify(body: WafClassifyRequest):
         logger.error(f"waf-classify: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -859,7 +892,7 @@ async def llm_nuclei_fp_filter(body: NucleiFpFilterRequest):
         logger.error(f"nuclei-fp-filter: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -992,7 +1025,7 @@ async def llm_takeover_classify(body: TakeoverClassifyRequest):
         logger.error(f"takeover-classify: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -1104,6 +1137,7 @@ def _setup_llm_for_endpoint(model_name: str) -> "BaseChatModel":
         mistral_api_key=(mistral_p or {}).get("apiKey"),
         aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
         aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+        aws_bearer_token=(bedrock_p or {}).get("awsBearerToken"),
         aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
         custom_llm_config=custom_config,
     )
@@ -1118,12 +1152,47 @@ class TradecraftVerifyRequest(BaseModel):
     user_id: Optional[str] = None      # used to load the user's LLM provider keys
     github_token: Optional[str] = None
     force: bool = False
+    # Per-resource model override. When set, the verify endpoint builds a
+    # provider-agnostic LLM for THIS model (resolving the user's provider
+    # keys) instead of reusing orchestrator.llm. Decouples tradecraft
+    # ingestion from the agent's current chat model and from project-load
+    # order (fixes the "agent reverted to default Anthropic after restart"
+    # 401 path).
+    model: Optional[str] = None
+
+
+_CUSTOM_PROVIDER_TYPES = ("openai_compatible", "bedrock_custom", "ollama_local")
+
+
+def _pick_custom_provider(user_providers: list, model_name: str) -> Optional[dict]:
+    """Return the custom-provider record that should serve this request, if any.
+
+    Resolution order:
+      1. If `model_name` is `custom/<id>`, look up that exact provider id.
+      2. Otherwise, the first provider whose providerType is custom.
+    Returns None when no custom provider is configured.
+    """
+    if model_name and model_name.startswith("custom/"):
+        wanted_id = model_name[len("custom/"):]
+        for p in user_providers or []:
+            if p.get("id") == wanted_id:
+                return p
+    for p in user_providers or []:
+        if p.get("providerType") in _CUSTOM_PROVIDER_TYPES:
+            return p
+    return None
 
 
 def _build_llm_for_user(user_id: Optional[str]):
     """Build an LLM for a non-project endpoint by loading the user's providers
     via the internal webapp API. Falls back to env-based providers when user_id
-    is missing or the lookup fails."""
+    is missing or the lookup fails.
+
+    When the user has only a custom (OpenAI-compatible / bedrock_custom /
+    ollama_local) provider configured, this honors it instead of falling back
+    to the global default model — otherwise the call would crash trying to
+    instantiate an Anthropic client with no key.
+    """
     import os
     import requests
     from orchestrator_helpers.llm_setup import setup_llm, _resolve_provider_key
@@ -1146,6 +1215,15 @@ def _build_llm_for_user(user_id: Optional[str]):
             user_providers = resp.json() or []
         except Exception as e:
             logger.warning(f"tradecraft verify: failed to fetch user LLM providers: {e}")
+
+    custom_provider = _pick_custom_provider(user_providers, model_name)
+    if custom_provider:
+        custom_model = f"custom/{custom_provider.get('id', '')}"
+        logger.info(
+            f"tradecraft verify: using custom provider id={custom_provider.get('id')} "
+            f"type={custom_provider.get('providerType')}"
+        )
+        return setup_llm(custom_model, custom_llm_config=custom_provider)
 
     openai_p = _resolve_provider_key(user_providers, "openai")
     anthropic_p = _resolve_provider_key(user_providers, "anthropic")
@@ -1172,6 +1250,7 @@ def _build_llm_for_user(user_id: Optional[str]):
         mistral_api_key=(mistral_p or {}).get("apiKey"),
         aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
         aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+        aws_bearer_token=(bedrock_p or {}).get("awsBearerToken"),
         aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
     )
 
@@ -1203,17 +1282,27 @@ async def tradecraft_verify(body: TradecraftVerifyRequest):
             "crawl_stats": {},
             "last_error": err,
         }
-    # Prefer the agent's loaded LLM (a project session is active);
-    # otherwise build one on demand from the user's saved providers.
-    llm = orchestrator.llm
-    if llm is None:
-        try:
+    # Resolve the LLM used for crawl decisions + summary:
+    #   1. If the request specifies a per-resource model, build a provider-
+    #      agnostic LLM for THAT model from the user's saved providers.
+    #      (Same path the 5 recon AI classifiers use.) This is the normal
+    #      path — the webapp always sends a model now that the field is
+    #      required at create/edit time.
+    #   2. Otherwise (back-compat for direct API callers and old rows
+    #      written before this column existed), prefer the orchestrator's
+    #      loaded LLM, then fall back to _build_llm_for_user.
+    try:
+        if body.model:
+            llm = _build_llm_with_model_for_user(body.model, body.user_id)
+        elif orchestrator.llm is not None:
+            llm = orchestrator.llm
+        else:
             llm = _build_llm_for_user(body.user_id)
-        except Exception as e:
-            logger.error(f"tradecraft verify: cannot set up LLM: {e}")
-            return JSONResponse(
-                {"error": f"LLM not configured: {e}"}, status_code=503
-            )
+    except Exception as e:
+        logger.error(f"tradecraft verify: cannot set up LLM: {e}")
+        return JSONResponse(
+            {"error": f"LLM not configured: {e}"}, status_code=503
+        )
     bounds = {
         "max_pages": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_PAGES", 30),
         "max_llm_calls": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_LLM_CALLS", 20),
@@ -1551,24 +1640,22 @@ async def get_defaults():
     return camel_case_defaults
 
 
-@app.get("/models", tags=["System"])
-async def get_models(providers: str = Query(default="", description="JSON-encoded list of provider configs from DB")):
+class ModelsRequest(BaseModel):
+    providers: list[dict] | None = None
+
+
+@app.post("/models", tags=["System"])
+async def get_models(body: ModelsRequest | None = None):
     """
     Fetch available AI models from all configured providers.
 
-    When `providers` query param is supplied (JSON list of UserLlmProvider rows),
-    uses those configs for discovery. Otherwise falls back to env vars.
+    Providers (a list of UserLlmProvider rows) are passed in the POST body
+    rather than the URL to keep apiKey values out of uvicorn access logs.
+    Falls back to env vars when the body is empty.
     """
     from orchestrator_helpers.model_providers import fetch_all_models
 
-    provider_list = None
-    if providers:
-        import json as json_mod
-        try:
-            provider_list = json_mod.loads(providers)
-        except (json_mod.JSONDecodeError, TypeError):
-            logger.warning("Invalid providers JSON in /models request, falling back to env")
-
+    provider_list = body.providers if body else None
     return await fetch_all_models(providers=provider_list)
 
 
@@ -1660,6 +1747,7 @@ class LlmProviderTestRequest(BaseModel):
     awsRegion: str = "us-east-1"
     awsAccessKeyId: str = ""
     awsSecretKey: str = ""
+    awsBearerToken: str = ""
 
 
 @app.post("/llm-provider/test", tags=["System"])
@@ -1673,7 +1761,10 @@ async def test_llm_provider(body: LlmProviderTestRequest):
         if ptype == "openai":
             llm = setup_llm("gpt-4o-mini", openai_api_key=body.apiKey)
         elif ptype == "anthropic":
-            llm = setup_llm("claude-sonnet-4-20250514", anthropic_api_key=body.apiKey)
+            # Connection check uses a current, valid alias (no date suffix).
+            # Dated snapshots like claude-sonnet-4-20250514 are deprecated and 404
+            # once retired. claude-opus-4-6 still accepts the temperature param.
+            llm = setup_llm("claude-opus-4-6", anthropic_api_key=body.apiKey)
         elif ptype == "openrouter":
             llm = setup_llm("openrouter/openai/gpt-4o-mini", openrouter_api_key=body.apiKey)
         elif ptype == "deepseek":
@@ -1739,10 +1830,29 @@ async def test_llm_provider(body: LlmProviderTestRequest):
             pick = next((m for m in available if "small" in m["id"].lower() or "nemo" in m["id"].lower()), available[0])
             llm = setup_llm(pick["id"], mistral_api_key=body.apiKey)
         elif ptype == "bedrock":
+            from orchestrator_helpers.model_providers import fetch_bedrock_models
+            available = await fetch_bedrock_models(
+                region=body.awsRegion,
+                access_key_id=body.awsAccessKeyId,
+                secret_access_key=body.awsSecretKey,
+                bearer_token=body.awsBearerToken,
+            )
+            if not available:
+                return JSONResponse(
+                    content={"success": False, "error": "No Bedrock models available — check region, credentials, and Model Access in the Bedrock console."},
+                    status_code=400,
+                )
+            # Prefer a small Haiku/Nova model for the smoke test if present;
+            # otherwise fall back to the first listed model.
+            pick = next(
+                (m for m in available if "haiku" in m["id"].lower() or "nova-micro" in m["id"].lower()),
+                available[0],
+            )
             llm = setup_llm(
-                "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+                pick["id"],
                 aws_access_key_id=body.awsAccessKeyId,
                 aws_secret_access_key=body.awsSecretKey,
+                aws_bearer_token=body.awsBearerToken,
                 aws_region=body.awsRegion,
             )
         elif ptype == "openai_compatible":
@@ -1868,7 +1978,315 @@ async def download_file(
 
 
 # =============================================================================
-# COMMAND WHISPERER — NLP-to-command translation using the project's LLM
+# WORKSPACE - per-project filesystem + background-job HTTP endpoints
+# =============================================================================
+# All routes are project-scoped (projectId is required) and use the same
+# _resolve_safe validator as the fs_* tools, so path traversal and symlink
+# escape attempts are rejected at the boundary. The webapp drawer + AI panel
+# both consume these.
+
+
+@app.get("/workspace/list", tags=["Workspace"])
+async def workspace_list(
+    projectId: str = Query(..., description="Project UUID"),
+    path: str = Query(".", description="Subdir relative to /workspace/<projectId>/"),
+):
+    """Directory listing as structured JSON for the drawer Files tab."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        entries = workspace_fs.list_dir_for_project(projectId, path)
+        return {"projectId": projectId, "path": path, "entries": entries}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/list failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/workspace/tree", tags=["Workspace"])
+async def workspace_tree(
+    projectId: str = Query(...),
+    path: str = Query("."),
+    maxDepth: int = Query(3, ge=1, le=10),
+    maxEntries: int = Query(500, ge=10, le=5000),
+):
+    """ASCII tree view of a workspace subtree."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        return {"projectId": projectId, "path": path,
+                "tree": workspace_fs.tree_for_project(projectId, path, maxDepth, maxEntries)}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/tree failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/workspace/download", tags=["Workspace"])
+async def workspace_download(
+    projectId: str = Query(...),
+    path: str = Query(...),
+):
+    """Stream file bytes directly from the bind-mount (no kali_shell round-trip)."""
+    if not projectId:
+        return Response(content="projectId required", status_code=400)
+    try:
+        content_bytes, mime = workspace_fs.download_for_project(projectId, path)
+    except ValueError as e:
+        return Response(content=str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/download failed: {e}")
+        return Response(content=str(e), status_code=500)
+    filename = os.path.basename(path) or "download"
+    return Response(
+        content=content_bytes,
+        media_type=mime,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(content_bytes)),
+        },
+    )
+
+
+class WorkspaceRenameRequest(BaseModel):
+    projectId: str
+    path: str
+    newName: str
+
+
+@app.post("/workspace/rename", tags=["Workspace"])
+async def workspace_rename(req: WorkspaceRenameRequest):
+    """Rename a single entry within its parent (no cross-dir moves)."""
+    if not req.projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        new_path = workspace_fs.rename_for_project(req.projectId, req.path, req.newName)
+        return {"projectId": req.projectId, "path": new_path}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/rename failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.delete("/workspace", tags=["Workspace"])
+async def workspace_delete(
+    projectId: str = Query(...),
+    path: str = Query(...),
+    recursive: bool = Query(False),
+):
+    """Delete a file or directory (recursive required for dirs)."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        workspace_fs.delete_for_project(projectId, path, recursive)
+        return {"projectId": projectId, "path": path, "deleted": True}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/delete failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+class WorkspaceResetRequest(BaseModel):
+    projectId: str
+
+
+@app.post("/workspace/reset", tags=["Workspace"])
+async def workspace_reset(req: WorkspaceResetRequest):
+    """Wipe the workspace back to its initial state (4 empty default folders)."""
+    if not req.projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        summary = workspace_fs.reset_for_project(req.projectId)
+        return {"projectId": req.projectId, **summary}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/reset failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/workspace/jobs", tags=["Workspace"])
+async def workspace_jobs_list(
+    projectId: str = Query(...),
+    active: Optional[bool] = Query(None, description="True=running only, False=terminal only, omit for all"),
+):
+    """List background jobs for the drawer Jobs tab."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    reg = job_runner.get_registry()
+    return {"projectId": projectId, "jobs": reg.list(projectId, active=active)}
+
+
+@app.post("/workspace/jobs/{job_id}/cancel", tags=["Workspace"])
+async def workspace_job_cancel(
+    job_id: str,
+    projectId: str = Query(...),
+):
+    """Cancel a running background job."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    reg = job_runner.get_registry()
+    result = await reg.cancel(projectId, job_id)
+    return result
+
+
+@app.post("/workspace/upload", tags=["Workspace"])
+async def workspace_upload(
+    projectId: str = Form(...),
+    path: str = Form("."),
+    overwrite: bool = Form(False),
+    file: UploadFile = File(...),
+):
+    """Multipart file upload into a workspace directory.
+
+    409 (`code: exists`) on name collision when `overwrite=False` so the
+    frontend can prompt for confirmation, then retry with `overwrite=true`.
+    """
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        file_bytes = await file.read()
+        new_path = workspace_fs.upload_for_project(
+            projectId, path, file_bytes, file.filename or "uploaded", overwrite=overwrite,
+        )
+        return {"projectId": projectId, "path": new_path, "size": len(file_bytes)}
+    except FileExistsError as e:
+        return JSONResponse(
+            content={"error": str(e), "code": "exists"}, status_code=409,
+        )
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/upload failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+class WorkspaceMkdirRequest(BaseModel):
+    projectId: str
+    path: str
+
+
+@app.post("/workspace/mkdir", tags=["Workspace"])
+async def workspace_mkdir(req: WorkspaceMkdirRequest):
+    """Create a new directory (parents created automatically)."""
+    if not req.projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        new_path = workspace_fs.mkdir_for_project(req.projectId, req.path)
+        return {"projectId": req.projectId, "path": new_path}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/mkdir failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+class WorkspaceBulkArchiveRequest(BaseModel):
+    projectId: str
+    paths: list[str]
+    format: str = "tar.gz"
+    archiveName: str = "bundle"
+
+
+@app.post("/workspace/bulk-archive", tags=["Workspace"])
+async def workspace_bulk_archive(req: WorkspaceBulkArchiveRequest):
+    """Bundle N workspace entries into one tar.gz/zip; stream back to client.
+
+    POST (not GET) because the list of paths can be long and we want a JSON
+    body for clarity over a megalong query string.
+    """
+    if not req.projectId:
+        return Response(content="projectId required", status_code=400)
+    try:
+        archive_bytes, filename = workspace_fs.bulk_archive_for_project(
+            req.projectId, req.paths, format=req.format, archive_name=req.archiveName,
+        )
+    except ValueError as e:
+        return Response(content=str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/bulk-archive failed: {e}")
+        return Response(content=str(e), status_code=500)
+    mime = "application/gzip" if req.format == "tar.gz" else "application/zip"
+    return Response(
+        content=archive_bytes,
+        media_type=mime,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(archive_bytes)),
+        },
+    )
+
+
+@app.get("/workspace/archive-download", tags=["Workspace"])
+async def workspace_archive_download(
+    projectId: str = Query(...),
+    path: str = Query(...),
+    format: str = Query("tar.gz"),
+):
+    """Stream a directory as a tar.gz or zip archive."""
+    if not projectId:
+        return Response(content="projectId required", status_code=400)
+    try:
+        archive_bytes, filename = workspace_fs.archive_dir_for_project(
+            projectId, path, format=format,
+        )
+    except ValueError as e:
+        return Response(content=str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/archive-download failed: {e}")
+        return Response(content=str(e), status_code=500)
+    mime = "application/gzip" if format == "tar.gz" else "application/zip"
+    return Response(
+        content=archive_bytes,
+        media_type=mime,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(archive_bytes)),
+        },
+    )
+
+
+@app.get("/workspace/preview", tags=["Workspace"])
+async def workspace_preview(
+    projectId: str = Query(...),
+    path: str = Query(...),
+    maxBytes: int = Query(1024 * 1024, ge=1, le=10 * 1024 * 1024),
+):
+    """File preview for the inline viewer pane (text or base64 binary)."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        return workspace_fs.preview_for_project(projectId, path, max_bytes=maxBytes)
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/preview failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/workspace/properties", tags=["Workspace"])
+async def workspace_properties(
+    projectId: str = Query(...),
+    path: str = Query(...),
+):
+    """Rich metadata for the properties popover (size, mtime, mode, sha256)."""
+    if not projectId:
+        return JSONResponse(content={"error": "projectId required"}, status_code=400)
+    try:
+        return workspace_fs.properties_for_project(projectId, path)
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"/workspace/properties failed: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+# =============================================================================
+# COMMAND WHISPERER - NLP-to-command translation using the project's LLM
 # =============================================================================
 
 _COMMAND_WHISPERER_SYSTEM_PROMPT = """You are a command-line expert for penetration testing.
@@ -2144,6 +2562,7 @@ async def text_to_cypher(body: TextToCypherRequest):
                 mistral_api_key=(mistral_p or {}).get("apiKey"),
                 aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
                 aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+                aws_bearer_token=(bedrock_p or {}).get("awsBearerToken"),
                 aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
             )
     except Exception as e:

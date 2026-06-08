@@ -11,6 +11,7 @@ Features:
   - Wayback Machine, Common Crawl, OTX, URLScan
 - jsluice JavaScript analysis for hidden URLs and secrets (active - downloads JS files)
 - FFuf directory fuzzing for hidden content discovery (active)
+- ZAP Ajax Spider browser-driven discovery for JavaScript-heavy apps (active)
 - HTML form parsing for POST endpoints
 - Parameter extraction and classification
 - Endpoint categorization (auth, file_access, api, dynamic, static, admin)
@@ -19,8 +20,9 @@ Features:
 - Parallel execution of Katana + Hakrawler + GAU + ParamSpider with merged results
 - jsluice post-crawl analysis on discovered JS files
 - FFuf post-crawl directory fuzzing with smart base path targeting
+- ZAP Ajax Spider post-crawl browser-driven discovery
 
-Pipeline: http_probe -> resource_enum (Katana + Hakrawler + GAU + ParamSpider parallel, then jsluice, then FFuf) -> vuln_scan
+Pipeline: http_probe -> resource_enum (Katana + Hakrawler + GAU + ParamSpider parallel, then jsluice, FFuf, ZAP Ajax Spider, Arjun) -> vuln_scan
 """
 
 import json
@@ -68,12 +70,18 @@ from recon.helpers.resource_enum import (
     pull_hakrawler_docker_image,
     merge_hakrawler_into_by_base_url,
     # jsluice helpers
+    DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
     run_jsluice_analysis,
     merge_jsluice_into_by_base_url,
+    verify_jsluice_urls,
     # FFuf helpers
     run_ffuf_discovery,
     pull_ffuf_binary_check,
     merge_ffuf_into_by_base_url,
+    # ZAP Ajax Spider helpers
+    pull_zap_ajax_docker_image,
+    run_zap_ajax_spider,
+    merge_zap_ajax_into_by_base_url,
     # Arjun helpers
     arjun_binary_check,
     run_arjun_discovery,
@@ -84,6 +92,125 @@ from recon.helpers.resource_enum import (
     # Endpoint organization
     organize_endpoints,
 )
+
+
+# =============================================================================
+# AI Surface Recon — endpoint + parameter classifier
+# =============================================================================
+
+# Import via the module (not the names) so monkey-patched catalogues in tests
+# are picked up at call time.
+from recon.helpers import ai_signal_catalog as _ai_catalog
+
+
+def _build_parent_ai_map(recon_data: dict) -> dict[str, bool]:
+    """Return ``{base_url: parent_is_ai}`` derived from http_probe output.
+
+    A BaseURL is considered "parent AI-tagged" when http_probe already
+    stamped ``is_ai_framework_detected = True`` on any Endpoint under it
+    (header / favicon / title / Wappalyzer body fingerprint hit).
+
+    Empty dict when http_probe didn't run — every BaseURL then defaults to
+    parent_is_ai=False, which only suppresses the ambiguous RAG patterns
+    (`/upload`, `/search`, `/query`). Unambiguous patterns (`/rag`,
+    `/vectorize`, `/threads`) still fire.
+    """
+    parent_ai: dict[str, bool] = {}
+    http_probe = recon_data.get("http_probe") or {}
+    by_url = http_probe.get("by_url") or {}
+    for url, entry in by_url.items():
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("is_ai_framework_detected"):
+            continue
+        # Derive base_url = scheme://host:port (drop path).
+        try:
+            p = urlparse(url)
+            base_url = f"{p.scheme}://{p.netloc}"
+        except Exception:
+            continue
+        parent_ai[base_url] = True
+    return parent_ai
+
+
+def _annotate_ai_endpoint_classifier(
+    organized_data: dict, settings: dict | None, recon_data: dict
+) -> dict:
+    """Apply the resource_enum AI classifier in place on ``organized_data``.
+
+    Walks every endpoint and parameter under ``organized_data['by_base_url']``
+    and stamps:
+
+      - ``endpoint['ai_interface_type']`` — one of the 8 enum values, or
+        the explicit ``'non-llm'`` sentinel when no path pattern matched
+      - ``endpoint['is_ai_rag_ingest']`` — True when an unambiguous RAG path
+        matched, or an ambiguous RAG path matched AND the parent BaseURL is
+        already AI-tagged
+      - ``parameter['is_ai_prompt_injectable']`` — True when the parameter
+        name is in the AI_PARAM_NAMES catalogue AND the parent endpoint is
+        AI-classified (ai_interface_type != 'non-llm')
+
+    Each annotation is gated by its own settings toggle plus the master toggle.
+    All toggles default ``True`` so a fresh project picks up annotations with
+    no configuration. Returns a summary dict of counters.
+    """
+    summary = {"paths": 0, "rag_paths": 0, "prompt_params": 0}
+    if settings is None:
+        return summary
+
+    if not settings.get("RESOURCE_ENUM_AI_CLASSIFIER_ENABLED", True):
+        return summary
+
+    path_on = settings.get("RESOURCE_ENUM_AI_PATH_CLASSIFIER_ENABLED", True)
+    rag_on = settings.get("RESOURCE_ENUM_AI_RAG_PATH_FLAG_ENABLED", True)
+    param_on = settings.get("RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED", True)
+    # ai_tool_arg_path resolver is a Phase-15 stub — toggle exists for
+    # forward compatibility but no resolution happens until that lap.
+
+    parent_ai_map = _build_parent_ai_map(recon_data)
+
+    by_base_url = (organized_data or {}).get("by_base_url") or {}
+    for base_url, base_data in by_base_url.items():
+        if not isinstance(base_data, dict):
+            continue
+        parent_is_ai = bool(parent_ai_map.get(base_url, False))
+        for path, endpoint in (base_data.get("endpoints") or {}).items():
+            if not isinstance(endpoint, dict):
+                continue
+
+            # Path classifier: only stamps when the sub-toggle is on AND
+            # something matched. When the sub-toggle is off we leave the
+            # field absent — operators who disabled it don't want sentinels
+            # polluting the graph.
+            if path_on:
+                interface_type = _ai_catalog.match_ai_path(path or "")
+                if interface_type is not None:
+                    endpoint["ai_interface_type"] = interface_type
+                    summary["paths"] += 1
+                else:
+                    endpoint["ai_interface_type"] = "non-llm"
+
+            if rag_on and _ai_catalog.is_ai_rag_path(path or "", parent_is_ai=parent_is_ai):
+                endpoint["is_ai_rag_ingest"] = True
+                summary["rag_paths"] += 1
+
+            endpoint_is_ai = (
+                endpoint.get("ai_interface_type") not in (None, "non-llm")
+                or endpoint.get("is_ai_rag_ingest") is True
+            )
+            if param_on and endpoint_is_ai:
+                params = endpoint.get("parameters") or {}
+                if not isinstance(params, dict):
+                    continue
+                for position in ("query", "body", "path"):
+                    for param in params.get(position) or []:
+                        if not isinstance(param, dict):
+                            continue
+                        name = param.get("name")
+                        if isinstance(name, str) and _ai_catalog.is_ai_prompt_param(name):
+                            param["is_ai_prompt_injectable"] = True
+                            summary["prompt_params"] += 1
+    return summary
 
 
 # =============================================================================
@@ -110,17 +237,22 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     """
     print("\n" + "=" * 70)
     print("[*][ResourceEnum] RedAmon - Resource Enumeration")
-    print("[*][ResourceEnum] (Katana + Hakrawler + GAU + jsluice + FFuf + Kiterunner + Arjun)")
+    print("[*][ResourceEnum] (Katana + Hakrawler + GAU + jsluice + FFuf + ZAP Ajax Spider + Kiterunner + Arjun)")
     print("=" * 70)
 
     # Use passed settings or empty dict as fallback
     if settings is None:
         settings = {}
 
+    effective_settings_display = dict(settings)
+    if "ZAP_AJAX_SPIDER_CUSTOM_HEADERS" in effective_settings_display:
+        header_count = len(effective_settings_display.get("ZAP_AJAX_SPIDER_CUSTOM_HEADERS") or [])
+        effective_settings_display["ZAP_AJAX_SPIDER_CUSTOM_HEADERS"] = f"<{header_count} header(s), redacted>"
+
     from recon.helpers import print_effective_settings
     print_effective_settings(
         "ResourceEnum",
-        settings,
+        effective_settings_display,
         keys=[
             ("KATANA_ENABLED", "Katana"),
             ("KATANA_DOCKER_IMAGE", "Katana"),
@@ -159,12 +291,38 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             ("FFUF_SMART_FUZZ", "FFuf"),
             ("FFUF_WORDLIST", "FFuf"),
             ("FFUF_CUSTOM_HEADERS", "FFuf"),
+            ("ZAP_AJAX_SPIDER_ENABLED", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_DOCKER_IMAGE", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_SEED_MODE", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_MAX_DURATION", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_MAX_CRAWL_STATES", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_BROWSER_ID", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_EVENT_WAIT", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_RELOAD_WAIT", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_RANDOM_INPUTS", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_SCOPE_CHECK", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_MAX_URLS", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_PARALLELISM", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_CUSTOM_HEADERS", "ZAP Ajax Spider"),
+            ("ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS", "ZAP Ajax Spider"),
             ("KITERUNNER_ENABLED", "Kiterunner"),
             ("KITERUNNER_RATE_LIMIT", "Kiterunner"),
             ("KITERUNNER_TIMEOUT", "Kiterunner"),
             ("JSLUICE_ENABLED", "jsluice"),
             ("JSLUICE_MAX_FILES", "jsluice"),
             ("JSLUICE_PARALLELISM", "jsluice"),
+            ("JSLUICE_VERIFY_URLS", "jsluice"),
+            ("JSLUICE_VERIFY_DOCKER_IMAGE", "jsluice"),
+            ("JSLUICE_VERIFY_TIMEOUT", "jsluice"),
+            ("JSLUICE_VERIFY_RATE_LIMIT", "jsluice"),
+            ("JSLUICE_VERIFY_THREADS", "jsluice"),
+            ("JSLUICE_VERIFY_ACCEPT_STATUS", "jsluice"),
+            ("JSLUICE_EXCLUDE_PATTERNS", "jsluice"),
             ("ARJUN_ENABLED", "Arjun"),
             ("ARJUN_THREADS", "Arjun"),
             ("ARJUN_RATE_LIMIT", "Arjun"),
@@ -216,6 +374,19 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     JSLUICE_EXTRACT_SECRETS = settings.get('JSLUICE_EXTRACT_SECRETS', True)
     JSLUICE_CONCURRENCY = settings.get('JSLUICE_CONCURRENCY', 5)
     JSLUICE_PARALLELISM = settings.get('JSLUICE_PARALLELISM', 3)
+    JSLUICE_VERIFY_URLS = settings.get('JSLUICE_VERIFY_URLS', True)
+    JSLUICE_VERIFY_DOCKER_IMAGE = settings.get('JSLUICE_VERIFY_DOCKER_IMAGE', 'projectdiscovery/httpx:latest')
+    JSLUICE_VERIFY_TIMEOUT = settings.get('JSLUICE_VERIFY_TIMEOUT', 5)
+    JSLUICE_VERIFY_RATE_LIMIT = settings.get('JSLUICE_VERIFY_RATE_LIMIT', 50)
+    JSLUICE_VERIFY_THREADS = settings.get('JSLUICE_VERIFY_THREADS', 50)
+    JSLUICE_VERIFY_ACCEPT_STATUS = settings.get(
+        'JSLUICE_VERIFY_ACCEPT_STATUS',
+        [200, 201, 301, 302, 307, 308, 401, 403]
+    )
+    JSLUICE_EXCLUDE_PATTERNS = list(settings.get(
+        'JSLUICE_EXCLUDE_PATTERNS',
+        DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
+    ))
 
     # FFuf settings
     FFUF_ENABLED = settings.get('FFUF_ENABLED', False)
@@ -237,6 +408,27 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     FFUF_PARALLELISM = settings.get('FFUF_PARALLELISM', 20)
     FFUF_AI_EXTENSIONS = settings.get('FFUF_AI_EXTENSIONS', False)
     AI_PIPELINE_MODEL = settings.get('AI_PIPELINE_MODEL', 'claude-opus-4-6')
+
+    # ZAP Ajax Spider settings
+    ZAP_AJAX_SPIDER_ENABLED = settings.get('ZAP_AJAX_SPIDER_ENABLED', False)
+    ZAP_AJAX_SPIDER_DOCKER_IMAGE = settings.get('ZAP_AJAX_SPIDER_DOCKER_IMAGE', 'ghcr.io/zaproxy/zaproxy:stable')
+    ZAP_AJAX_SPIDER_SEED_MODE = settings.get('ZAP_AJAX_SPIDER_SEED_MODE', 'base_urls')
+    ZAP_AJAX_SPIDER_MAX_DURATION = settings.get('ZAP_AJAX_SPIDER_MAX_DURATION', 10)
+    ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH = settings.get('ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH', 5)
+    ZAP_AJAX_SPIDER_MAX_CRAWL_STATES = settings.get('ZAP_AJAX_SPIDER_MAX_CRAWL_STATES', 0)
+    ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS = settings.get('ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS', 1)
+    ZAP_AJAX_SPIDER_BROWSER_ID = settings.get('ZAP_AJAX_SPIDER_BROWSER_ID', 'firefox-headless')
+    ZAP_AJAX_SPIDER_EVENT_WAIT = settings.get('ZAP_AJAX_SPIDER_EVENT_WAIT', 1000)
+    ZAP_AJAX_SPIDER_RELOAD_WAIT = settings.get('ZAP_AJAX_SPIDER_RELOAD_WAIT', 1000)
+    ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS = settings.get('ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS', True)
+    ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE = settings.get('ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE', True)
+    ZAP_AJAX_SPIDER_RANDOM_INPUTS = settings.get('ZAP_AJAX_SPIDER_RANDOM_INPUTS', False)
+    ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE = settings.get('ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE', True)
+    ZAP_AJAX_SPIDER_SCOPE_CHECK = settings.get('ZAP_AJAX_SPIDER_SCOPE_CHECK', 'Strict')
+    ZAP_AJAX_SPIDER_CUSTOM_HEADERS = settings.get('ZAP_AJAX_SPIDER_CUSTOM_HEADERS', [])
+    ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS = settings.get('ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS', [])
+    ZAP_AJAX_SPIDER_MAX_URLS = settings.get('ZAP_AJAX_SPIDER_MAX_URLS', 1000)
+    ZAP_AJAX_SPIDER_PARALLELISM = settings.get('ZAP_AJAX_SPIDER_PARALLELISM', 1)
 
     # Arjun settings
     ARJUN_ENABLED = settings.get('ARJUN_ENABLED', False)
@@ -325,13 +517,15 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     print("\n[*][ResourceEnum] Setting up tools...")
     kr_binary_path = None
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         if KATANA_ENABLED:
             katana_future = executor.submit(pull_katana_docker_image, KATANA_DOCKER_IMAGE)
         if HAKRAWLER_ENABLED:
             hakrawler_future = executor.submit(pull_hakrawler_docker_image, HAKRAWLER_DOCKER_IMAGE)
         if GAU_ENABLED:
             gau_future = executor.submit(pull_gau_docker_image, GAU_DOCKER_IMAGE)
+        if ZAP_AJAX_SPIDER_ENABLED:
+            zap_ajax_future = executor.submit(pull_zap_ajax_docker_image, ZAP_AJAX_SPIDER_DOCKER_IMAGE)
         if KITERUNNER_ENABLED and KITERUNNER_WORDLISTS:
             kr_future = executor.submit(ensure_kiterunner_binary, KITERUNNER_WORDLISTS[0])
         if KATANA_ENABLED:
@@ -340,6 +534,8 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             hakrawler_future.result()
         if GAU_ENABLED:
             gau_future.result()
+        if ZAP_AJAX_SPIDER_ENABLED:
+            zap_ajax_future.result()
         if KITERUNNER_ENABLED and KITERUNNER_WORDLISTS:
             kr_binary_path, _ = kr_future.result()
 
@@ -415,6 +611,12 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         print(f"[*][jsluice] Extract URLs: {JSLUICE_EXTRACT_URLS}")
         print(f"[*][jsluice] Extract secrets: {JSLUICE_EXTRACT_SECRETS}")
         print(f"[*][jsluice] Parallelism: {JSLUICE_PARALLELISM} concurrent base URLs")
+        print(f"[*][jsluice] URL verification: {JSLUICE_VERIFY_URLS}")
+        if JSLUICE_VERIFY_URLS:
+            print(f"[*][jsluice] Verify rate limit: {JSLUICE_VERIFY_RATE_LIMIT} req/s")
+            print(f"[*][jsluice] Verify threads: {JSLUICE_VERIFY_THREADS}")
+            print(f"[*][jsluice] Verify timeout: {JSLUICE_VERIFY_TIMEOUT}s")
+        print(f"[*][jsluice] Noise filter patterns: {len(JSLUICE_EXCLUDE_PATTERNS)}")
     # FFuf settings
     print(f"[*][FFuf] Enabled: {FFUF_ENABLED}")
     if FFUF_ENABLED:
@@ -429,6 +631,25 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             print(f"[*][FFuf] Extensions: {', '.join(FFUF_EXTENSIONS)}")
         if FFUF_RECURSION:
             print(f"[*][FFuf] Recursion: depth {FFUF_RECURSION_DEPTH}")
+    # ZAP Ajax Spider settings
+    print(f"[*][ZAP Ajax] Enabled: {ZAP_AJAX_SPIDER_ENABLED}")
+    if ZAP_AJAX_SPIDER_ENABLED:
+        print(f"[*][ZAP Ajax] Docker image: {ZAP_AJAX_SPIDER_DOCKER_IMAGE}")
+        print(f"[*][ZAP Ajax] Seed mode: {ZAP_AJAX_SPIDER_SEED_MODE}")
+        print(f"[*][ZAP Ajax] Max duration: {ZAP_AJAX_SPIDER_MAX_DURATION} min")
+        print(f"[*][ZAP Ajax] Max crawl depth: {ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH}")
+        print(f"[*][ZAP Ajax] Max crawl states: {ZAP_AJAX_SPIDER_MAX_CRAWL_STATES}")
+        print(f"[*][ZAP Ajax] Browsers: {ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS} ({ZAP_AJAX_SPIDER_BROWSER_ID})")
+        print(f"[*][ZAP Ajax] Event/reload wait: {ZAP_AJAX_SPIDER_EVENT_WAIT}ms/{ZAP_AJAX_SPIDER_RELOAD_WAIT}ms")
+        print(f"[*][ZAP Ajax] Click defaults: {ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS}")
+        print(f"[*][ZAP Ajax] Click once: {ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE}")
+        print(f"[*][ZAP Ajax] Random inputs: {ZAP_AJAX_SPIDER_RANDOM_INPUTS}")
+        print(f"[*][ZAP Ajax] Logout avoidance: {ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE}")
+        print(f"[*][ZAP Ajax] Scope check: {ZAP_AJAX_SPIDER_SCOPE_CHECK}")
+        print(f"[*][ZAP Ajax] Max URLs: {ZAP_AJAX_SPIDER_MAX_URLS}")
+        print(f"[*][ZAP Ajax] Parallelism: {ZAP_AJAX_SPIDER_PARALLELISM}")
+        print(f"[*][ZAP Ajax] Custom headers: {len(ZAP_AJAX_SPIDER_CUSTOM_HEADERS)}")
+        print(f"[*][ZAP Ajax] Exclude patterns: {len(ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS)}")
     # GAU settings
     print(f"[*][GAU] Enabled: {GAU_ENABLED}")
     if GAU_ENABLED:
@@ -494,6 +715,14 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     arjun_results = []
     arjun_meta = {}
     jsluice_result = {"urls": [], "secrets": [], "external_domains": []}
+    zap_ajax_urls = []
+    zap_ajax_meta = {"external_domains": []}
+    zap_ajax_stats = {
+        "zap_ajax_spider_total": 0,
+        "zap_ajax_spider_parsed": 0,
+        "zap_ajax_spider_new": 0,
+        "zap_ajax_spider_overlap": 0,
+    }
 
     # Run Katana, Hakrawler, GAU, and ParamSpider in parallel first (if enabled)
     if KATANA_ENABLED or HAKRAWLER_ENABLED or GAU_ENABLED or PARAMSPIDER_ENABLED:
@@ -507,8 +736,8 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         if PARAMSPIDER_ENABLED:
             tools_running.append("ParamSpider")
         print(f"\n[*][ResourceEnum] Running URL discovery ({' + '.join(tools_running)})...")
-    elif not KITERUNNER_ENABLED:
-        print("\n[-][ResourceEnum] All URL discovery tools disabled (Katana, Hakrawler, GAU, ParamSpider, Kiterunner)")
+    elif not KITERUNNER_ENABLED and not ZAP_AJAX_SPIDER_ENABLED:
+        print("\n[-][ResourceEnum] All URL discovery tools disabled (Katana, Hakrawler, GAU, ParamSpider, Kiterunner, ZAP Ajax Spider)")
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {}
@@ -693,7 +922,14 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         "jsluice_parsed": 0,
         "jsluice_new": 0,
         "jsluice_overlap": 0,
+        "jsluice_verify_total": 0,
+        "jsluice_verify_candidates": 0,
+        "jsluice_skipped_blacklist": 0,
+        "jsluice_verified": 0,
+        "jsluice_skipped_unverified": 0,
     }
+
+    jsluice_urls_pre_verify_count = 0
 
     if JSLUICE_ENABLED and (JSLUICE_EXTRACT_URLS or JSLUICE_EXTRACT_SECRETS):
         all_crawl_urls = list(set(katana_urls + hakrawler_urls))
@@ -710,15 +946,43 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 use_proxy
             )
 
+            jsluice_urls_pre_verify_count = len(jsluice_result.get("urls", []))
+
+            if jsluice_result.get("urls"):
+                if JSLUICE_VERIFY_URLS:
+                    verified_jsluice_urls, verify_stats = verify_jsluice_urls(
+                        jsluice_result["urls"],
+                        JSLUICE_VERIFY_DOCKER_IMAGE,
+                        JSLUICE_VERIFY_THREADS,
+                        JSLUICE_VERIFY_TIMEOUT,
+                        JSLUICE_VERIFY_RATE_LIMIT,
+                        JSLUICE_VERIFY_ACCEPT_STATUS,
+                        JSLUICE_EXCLUDE_PATTERNS,
+                        use_proxy,
+                    )
+                    jsluice_result["urls"] = sorted(verified_jsluice_urls)
+                    jsluice_stats.update(verify_stats)
+                else:
+                    jsluice_stats["jsluice_verify_total"] = jsluice_urls_pre_verify_count
+                    jsluice_stats["jsluice_verify_candidates"] = jsluice_urls_pre_verify_count
+                    jsluice_stats["jsluice_verified"] = jsluice_urls_pre_verify_count
+
             if jsluice_result.get("urls"):
                 print("\n[*][jsluice] Merging extracted URLs into results...")
-                organized_data['by_base_url'], jsluice_stats = merge_jsluice_into_by_base_url(
+                organized_data['by_base_url'], merge_stats = merge_jsluice_into_by_base_url(
                     jsluice_result["urls"],
                     organized_data['by_base_url'],
                 )
+                jsluice_stats.update(merge_stats)
                 print(f"[+][jsluice] Total URLs: {jsluice_stats['jsluice_total']}")
                 print(f"[+][jsluice] New endpoints: {jsluice_stats['jsluice_new']}")
                 print(f"[+][jsluice] Overlap: {jsluice_stats['jsluice_overlap']}")
+                if JSLUICE_VERIFY_URLS:
+                    print(f"[+][jsluice] Pre-verify URLs: {jsluice_urls_pre_verify_count}")
+                    print(f"[+][jsluice] Skipped (blacklist): {jsluice_stats['jsluice_skipped_blacklist']}")
+                    print(f"[+][jsluice] Skipped (unverified): {jsluice_stats['jsluice_skipped_unverified']}")
+            elif JSLUICE_VERIFY_URLS and jsluice_stats.get("jsluice_verify_total", 0) > 0:
+                print(f"[-][jsluice] No URLs survived validation ({jsluice_stats['jsluice_skipped_blacklist']} blacklisted, {jsluice_stats['jsluice_skipped_unverified']} unverified)")
 
     # FFuf directory fuzzing (runs after crawlers and jsluice, before GAU merge)
     ffuf_stats = {
@@ -795,6 +1059,50 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 print(f"[+][FFuf] Overlap with crawlers: {ffuf_stats['ffuf_overlap']}")
         else:
             print("[!][FFuf] ffuf binary not found in PATH, skipping")
+
+    # ZAP Ajax Spider browser-driven discovery (runs before Arjun so Arjun can enrich ZAP endpoints)
+    if ZAP_AJAX_SPIDER_ENABLED:
+        zap_ajax_seed_urls = list(target_urls)
+        if ZAP_AJAX_SPIDER_SEED_MODE == "base_urls_and_endpoints":
+            for base_url, base_data in organized_data['by_base_url'].items():
+                for path in base_data.get('endpoints', {}).keys():
+                    zap_ajax_seed_urls.append(base_url.rstrip('/') + path)
+        zap_ajax_seed_urls = sorted(set(zap_ajax_seed_urls))
+
+        print(f"\n[*][ZAP Ajax] Running browser-driven discovery ({len(zap_ajax_seed_urls)} seed URLs)...")
+        zap_ajax_urls, zap_ajax_meta = run_zap_ajax_spider(
+            zap_ajax_seed_urls,
+            ZAP_AJAX_SPIDER_DOCKER_IMAGE,
+            allowed_hosts=target_domains,
+            custom_headers=ZAP_AJAX_SPIDER_CUSTOM_HEADERS,
+            exclude_patterns=ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS,
+            max_urls=ZAP_AJAX_SPIDER_MAX_URLS,
+            max_duration=ZAP_AJAX_SPIDER_MAX_DURATION,
+            max_crawl_depth=ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH,
+            max_crawl_states=ZAP_AJAX_SPIDER_MAX_CRAWL_STATES,
+            number_of_browsers=ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS,
+            browser_id=ZAP_AJAX_SPIDER_BROWSER_ID,
+            event_wait=ZAP_AJAX_SPIDER_EVENT_WAIT,
+            reload_wait=ZAP_AJAX_SPIDER_RELOAD_WAIT,
+            click_default_elems=ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS,
+            click_elems_once=ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE,
+            random_inputs=ZAP_AJAX_SPIDER_RANDOM_INPUTS,
+            logout_avoidance=ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE,
+            scope_check=ZAP_AJAX_SPIDER_SCOPE_CHECK,
+            use_proxy=use_proxy,
+            parallelism=ZAP_AJAX_SPIDER_PARALLELISM,
+        )
+
+        if zap_ajax_urls:
+            print("\n[*][ZAP Ajax] Merging discovered URLs into results...")
+            organized_data['by_base_url'], zap_ajax_stats = merge_zap_ajax_into_by_base_url(
+                zap_ajax_urls,
+                organized_data['by_base_url'],
+            )
+        print(f"[+][ZAP Ajax] Total URLs: {zap_ajax_stats['zap_ajax_spider_total']}")
+        print(f"[+][ZAP Ajax] Parsed: {zap_ajax_stats['zap_ajax_spider_parsed']}")
+        print(f"[+][ZAP Ajax] New endpoints: {zap_ajax_stats['zap_ajax_spider_new']}")
+        print(f"[+][ZAP Ajax] Overlap: {zap_ajax_stats['zap_ajax_spider_overlap']}")
 
     # Arjun parameter discovery (runs after crawlers/FFuf, enriches endpoints with hidden params)
     # Feeds DISCOVERED endpoint URLs (not just base URLs) for maximum coverage.
@@ -1039,7 +1347,14 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     jsluice_in_scope_urls = jsluice_result.get("urls", []) if JSLUICE_ENABLED else []
     ffuf_discovered_urls = [r["url"] for r in ffuf_results] if FFUF_ENABLED else []
     all_discovered_urls = sorted(set(
-        katana_urls + hakrawler_urls + in_scope_gau + paramspider_urls + urlscan_urls + jsluice_in_scope_urls + ffuf_discovered_urls
+        katana_urls
+        + hakrawler_urls
+        + in_scope_gau
+        + paramspider_urls
+        + urlscan_urls
+        + jsluice_in_scope_urls
+        + ffuf_discovered_urls
+        + zap_ajax_urls
     ))
 
     # Build result structure
@@ -1069,6 +1384,8 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             # jsluice metadata
             'jsluice_enabled': JSLUICE_ENABLED,
             'jsluice_max_files': JSLUICE_MAX_FILES if JSLUICE_ENABLED else None,
+            'jsluice_verify_enabled': JSLUICE_VERIFY_URLS if JSLUICE_ENABLED else False,
+            'jsluice_urls_pre_verify': jsluice_urls_pre_verify_count if JSLUICE_ENABLED else 0,
             'jsluice_urls_found': len(jsluice_in_scope_urls),
             'jsluice_secrets_found': len(jsluice_result.get("secrets", [])),
             'jsluice_stats': jsluice_stats,
@@ -1080,6 +1397,13 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             'ffuf_endpoints_found': len(ffuf_results) if FFUF_ENABLED else 0,
             'ffuf_smart_fuzz': FFUF_SMART_FUZZ if FFUF_ENABLED else None,
             'ffuf_stats': ffuf_stats,
+            # ZAP Ajax Spider metadata
+            'zap_ajax_spider_enabled': ZAP_AJAX_SPIDER_ENABLED,
+            'zap_ajax_spider_docker_image': ZAP_AJAX_SPIDER_DOCKER_IMAGE if ZAP_AJAX_SPIDER_ENABLED else None,
+            'zap_ajax_spider_seed_mode': ZAP_AJAX_SPIDER_SEED_MODE if ZAP_AJAX_SPIDER_ENABLED else None,
+            'zap_ajax_spider_urls_found': len(zap_ajax_urls) if ZAP_AJAX_SPIDER_ENABLED else 0,
+            'zap_ajax_spider_stats': zap_ajax_stats,
+            'zap_ajax_spider_meta': zap_ajax_meta,
             # GAU metadata
             'gau_enabled': GAU_ENABLED,
             'gau_docker_image': GAU_DOCKER_IMAGE if GAU_ENABLED else None,
@@ -1142,6 +1466,10 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             'from_ffuf': len(ffuf_results) if FFUF_ENABLED else 0,
             'ffuf_new_endpoints': ffuf_stats['ffuf_new'],
             'ffuf_overlap': ffuf_stats['ffuf_overlap'],
+            # ZAP Ajax Spider breakdown
+            'from_zap_ajax_spider': len(zap_ajax_urls) if ZAP_AJAX_SPIDER_ENABLED else 0,
+            'zap_ajax_spider_new_endpoints': zap_ajax_stats['zap_ajax_spider_new'],
+            'zap_ajax_spider_overlap': zap_ajax_stats['zap_ajax_spider_overlap'],
             'from_gau_total': len(gau_urls),  # All URLs found by GAU
             'from_gau_in_scope': len(in_scope_gau),  # Only in-scope URLs
             'gau_new_endpoints': gau_stats['gau_new'],
@@ -1170,6 +1498,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             + hakrawler_meta.get("external_domains", [])
             + jsluice_result.get("external_domains", [])
             + ffuf_meta.get("external_domains", [])
+            + zap_ajax_meta.get("external_domains", [])
             + arjun_meta.get("external_domains", [])
         ),
     }
@@ -1182,6 +1511,20 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         for category, count in base_data['summary']['categories'].items():
             resource_enum_result['summary']['categories'][category] = \
                 resource_enum_result['summary']['categories'].get(category, 0) + count
+
+    # AI Surface Recon — endpoint + parameter classifier.
+    # Annotates every endpoint and parameter in organized_data['by_base_url']
+    # with ai_interface_type / is_ai_rag_ingest / is_ai_prompt_injectable.
+    # Gated by RESOURCE_ENUM_AI_CLASSIFIER_ENABLED (master) plus 4 sub-toggles.
+    ai_summary = _annotate_ai_endpoint_classifier(organized_data, settings, recon_data)
+    resource_enum_result['ai_surface'] = ai_summary
+    if any(ai_summary.values()):
+        print(
+            f"[+][ResourceEnum-AI] AI surface matches \u2014 "
+            f"paths={ai_summary.get('paths', 0)}, "
+            f"rag={ai_summary.get('rag_paths', 0)}, "
+            f"prompt-params={ai_summary.get('prompt_params', 0)}"
+        )
 
     # Add to recon_data
     recon_data['resource_enum'] = resource_enum_result
@@ -1208,6 +1551,10 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     if FFUF_ENABLED and ffuf_results:
         print(f"[+][FFuf] New endpoints: {ffuf_stats['ffuf_new']}")
         print(f"[+][FFuf] Overlap: {ffuf_stats['ffuf_overlap']}")
+    print(f"[+][ZAP Ajax] Browser crawl: {len(zap_ajax_urls) if ZAP_AJAX_SPIDER_ENABLED else 'disabled'}")
+    if ZAP_AJAX_SPIDER_ENABLED and zap_ajax_urls:
+        print(f"[+][ZAP Ajax] New endpoints: {zap_ajax_stats['zap_ajax_spider_new']}")
+        print(f"[+][ZAP Ajax] Overlap: {zap_ajax_stats['zap_ajax_spider_overlap']}")
     print(f"[+][GAU] Passive archive: {len(gau_urls) if GAU_ENABLED else 'disabled'}")
     if GAU_ENABLED and gau_urls:
         print(f"[+][GAU] New endpoints: {gau_stats['gau_new']}")

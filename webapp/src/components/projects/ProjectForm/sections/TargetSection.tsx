@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { ChevronDown, Target, ShieldAlert, AlertTriangle } from 'lucide-react'
 import { AiToggleLabel } from '../AiToggleLabel'
 import { Toggle, WikiInfoButton } from '@/components/ui'
@@ -80,6 +80,35 @@ export function TargetSection({ data, updateField, mode = 'create' }: TargetSect
     const currentPrefixes = toDisplayPrefixes(data.subdomainList)
     updateField('subdomainList', toStoredPrefixes(currentPrefixes, checked))
   }
+
+  // When subdomain discovery is OFF and no prefixes are set, the only valid
+  // target is the root domain. Force-enable "Include Root Domain" and lock it
+  // so the pipeline cannot be started with zero targets (which would silently
+  // produce empty results). Runs in edit mode too — it's a system-driven
+  // safety net, not user editing of scope.
+  const forceIncludeRootDomain = !ipMode
+    && !data.subdomainDiscoveryEnabled
+    && displayPrefixes.trim().length === 0
+
+  // When the user supplies explicit Subdomain Prefixes, the pipeline runs in
+  // FILTERED mode and the entire Subdomain Discovery group (Subfinder, Amass,
+  // crt.sh, HackerTarget, Knockpy, puredns) is silently skipped. Force the
+  // master toggle OFF so the UI matches what the backend actually does.
+  const prefixesPresent = !ipMode && !isLocked && displayPrefixes.trim().length > 0
+
+  useEffect(() => {
+    if (forceIncludeRootDomain && !includesRootDomain) {
+      handleRootDomainToggle(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceIncludeRootDomain, includesRootDomain])
+
+  useEffect(() => {
+    if (prefixesPresent && data.subdomainDiscoveryEnabled) {
+      updateField('subdomainDiscoveryEnabled', false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefixesPresent, data.subdomainDiscoveryEnabled])
 
   const handleIpModeToggle = (checked: boolean) => {
     updateField('ipMode', checked)
@@ -269,6 +298,30 @@ export function TargetSection({ data, updateField, mode = 'create' }: TargetSect
                     </span>
                   </div>
                 )}
+                {prefixesPresent && (
+                  <div
+                    className={styles.shodanWarning}
+                    style={{
+                      marginTop: 'var(--space-2)',
+                      marginBottom: 0,
+                      padding: 'var(--space-3) var(--space-4)',
+                      fontSize: 'var(--text-sm)',
+                      borderWidth: '2px',
+                      borderColor: 'rgba(96, 165, 250, 0.5)',
+                      background: 'rgba(96, 165, 250, 0.12)',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <AlertTriangle size={22} style={{ color: '#60a5fa' }} />
+                    <span>
+                      <strong>Filtered mode:</strong> with explicit prefixes the pipeline scans
+                      only the subdomains you listed. <strong>Subdomain Discovery has been
+                      automatically turned off</strong> and locked (Subfinder, Amass, crt.sh,
+                      HackerTarget, Knockpy, puredns will not run). Clear the prefixes if you
+                      want full enumeration.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className={styles.toggleRow}>
@@ -276,12 +329,18 @@ export function TargetSection({ data, updateField, mode = 'create' }: TargetSect
                   <span className={styles.toggleLabel}>Include Root Domain</span>
                   <p className={styles.toggleDescription}>
                     Also scan the root domain (e.g., example.com without subdomain)
+                    {forceIncludeRootDomain && (
+                      <>
+                        {' '}
+                        <strong>Locked ON: Subdomain Discovery is disabled and no prefixes are set, so the root domain is the only valid target.</strong>
+                      </>
+                    )}
                   </p>
                 </div>
                 <Toggle
                   checked={includesRootDomain}
                   onChange={handleRootDomainToggle}
-                  disabled={isLocked}
+                  disabled={isLocked || forceIncludeRootDomain}
                 />
               </div>
 

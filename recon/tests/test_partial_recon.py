@@ -2869,6 +2869,472 @@ class TestRunHakrawler(unittest.TestCase):
         self.assertEqual(target_urls.count("https://example.com"), 1)
 
 
+class TestRunZapAjaxSpider(unittest.TestCase):
+    """Tests for run_zap_ajax_spider_partial using module-level mocks."""
+
+    def _run_with_mocks(self, config, neo4j_connected=True, graph_baseurls=None):
+        """Helper that sets up all mocks and runs run_zap_ajax_spider_partial."""
+        mock_settings = MagicMock()
+        mock_settings.return_value = {
+            "ZAP_AJAX_SPIDER_ENABLED": False,  # force-enabled inside the runner
+            "ZAP_AJAX_SPIDER_DOCKER_IMAGE": "ghcr.io/zaproxy/zaproxy:stable",
+            "ZAP_AJAX_SPIDER_SEED_MODE": "base_urls",
+            "ZAP_AJAX_SPIDER_MAX_DURATION": 10,
+            "ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH": 5,
+            "ZAP_AJAX_SPIDER_MAX_CRAWL_STATES": 0,
+            "ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS": 1,
+            "ZAP_AJAX_SPIDER_BROWSER_ID": "firefox-headless",
+            "ZAP_AJAX_SPIDER_EVENT_WAIT": 1000,
+            "ZAP_AJAX_SPIDER_RELOAD_WAIT": 1000,
+            "ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS": True,
+            "ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE": True,
+            "ZAP_AJAX_SPIDER_RANDOM_INPUTS": False,
+            "ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE": True,
+            "ZAP_AJAX_SPIDER_SCOPE_CHECK": "Strict",
+            "ZAP_AJAX_SPIDER_CUSTOM_HEADERS": [],
+            "ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS": [],
+            "ZAP_AJAX_SPIDER_MAX_URLS": 1000,
+            "ZAP_AJAX_SPIDER_PARALLELISM": 1,
+            "TOR_ENABLED": False,
+            "SUBDOMAIN_LIST": ["."],
+        }
+
+        mock_run_zap = MagicMock(return_value=(
+            ["https://example.com/api/users", "https://example.com/dashboard"],
+            {"external_domains": ["external.com"], "errors": []},
+        ))
+        mock_pull_image = MagicMock(return_value=True)
+        mock_merge = MagicMock(return_value=(
+            {
+                "https://example.com": {
+                    "base_url": "https://example.com",
+                    "endpoints": {
+                        "/api/users": {
+                            "path": "/api/users", "methods": ["GET"],
+                            "full_url": "https://example.com/api/users",
+                            "has_parameters": False, "category": "api",
+                            "sources": ["zap_ajax_spider"],
+                            "parameters": {"query": [], "body": [], "path": []},
+                            "parameter_count": {"query": 0, "body": 0, "path": 0, "total": 0},
+                            "sample_urls": ["https://example.com/api/users"], "urls_found": 1,
+                        },
+                        "/dashboard": {
+                            "path": "/dashboard", "methods": ["GET"],
+                            "full_url": "https://example.com/dashboard",
+                            "has_parameters": False, "category": "page",
+                            "sources": ["zap_ajax_spider"],
+                            "parameters": {"query": [], "body": [], "path": []},
+                            "parameter_count": {"query": 0, "body": 0, "path": 0, "total": 0},
+                            "sample_urls": ["https://example.com/dashboard"], "urls_found": 1,
+                        },
+                    },
+                    "summary": {"total_endpoints": 2, "total_parameters": 0,
+                                "methods": {"GET": 2}, "categories": {"api": 1, "page": 1}},
+                },
+            },
+            {"zap_ajax_spider_total": 2, "zap_ajax_spider_parsed": 2,
+             "zap_ajax_spider_new": 2, "zap_ajax_spider_overlap": 0},
+        ))
+
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = neo4j_connected
+        mock_client.update_graph_from_resource_enum.return_value = {
+            "endpoints_created": 2, "parameters_created": 0,
+            "forms_created": 0, "secrets_created": 0,
+            "relationships_created": 3, "errors": [],
+        }
+
+        _graph_baseurls = graph_baseurls if graph_baseurls is not None else [
+            {"url": "https://example.com", "status_code": 200, "host": "example.com", "content_type": "text/html"},
+        ]
+        _graph_subdomains = ["www.example.com"]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "BaseURL" in query and "RETURN" in query:
+                records = []
+                for bu_data in _graph_baseurls:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=bu_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query:
+                record = MagicMock()
+                record.__getitem__ = lambda self, key: _graph_subdomains
+                result.single.return_value = record
+                result.__iter__ = lambda self: iter([])
+            else:
+                result.__iter__ = lambda self: iter([])
+                result.single.return_value = None
+            return result
+
+        mock_session = MagicMock()
+        mock_session.run = mock_session_run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_helpers_resource_enum = MagicMock()
+        mock_helpers_resource_enum.run_zap_ajax_spider = mock_run_zap
+        mock_helpers_resource_enum.pull_zap_ajax_docker_image = mock_pull_image
+        mock_helpers_resource_enum.merge_zap_ajax_into_by_base_url = mock_merge
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        mock_helpers = MagicMock()
+
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.helpers.resource_enum': mock_helpers_resource_enum,
+            'recon.helpers': mock_helpers,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            pr.run_zap_ajax_spider_partial(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "run_zap": mock_run_zap,
+            "pull_image": mock_pull_image,
+            "merge": mock_merge,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+        }
+
+    def test_basic_scan_graph_only(self):
+        """Graph-only scan loads BaseURLs and runs the ZAP spider."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["pull_image"].assert_called_once()
+        mocks["run_zap"].assert_called_once()
+        mocks["merge"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_resource_enum.assert_called_once()
+
+    def test_settings_force_enabled_inside_runner(self):
+        """ZAP_AJAX_SPIDER_ENABLED is force-set to True by the runner regardless of stored value."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["settings"].assert_called_once()
+        mocks["run_zap"].assert_called_once()
+
+    def test_user_urls_injected(self):
+        """User-provided URLs are added to the seed list."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com:8443"], "url_attach_to": None},
+        })
+        mocks["run_zap"].assert_called_once()
+        seeds = mocks["run_zap"].call_args[0][0]
+        self.assertIn("https://custom.example.com:8443", seeds)
+        self.assertIn("https://example.com", seeds)
+
+    def test_user_urls_only_no_graph(self):
+        """With graph targets disabled, only user URLs are scanned and apex metadata is stamped."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": None},
+            "include_graph_targets": False,
+        })
+        mocks["run_zap"].assert_called_once()
+        seeds = mocks["run_zap"].call_args[0][0]
+        self.assertIn("https://custom.example.com", seeds)
+        self.assertEqual(len(seeds), 1)
+
+    def test_no_targets_exits(self):
+        """Exits with code 1 when no BaseURLs in graph and no user URLs."""
+        with self.assertRaises(SystemExit) as cm:
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": [], "include_graph_targets": False},
+                graph_baseurls=[],
+            )
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_generic_user_urls_create_userinput(self):
+        """When url_attach_to is null, a UserInput node is created with tool_id=ZapAjaxSpider."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": None},
+        })
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        call_kwargs = mocks["neo4j_client"].create_user_input_node.call_args
+        user_input_data = call_kwargs[1].get("user_input_data") or call_kwargs[0][1]
+        self.assertEqual(user_input_data["input_type"], "urls")
+        self.assertEqual(user_input_data["tool_id"], "ZapAjaxSpider")
+
+    def test_attached_user_urls_no_userinput(self):
+        """When url_attach_to is set, no UserInput node is created (uses DISCOVERED_FROM)."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["https://custom.example.com"], "url_attach_to": "https://example.com"},
+        })
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
+
+    def test_invalid_urls_skipped(self):
+        """Invalid URLs are filtered out by _is_valid_url before being passed to the spider."""
+        mocks = self._run_with_mocks({
+            "domain": "example.com",
+            "user_inputs": [],
+            "user_targets": {"urls": ["not-a-url", "ftp://bad.com", "https://good.example.com"], "url_attach_to": None},
+        })
+        mocks["run_zap"].assert_called_once()
+        seeds = mocks["run_zap"].call_args[0][0]
+        self.assertIn("https://good.example.com", seeds)
+        self.assertNotIn("not-a-url", seeds)
+        self.assertNotIn("ftp://bad.com", seeds)
+
+    def test_endpoints_marked_with_zap_source(self):
+        """Discovered endpoints flowing into the graph carry sources=['zap_ajax_spider']."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["neo4j_client"].update_graph_from_resource_enum.call_args
+        recon_data = call_args[1].get("recon_data") or call_args[0][0]
+        resource_enum = recon_data.get("resource_enum", {})
+        by_base_url = resource_enum.get("by_base_url", {})
+        for base_url, base_data in by_base_url.items():
+            for path, endpoint in base_data["endpoints"].items():
+                self.assertEqual(endpoint["sources"], ["zap_ajax_spider"],
+                    f"Endpoint {path} should have sources=['zap_ajax_spider'], got {endpoint.get('sources')}")
+
+    def test_result_structure_has_required_keys(self):
+        """The result dict passed to graph update has resource_enum with the expected shape."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["neo4j_client"].update_graph_from_resource_enum.call_args
+        recon_data = call_args[1].get("recon_data") or call_args[0][0]
+        resource_enum = recon_data.get("resource_enum", {})
+        self.assertIn("by_base_url", resource_enum)
+        self.assertIn("forms", resource_enum)
+        self.assertIn("scan_metadata", resource_enum)
+        self.assertIn("summary", resource_enum)
+        self.assertEqual(resource_enum["summary"]["total_endpoints"], 2)
+        self.assertEqual(resource_enum["summary"]["total_base_urls"], 1)
+        self.assertIn("external_domains", resource_enum)
+        self.assertEqual(resource_enum["external_domains"], ["external.com"])
+
+    def test_spider_receives_correct_settings(self):
+        """run_zap_ajax_spider is called with the docker image and crawl knobs from settings."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        call_args = mocks["run_zap"].call_args
+        self.assertEqual(call_args[0][1], "ghcr.io/zaproxy/zaproxy:stable")
+        kwargs = call_args[1]
+        self.assertEqual(kwargs.get("max_duration"), 10)
+        self.assertEqual(kwargs.get("max_crawl_depth"), 5)
+        self.assertEqual(kwargs.get("browser_id"), "firefox-headless")
+        self.assertEqual(kwargs.get("scope_check"), "Strict")
+        self.assertEqual(kwargs.get("max_urls"), 1000)
+
+
+class TestIsHostInScope(unittest.TestCase):
+    """Pure unit tests for the shared scope-filter helper."""
+
+    def _f(self, host, settings=None, requested_domain="example.com", include_root_domain=False):
+        from recon.partial_recon_modules.helpers import _is_host_in_scope
+        return _is_host_in_scope(host, settings or {}, requested_domain, include_root_domain)
+
+    # ----- Empty / None inputs -----
+    def test_empty_host_is_out_of_scope(self):
+        self.assertFalse(self._f(""))
+        self.assertFalse(self._f(None))
+        self.assertFalse(self._f("   "))
+
+    # ----- Domain mode (default behavior) -----
+    def test_domain_mode_root_domain_rejected_when_flag_false(self):
+        self.assertFalse(self._f("example.com"))
+
+    def test_domain_mode_root_domain_accepted_when_flag_true(self):
+        self.assertTrue(self._f("example.com", include_root_domain=True))
+
+    def test_domain_mode_subdomain_accepted(self):
+        self.assertTrue(self._f("api.example.com"))
+        self.assertTrue(self._f("deep.api.example.com"))
+
+    def test_domain_mode_unrelated_host_rejected(self):
+        self.assertFalse(self._f("evil.com"))
+        self.assertFalse(self._f("example.org"))
+
+    def test_domain_mode_substring_match_rejected(self):
+        # Defends against "exampleXcom" or "notexample.com" sneaking through
+        self.assertFalse(self._f("notexample.com"))
+        self.assertFalse(self._f("ample.com"))
+
+    def test_domain_mode_strips_port_from_host(self):
+        self.assertTrue(self._f("api.example.com:8080"))
+
+    # ----- IP mode with TARGET_IPS configured -----
+    def test_ip_mode_literal_ip_match(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["127.0.0.1", "192.168.1.5"]}
+        self.assertTrue(self._f("127.0.0.1", s))
+        self.assertTrue(self._f("192.168.1.5", s))
+
+    def test_ip_mode_ip_not_in_targets_rejected(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["127.0.0.1"]}
+        self.assertFalse(self._f("10.0.0.1", s))
+
+    def test_ip_mode_localhost_accepted_when_loopback_in_targets(self):
+        """The user's exact bug case: localhost was getting pruned."""
+        s = {"IP_MODE": True, "TARGET_IPS": ["127.0.0.1"]}
+        self.assertTrue(self._f("localhost", s))
+
+    def test_ip_mode_localhost_rejected_when_no_loopback_in_targets(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["192.168.1.10"]}
+        self.assertFalse(self._f("localhost", s))
+
+    def test_ip_mode_ipv6_loopback_accepts_localhost(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["::1"]}
+        self.assertTrue(self._f("localhost", s))
+
+    def test_ip_mode_cidr_membership_accepted(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["10.0.0.0/24"]}
+        self.assertTrue(self._f("10.0.0.5", s))
+        self.assertTrue(self._f("10.0.0.255", s))
+        self.assertFalse(self._f("10.0.1.5", s))
+
+    def test_ip_mode_cidr_handles_invalid_gracefully(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["not-a-cidr/99", "127.0.0.1"]}
+        # Invalid CIDR is skipped, 127.0.0.1 still works
+        self.assertTrue(self._f("127.0.0.1", s))
+        self.assertFalse(self._f("10.0.0.5", s))
+
+    def test_ip_mode_hostname_not_resolving_rejected(self):
+        # In IP mode with explicit targets, arbitrary hostnames are out
+        s = {"IP_MODE": True, "TARGET_IPS": ["127.0.0.1"]}
+        self.assertFalse(self._f("example.com", s))
+
+    def test_ip_mode_strips_port(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["127.0.0.1"]}
+        self.assertTrue(self._f("127.0.0.1:9105", s))
+        self.assertTrue(self._f("localhost:9105", s))
+
+    # ----- IP mode without TARGET_IPS (graph already pre-filtered) -----
+    def test_ip_mode_no_targets_accepts_localhost(self):
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        self.assertTrue(self._f("localhost", s))
+
+    def test_ip_mode_no_targets_accepts_private_ips(self):
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        self.assertTrue(self._f("10.0.0.1", s))
+        self.assertTrue(self._f("192.168.1.1", s))
+        self.assertTrue(self._f("172.20.0.5", s))
+        self.assertTrue(self._f("127.0.0.1", s))
+
+    def test_ip_mode_no_targets_rejects_public_ips(self):
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        self.assertFalse(self._f("8.8.8.8", s))
+        self.assertFalse(self._f("1.1.1.1", s))
+
+    def test_ip_mode_no_targets_rejects_random_hostnames(self):
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        self.assertFalse(self._f("evil.com", s))
+
+    # ----- Synthetic ip-targets pseudo-domain must be ignored in IP mode -----
+    def test_ip_mode_synthetic_domain_does_not_apply(self):
+        """The pipeline injects requested_domain='ip-targets.X' for IP-mode
+        projects. The scope filter must ignore it and use IP semantics."""
+        s = {"IP_MODE": True, "TARGET_IPS": ["127.0.0.1"]}
+        synthetic = "ip-targets.d4a46429d3aa4d7eb6302c58d"
+        # localhost in scope despite NOT ending with the synthetic domain
+        self.assertTrue(self._f("localhost", s, requested_domain=synthetic))
+        # An arbitrary hostname ending with the synthetic domain still rejected
+        self.assertFalse(self._f("foo.ip-targets.d4a46429d3aa4d7eb6302c58d", s,
+                                  requested_domain=synthetic))
+
+    # ----- Degenerate cases -----
+    def test_empty_requested_domain_accepts_anything_in_domain_mode(self):
+        # Defensive fallback: if no domain was configured, treat as permissive
+        self.assertTrue(self._f("anything.com", requested_domain=""))
+
+    # ----- IPv6 (regression: colon-split used to mangle these) -----
+    def test_ipv6_loopback_bare_accepted_when_in_targets(self):
+        """Bare '::1' (no brackets) must not be mangled by colon-stripping."""
+        s = {"IP_MODE": True, "TARGET_IPS": ["::1"]}
+        self.assertTrue(self._f("::1", s))
+
+    def test_ipv6_global_accepted_when_in_targets(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["2001:db8::1"]}
+        self.assertTrue(self._f("2001:db8::1", s))
+
+    def test_ipv6_uppercase_normalized(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["2001:db8::1"]}
+        self.assertTrue(self._f("2001:DB8::1", s))
+
+    def test_ipv6_bracketed_with_port_stripped(self):
+        """Raw form like '[::1]:9105' must reduce to '::1' before scope check."""
+        s = {"IP_MODE": True, "TARGET_IPS": ["::1"]}
+        self.assertTrue(self._f("[::1]:9105", s))
+
+    def test_ipv6_bracketed_global_with_port(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["2001:db8::1"]}
+        self.assertTrue(self._f("[2001:db8::1]:443", s))
+
+    def test_ipv6_loopback_accepted_when_no_targets(self):
+        """No TARGET_IPS configured → loopback IPv6 is in scope via .is_loopback."""
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        self.assertTrue(self._f("::1", s))
+
+    def test_ipv6_public_rejected_when_no_targets(self):
+        """Truly global IPv6 (not loopback/private/link-local/documentation) must be rejected."""
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        # Cloudflare DNS — globally routable
+        self.assertFalse(self._f("2606:4700:4700::1111", s))
+        # Google DNS — globally routable
+        self.assertFalse(self._f("2001:4860:4860::8888", s))
+        # NB: the doc-range 2001:db8::/32 is classified as `.is_private` by
+        # Python's ipaddress module (RFC 6890 reserved-for-documentation),
+        # so it is intentionally permitted under the "no targets" rule.
+
+    def test_ipv6_link_local_accepted_when_no_targets(self):
+        s = {"IP_MODE": True, "TARGET_IPS": []}
+        self.assertTrue(self._f("fe80::1", s))
+
+    def test_ipv6_in_targets_rejects_unrelated_ipv6(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["2001:db8::1"]}
+        self.assertFalse(self._f("2001:db8::2", s))
+
+    def test_ipv6_cidr_membership(self):
+        s = {"IP_MODE": True, "TARGET_IPS": ["2001:db8::/32"]}
+        self.assertTrue(self._f("2001:db8::1", s))
+        self.assertTrue(self._f("2001:db8:abcd::1", s))
+        self.assertFalse(self._f("2001:db9::1", s))
+
+    # ----- Hostname case-insensitivity -----
+    def test_hostname_uppercase_normalized_in_domain_mode(self):
+        self.assertTrue(self._f("API.Example.COM"))
+        self.assertTrue(self._f("LOCALHOST",
+                                  settings={"IP_MODE": True, "TARGET_IPS": ["127.0.0.1"]}))
+
+    # ----- Whitespace sanitisation -----
+    def test_leading_trailing_whitespace_stripped(self):
+        self.assertTrue(self._f("  api.example.com  "))
+        self.assertTrue(self._f("\tapi.example.com\n"))
+
+
 class TestRunJsluice(unittest.TestCase):
     """Tests for run_jsluice using module-level mocks."""
 
@@ -2973,6 +3439,18 @@ class TestRunJsluice(unittest.TestCase):
         mock_helpers_resource_enum = MagicMock()
         mock_helpers_resource_enum.run_jsluice_analysis = mock_jsluice_analysis
         mock_helpers_resource_enum.merge_jsluice_into_by_base_url = mock_merge
+        # B2 added URL verification to partial recon. Mock the verifier as a passthrough
+        # so existing partial-recon tests stay focused on the graph-write contract.
+        def _mock_verify_passthrough(urls, *args, **kwargs):
+            return set(urls), {
+                "jsluice_verify_total": len(urls),
+                "jsluice_verify_candidates": len(urls),
+                "jsluice_skipped_blacklist": 0,
+                "jsluice_verified": len(urls),
+                "jsluice_skipped_unverified": 0,
+            }
+        mock_helpers_resource_enum.verify_jsluice_urls = MagicMock(side_effect=_mock_verify_passthrough)
+        mock_helpers_resource_enum.DEFAULT_JSLUICE_EXCLUDE_PATTERNS = []
 
         mock_graph_db = MagicMock()
         mock_graph_db.Neo4jClient = mock_neo4j_cls
@@ -4803,6 +5281,85 @@ class TestRunVhostSni(unittest.TestCase):
             finally:
                 del os.environ["PARTIAL_RECON_CONFIG"]
                 os.unlink(f.name)
+
+
+class TestRunAiSurfaceRecon(unittest.TestCase):
+    """Tests for the AI Surface Recon partial-recon orchestration.
+
+    The partial module loads AI-tagged endpoints from the graph, reuses the
+    full-pipeline runner, then persists via the mixin. We mock the graph client,
+    settings, and the shared runner to verify the wiring without a live Neo4j.
+    """
+
+    def _run_with_mocks(self, config, ep_rows=None):
+        # Fake Neo4j session: every .run() returns the provided rows (default empty).
+        fake_session = MagicMock()
+        fake_session.run.return_value = ep_rows or []
+        fake_session.__enter__ = MagicMock(return_value=fake_session)
+        fake_session.__exit__ = MagicMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.driver.session.return_value = fake_session
+        mock_client.update_graph_from_ai_surface_recon.return_value = {}
+
+        mock_neo4j_mod = MagicMock()
+        mock_neo4j_mod.Neo4jClient = MagicMock(return_value=mock_client)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = MagicMock(return_value={"AI_SURFACE_RECON_ENABLED": True})
+
+        # Shared runner: passthrough that stamps a marker so we know it ran.
+        def _fake_run_full(recon_data, output_file=None, settings=None):
+            recon_data["ai_surface_recon"] = {"summary": {}, "by_url": {}, "findings": [], "vector_db": []}
+            return recon_data
+        mock_full_mod = MagicMock()
+        mock_full_mod.run_ai_surface_recon = MagicMock(side_effect=_fake_run_full)
+
+        saved = {}
+        to_mock = {
+            'graph_db.neo4j_client': mock_neo4j_mod,
+            'recon.project_settings': mock_project_settings,
+            'recon.main_recon_modules.ai_surface_recon': mock_full_mod,
+        }
+        for name, mod in to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+        os.environ["USER_ID"] = "u"
+        os.environ["PROJECT_ID"] = "p"
+        try:
+            import importlib
+            import recon.partial_recon_modules.ai_surface_recon as mod
+            importlib.reload(mod)
+            mod.run_ai_surface_recon(config)
+            return mock_client, mock_full_mod
+        finally:
+            for name, m in saved.items():
+                if m is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = m
+            os.environ.pop("USER_ID", None)
+            os.environ.pop("PROJECT_ID", None)
+
+    def test_empty_graph_no_persist(self):
+        """No AI surfaces in the graph -> runner is not invoked, no crash."""
+        client, full = self._run_with_mocks({"domain": "x.com"}, ep_rows=[])
+        full.run_ai_surface_recon.assert_not_called()
+        client.update_graph_from_ai_surface_recon.assert_not_called()
+
+    def test_with_ai_endpoint_runs_and_persists(self):
+        """An AI-tagged endpoint -> runner runs and results are persisted."""
+        row = {
+            "base_url": "http://h", "path": "/v1/chat/completions",
+            "method": "POST", "iface": "llm-chat", "ai_fw": True,
+        }
+        # Make the row behave like a neo4j Record (supports __getitem__),
+        # returning None for columns this query doesn't have (vdb reuse).
+        rec = MagicMock()
+        rec.__getitem__ = lambda _self, k: row.get(k)
+        client, full = self._run_with_mocks({"domain": "h"}, ep_rows=[rec])
+        full.run_ai_surface_recon.assert_called_once()
+        client.update_graph_from_ai_surface_recon.assert_called_once()
 
 
 if __name__ == "__main__":

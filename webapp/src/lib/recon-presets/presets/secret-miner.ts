@@ -69,6 +69,10 @@ Bug bounty hunters and pentesters targeting modern web applications built with R
     hakrawlerDepth: 3,
     hakrawlerIncludeSubs: true,
 
+    // ZAP Ajax Spider: disabled. JS Recon + jsluice cover JS file analysis;
+    // browser-driven crawling adds runtime cost without contributing to secret mining.
+    zapAjaxSpiderEnabled: false,
+
     // GAU: historical JS from Wayback (default is false)
     gauEnabled: true,
 

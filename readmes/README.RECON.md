@@ -925,6 +925,38 @@ flowchart TB
 
 ---
 
+### Module 4.5: `ai_surface_recon`
+
+The **detection / fingerprinting half** of the adversarial-AI pipeline. Runs as
+**Phase 4.5** (after `resource_enum`, before `vuln_scan`), gated on
+`AI_SURFACE_RECON_ENABLED` (not on `SCAN_MODULES`). It sends **benign,
+protocol-aware shape-probes** to confirm and characterize AI/LLM infrastructure
+that generic web recon can't see — and writes the results onto the graph as
+`ai_*` property annotations plus MCP tool-poisoning `Vulnerability` nodes. It
+never jailbreaks, injects, or fuzzes, and never presents credentials.
+
+Seven workloads run per host (hosts in parallel, workloads sequential within a host):
+
+| # | Workload | Confirms / extracts |
+|---|----------|---------------------|
+| 1 | Chat-shape probe | LLM chat endpoint, dialect, streaming, p50 latency |
+| 2 | MCP handshake + `tools/list` + YARA | MCP server, tools, capabilities, tool-poisoning findings |
+| 3 | OpenAPI / manifest / model listing | tool/vision/streaming support, model ids + family, cached spec |
+| 4 | Julius probe pack (YAML) | confirmed AI `Technology` (vLLM, Ollama, …) |
+| 5 | Vector-DB confirmation reads | qdrant / chroma / weaviate / milvus, unauthenticated read exposure |
+| 6 / 7 | latency baseline + summary glue | counters, merged model family |
+
+**Input:** `resource_enum.by_base_url` (classified endpoints), `http_probe.by_url`
+(AI flags), `port_scan.by_host` (AI + vector-DB ports).
+**Output:** `combined_result["ai_surface_recon"]` → graph via
+`update_graph_from_ai_surface_recon` (enriches `Endpoint` / `Parameter` /
+`Technology`, adds `Vulnerability` nodes). Heavy deps (`mcp`, `yara`, `prance`,
+`jq`, `PyYAML`) are lazy-imported, so a missing dep degrades one workload, not the job.
+
+📖 **Detailed documentation:** [readmes/AI_SURFACE_RECON_MODULE.md](AI_SURFACE_RECON_MODULE.md)
+
+---
+
 ### Module 5: `vuln_scan`
 
 ```mermaid
@@ -1515,6 +1547,8 @@ recon/
 ├── port_scan.py            # Port scanning
 ├── http_probe.py           # HTTP probing
 ├── resource_enum.py        # Endpoint discovery
+├── main_recon_modules/
+│   └── ai_surface_recon.py # AI/LLM/MCP/vector-DB surface fingerprinting (Phase 4.5)
 ├── vuln_scan.py            # Vulnerability scanning
 ├── add_mitre.py            # MITRE enrichment
 ├── github_secret_hunt.py   # GitHub secrets
@@ -1543,6 +1577,7 @@ flowchart TB
         Ports[port_scan<br/>open ports, services]
         HTTP[http_probe<br/>live URLs, tech stack]
         Resources[resource_enum<br/>endpoints, forms]
+        AISurface[ai_surface_recon<br/>AI/LLM/MCP/vector-DB]
         Vulns[vuln_scan<br/>CVEs, misconfigs]
         TechCVE[technology_cves<br/>version-based CVEs]
     end
@@ -1553,7 +1588,8 @@ flowchart TB
     DNSData --> Ports
     Ports --> HTTP
     HTTP --> Resources
-    Resources --> Vulns
+    Resources --> AISurface
+    AISurface --> Vulns
     Vulns --> TechCVE
 ```
 

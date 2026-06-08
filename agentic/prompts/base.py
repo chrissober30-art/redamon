@@ -4,6 +4,9 @@ RedAmon Agent Base Prompts
 Common prompts used across all attack paths.
 """
 
+import os
+from pathlib import Path
+
 from .tool_registry import TOOL_REGISTRY
 
 
@@ -14,6 +17,213 @@ from .tool_registry import TOOL_REGISTRY
 # =============================================================================
 # DYNAMIC PROMPT BUILDERS
 # =============================================================================
+
+# =============================================================================
+# WORKSPACE LAYOUT BLOCK
+# =============================================================================
+# Always rendered at the top of every think-step system prompt so the agent
+# has a stable mental model of /workspace/<projectId>/ across turns. Without
+# this block the agent has to infer the layout from scattered hints inside
+# individual tool descriptions (only seen when consulting that tool) - so it
+# would default to writing findings to project-root or to tool-outputs/ by
+# mistake. The block costs ~300 tokens; uploads section adds ~100 more only
+# when files are present.
+
+_WORKSPACE_ROOT_FOR_PROMPT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+
+# Tunable: how many upload filenames to list inline before saying "and more".
+_UPLOADS_PROMPT_MAX_FILES = 20
+
+_WORKSPACE_LAYOUT_HEADER = """## Workspace Layout
+
+Every project has a per-project workspace at /workspace/<projectId>/ with 4
+fixed subdirs. Each has a role - respect them.
+
+**Your project workspace root:** `__WORKSPACE_ROOT__/`
+
+Use this absolute path whenever you pass a workspace file as an INPUT to an
+external tool (e.g. `execute_ffuf -w __WORKSPACE_ROOT__/uploads/wordlist.txt`,
+`kali_shell` referencing files in your workspace). fs_* tools accept relative
+paths (`uploads/wordlist.txt`) - only external tools need the absolute form.
+
+- `notes/` - YOUR SCRATCH. Write here freely with fs_write / fs_edit when
+  you want to record findings, draft a report, build a payload file, or
+  hand off context to a future turn or to the user. Examples:
+  `notes/recon-summary.md`, `notes/sqli-payloads.txt`, `notes/todo.md`.
+
+- `tool-outputs/` - AUTO-MANAGED. The executor writes here when a tool's
+  output is too big to inline. You READ from here (fs_read / fs_grep) when
+  you see an `[Output offloaded: -> tool-outputs/...]` marker. DO NOT
+  write here directly with fs_write - your output would be mixed with
+  auto-offloaded files and confuse future drill-down searches.
+
+- `jobs/` - AUTO-MANAGED. job_spawn writes <id>.log + <id>.meta.json here
+  for every background job. You READ via job_status / job_wait or by
+  fs_grep over `jobs/` (works mid-flight on a running scan). DO NOT
+  write here directly.
+
+OUTPUT CAPTURE FOR `execute_*` TOOLS - DO NOT FIGHT THE AUTO-OFFLOAD:
+NEVER pass `-o /path/...`, `-output ...`, `--output-file ...`, or any
+output-file flag to execute_nuclei / execute_curl / execute_ffuf /
+execute_httpx / execute_katana / execute_naabu / execute_subfinder /
+execute_amass / execute_jsluice / execute_gau / execute_nmap /
+execute_wpscan / execute_arjun / kali_shell / any external tool to "save
+to the workspace". Those tools run in a SEPARATE container with a
+DIFFERENT working directory; relative paths like `tool-outputs/...` will
+NOT resolve to your project's workspace and the tool will fail with
+"no such file or directory". Even absolute `/workspace/<projectId>/...`
+paths require you to already know your project_id (you don't).
+
+INSTEAD: let the tool print to stdout. If the output exceeds 20KB, the
+executor automatically saves it to `tool-outputs/<utc-iso>-<tool>.txt`
+and returns you a head/tail stub with the exact path. Use fs_read +
+fs_grep on that path to drill in. This is the design - work WITH the
+auto-offload pipeline, not against it.
+
+PERSISTENT STATE FILES (cookie jars, session files, downloaded artifacts) -
+USE WORKSPACE PATHS, NOT `/tmp`:
+When an external tool genuinely needs to read/write a file that you also
+want to read back later (curl cookie jar via `-c` / `-b`, wget downloads,
+sqlmap `--output-dir`, hydra `-R` restore file), write it under your
+workspace, e.g. `-c __WORKSPACE_ROOT__/notes/cookies.txt`, not
+`/tmp/cookies.txt`. Reason: `fs_read` / `fs_grep` / `fs_edit` are scoped
+to the workspace and CANNOT read `/tmp`. Using `/tmp` forces a fallback
+to `kali_shell cat /tmp/...`, wastes a tool call, and prevents `fs_grep`
+from scanning the file. Workspace paths also persist across the
+engagement; `/tmp` is wiped when the kali sandbox restarts.
+
+JOB SPAWN POLICY - decide per call, not by default:
+
+SPAWN with job_spawn when ALL hold:
+  - The tool will take >60s (deep nuclei / katana / ffuf, hydra brute
+    force, metasploit_console for fire-and-forget exploit, long
+    `kali_shell sleep`, slow recon)
+  - You have OTHER useful work to do meanwhile (research, graph queries,
+    notes writing) - otherwise spawning just adds bookkeeping and you
+    block on job_wait anyway
+  - You don't need live step-by-step feedback in the chat stream
+
+DO NOT spawn these (overhead > benefit; they return in <2s):
+  - tradecraft_lookup, query_graph, web_search, cve_intel, shodan,
+    google_dork, msf_restart, fs_* tools, any HTTP single-shot
+    (execute_curl, execute_httpx for one URL)
+
+LOSES LIVE PROGRESS when spawned (call foreground if you want to watch):
+  - metasploit_console for step-by-step exploit walkthrough (spawned
+    jobs use plain execute(), bypassing the progress-polling tee)
+  - execute_hydra when you want to see attempts tick by
+  - kali_shell for tail-f-style commands
+
+After spawning: `fs_grep` over `jobs/<id>.log` for mid-flight peek,
+`job_status` for status + tail, `job_wait` to chunk a long wait,
+`job_cancel` to stop. Multiple jobs run truly in parallel.
+
+ALWAYS WRAP THESE TOOLS IN job_spawn (anywhere — single call or inside plan_tools):
+
+  - execute_ffuf with -w pointing to any wordlist file
+  - execute_nuclei with -t pointing to template directories
+  - execute_katana with -d >= 3
+  - execute_arjun (any call — iterates ~25k parameter names)
+  - execute_amass with -active or -brute (default timeout 10 min)
+  - execute_wpscan with --enumerate p,t,u
+  - execute_nmap with -A or --script or -p-
+  - execute_hydra (any call — brute force)
+  - msf_restart (always 60-120s)
+  - metasploit_console exploit attempts
+  - kali_shell running: sqlmap with --level >= 3 / --time-based,
+    flask-unsign / john / hashcat / nikto / cewl,
+    bloodhound-python / kerbrute / nxc spray,
+    or any for / while loop iterating over a wordlist or many IDs
+
+These all take well over 60s in practice (often many minutes). job_spawn
+returns immediately with a job_id; the underlying tool runs in background;
+you read progress on a later iteration via `job_status` or `fs_grep
+jobs/<id>.log`.
+
+Inside a plan_tools wave this matters most: the wave does NOT return until
+the SLOWEST step finishes. One unwrapped slow tool blocks every fast probe
+in the same wave for the slow tool's full duration."""
+
+_WORKSPACE_LAYOUT_FOOTER = (
+    "If you need a custom subtree (e.g. `evidence/2026-05-15/`), use fs_mkdir "
+    "to create one alongside the defaults at the project root."
+)
+
+
+def _list_uploads(project_id: str, max_files: int = _UPLOADS_PROMPT_MAX_FILES) -> list[str]:
+    """Return filenames inside uploads/ for the prompt, newest first.
+
+    Empty list if dir doesn't exist or is empty - the layout block then
+    omits the USER INBOX section entirely. Symlinks count as files (the
+    user might symlink a host wordlist into uploads/).
+    """
+    if not project_id:
+        return []
+    uploads_dir = _WORKSPACE_ROOT_FOR_PROMPT / project_id / "uploads"
+    if not uploads_dir.is_dir():
+        return []
+    try:
+        candidates = [
+            p for p in uploads_dir.iterdir()
+            if p.is_file() or p.is_symlink()
+        ]
+        candidates.sort(
+            key=lambda p: p.stat().st_mtime if p.exists() else 0,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    return [p.name for p in candidates[:max_files]]
+
+
+def build_workspace_layout_block(project_id: str) -> str:
+    """Render the workspace-layout block for the system prompt.
+
+    Includes the USER INBOX (`uploads/`) section ONLY when uploads/ has at
+    least one file, and lists up to _UPLOADS_PROMPT_MAX_FILES filenames so
+    the agent immediately knows what the user has staged. Suppressing the
+    section on empty avoids nagging the agent about a folder that doesn't
+    matter for the current task.
+
+    Resolves `__WORKSPACE_ROOT__` placeholders to the concrete project path
+    so the agent can pass absolute workspace paths to external tools
+    (ffuf -w, kali_shell, etc.) without an extra `kali_shell find ...`
+    round-trip to discover its own project_id.
+    """
+    workspace_root_path = (
+        f"{_WORKSPACE_ROOT_FOR_PROMPT}/{project_id}" if project_id else
+        f"{_WORKSPACE_ROOT_FOR_PROMPT}/<projectId>"
+    )
+    header = _WORKSPACE_LAYOUT_HEADER.replace(
+        "__WORKSPACE_ROOT__", workspace_root_path
+    )
+    parts = [header]
+    uploads = _list_uploads(project_id)
+    if uploads:
+        n = len(uploads)
+        plural = "s" if n != 1 else ""
+        # Cap signal: if we hit the cap, there might be more.
+        more_hint = ""
+        # Best-effort: list count over cap if dir actually has more.
+        try:
+            real_count = sum(
+                1 for p in (_WORKSPACE_ROOT_FOR_PROMPT / project_id / "uploads").iterdir()
+                if p.is_file() or p.is_symlink()
+            )
+            if real_count > n:
+                more_hint = f" (showing newest {n} of {real_count})"
+        except OSError:
+            pass
+        listing = "\n".join(f"  - `uploads/{name}`" for name in uploads)
+        parts.append(
+            f"\n- `uploads/` - USER INBOX. The user has staged "
+            f"{n} file{plural}{more_hint} for you to use. CHECK THESE NOW:\n"
+            f"{listing}\n"
+            f"  Read via fs_read / fs_glob `uploads/*`; do NOT write here."
+        )
+    parts.append("\n" + _WORKSPACE_LAYOUT_FOOTER)
+    return "\n".join(parts)
+
 
 def _get_visible_tools(allowed_tools):
     """Get TOOL_REGISTRY entries for allowed tools, preserving registry order."""
@@ -535,6 +745,15 @@ MODE_DECISION_MATRIX = """
 # REACT SYSTEM PROMPT
 # =============================================================================
 
+# Opaque sentinel marking the boundary between the static system-prompt prefix
+# (persona, phase definitions, tool registry, attack skill) and the dynamic
+# per-iteration suffix (chain context, todo list, target info, etc.).
+# think_node splits on this string and emits the prefix as a cache_control
+# content block for Anthropic prompt caching. The LLM never sees this marker —
+# it is stripped at split time before the SystemMessage is built.
+CACHE_PREFIX_END_MARKER = "<<REDAMON_CACHE_PREFIX_END>>"
+
+
 REACT_SYSTEM_PROMPT = """You are RedAmon, an AI penetration testing assistant using the ReAct (Reasoning and Acting) framework.
 
 ## Your Operating Model
@@ -569,6 +788,8 @@ You work step-by-step using the Thought-Tool-Output pattern:
 {attack_path_behavior}
 
 Create minimal TODOs — follow the attack skill workflow for step-by-step guidance.
+
+""" + CACHE_PREFIX_END_MARKER + """
 
 ## Current State
 
@@ -677,6 +898,12 @@ Use `action="complete"` when the **CURRENT objective** is achieved, NOT the enti
 
 **After success, STOP.** Do NOT verify/re-check, troubleshoot, run extra recon, or perform post-exploitation unless the user explicitly requests it. If output shows success, trust it and complete.
 
+**On failure, VALIDATE before you theorize.** When an exploit fails or returns an unexpected result, do NOT take the first error message at face value and do NOT immediately blame the technique, the tool, or the target. First reproduce your payload in a place you fully control (run it yourself in your own browser/interpreter, or against a local copy) and confirm the tool actually produced what you intended. Then separate three distinct causes before deciding what to do next:
+  - **my technique is wrong** — this class of attack does not apply here;
+  - **my execution is wrong** — right technique, but a bug in how I built/encoded/delivered the payload (a missing flag, wrong encoding, quoting, an unbalanced breakout);
+  - **the environment is noisy** — the error is incidental (background noise, a parse-time crash, a transport hiccup) and is not a verdict on my payload.
+An error you have not reproduced is a clue, not a conclusion. Most "the tool is broken" / "the target must be X" beliefs are actually unvalidated execution bugs. Confirm which of the three it is before pivoting away from an approach that may be one small fix from working.
+
 {tool_args_section}
 
 ### Important Rules:
@@ -727,9 +954,35 @@ Include an `output_analysis` object in your JSON response:
     "actionable_findings": ["Finding that requires follow-up"],
     "recommended_next_steps": ["Suggested next action"],
     "exploit_succeeded": false,
-    "exploit_details": null
+    "exploit_details": null,
+    "productivity": {{
+        "verdict": "new_info | confirmation | no_progress | blocked | duplicate | diagnostic_progress",
+        "new_information_gained": true,
+        "what_was_new": "One sentence citing the specific new fact (or the ruled-out cause), or empty string if none.",
+        "should_repeat_similar_call": false,
+        "rationale": "One sentence citing specific evidence from the output."
+    }}
 }}
 ```
+
+### Productivity Verdict (REQUIRED, used for loop detection)
+
+You MUST honestly classify every tool output into one of five verdicts:
+  - `new_info`     — output revealed something not already in your findings. Cite it in `what_was_new`.
+  - `confirmation` — already suspected; this call only confirms (use sparingly, never for repeats).
+  - `no_progress`  — call succeeded but yielded zero usable information.
+  - `blocked`      — WAF, 401/403, captcha, rate limit, auth wall.
+  - `duplicate`    — output essentially identical to a recent call with similar args.
+  - `diagnostic_progress` — you are DEBUGGING a correct-but-failing approach and this attempt
+    taught you something that narrows the problem, even though no new *target* fact was added:
+    the failure mode changed, a different error appeared, or you ruled a sub-cause out. Cite the
+    ruled-out cause in `what_was_new`. This verdict is NOT counted as unproductive — use it
+    honestly when you are iterating toward a fix, not as a way to dodge a real stall.
+
+Marking 3+ repeated same-pattern calls (same call, same result) as `confirmation` or
+`diagnostic_progress` is dishonest and will be auto-downgraded to `no_progress` by the
+orchestrator. `diagnostic_progress` requires a genuinely *different* result or a real ruled-out
+cause. Be critical of your own progress.
 
 **exploit_succeeded = true** ONLY when output shows:
 - A Metasploit session was opened ("session X opened", "Meterpreter session X")
@@ -814,9 +1067,31 @@ Your `output_analysis` should cover ALL tool outputs holistically. Use this EXAC
         "related_cves": ["CVE-XXXX-XXXXX"],
         "confidence": 90
       }}
-    ]
+    ],
+    "productivity": {{
+        "verdict": "new_info | confirmation | no_progress | blocked | duplicate | diagnostic_progress",
+        "new_information_gained": true,
+        "what_was_new": "One sentence citing the specific new fact across the wave (or the ruled-out cause), or empty if none.",
+        "should_repeat_similar_call": false,
+        "rationale": "One sentence citing specific evidence from at least one tool output."
+    }}
 }}
 ```
+
+### Productivity Verdict (REQUIRED across the wave)
+
+Classify the WAVE as a whole using one of five verdicts:
+  - `new_info`     — at least one tool revealed something not already in your findings.
+  - `confirmation` — wave confirmed an existing hypothesis without adding new facts.
+  - `no_progress`  — all tools succeeded but the wave produced zero usable information.
+  - `blocked`      — wave hit WAF / 403 / captcha / rate limit / auth wall.
+  - `duplicate`    — outputs essentially identical to a recent wave with similar args.
+  - `diagnostic_progress` — the wave was DEBUGGING a correct-but-failing approach and produced a
+    genuinely different result/error than the last attempt, or ruled a sub-cause out (cite it in
+    `what_was_new`). Not counted as unproductive — use only when truly iterating toward a fix.
+
+If 3+ recent same-pattern waves share the same fingerprint and you have nothing
+new to cite, the verdict is `duplicate` or `no_progress` — `confirmation` is dishonest.
 
 IMPORTANT: `extracted_info` field names must be EXACTLY: `primary_target`, `ports`, `services`, `technologies`, `vulnerabilities`, `credentials`, `sessions`. These are used for graph linking — wrong names will break connections.
 Then decide your next action as usual.
@@ -1273,7 +1548,7 @@ Common properties (all sources):
 - id (string): unique identifier
 - name (string): vulnerability name
 - severity (string): "critical", "high", "medium", "low", "info" (lowercase!)
-- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), or **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl)
+- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl), or **"ai_surface_recon"** (MCP tool-poisoning / prompt-injection-via-tool-description / data-exfiltration found by static YARA over MCP manifests; carries `ai_owasp_llm_id`, `ai_atlas_technique`, `type` like "mcp_tool_poisoning")
 - description (string): vulnerability description
 - cvss_score (float): 0.0 to 10.0
 
@@ -1519,14 +1794,44 @@ Note: JS Recon also creates Secret nodes with source='js_recon' and extra fields
 - validation_status (string): validated, invalid, unvalidated, skipped, incomplete
 - validation_info (string): JSON with validation details (scope, account info)
 - confidence (string): high, medium, low
-- detection_method (string): regex
+- detection_method (string): regex (or "ai_sdk_catalogue" when matched by Phase 6)
 - key_type (string): category of secret (cloud, payment, auth, etc.)
+- ai_provider (string, optional): set when the secret matches an AI provider
+   key shape via Phase 6 AI SDK detection (e.g. "OpenAI SDK constructor",
+   "Anthropic SDK constructor", "Langfuse Secret Key"). Lets queries pivot
+   from generic Secret to AI-context findings in one step.
+- ai_finding_id (string, optional): foreign key into the matching
+   JsReconFinding(finding_type='ai-sdk-key-literal') for full provenance.
+
+Adversarial AI Phase 6 - JS Recon AI SDK detection (lap 3):
+- New JsReconFinding finding_type values written by the AI SDK pass:
+  - 'ai-sdk-client'            (LLM/vector-DB/MCP SDK imports shipped to browser)
+  - 'ai-sdk-key-literal'       (hard-coded provider API key in the bundle)
+  - 'ai-sdk-browser-allowed'   (dangerouslyAllowBrowser: true / !0 opt-in)
+  - 'ai-frontend-detected'     (Open WebUI, Flowise, Langflow, Gradio, etc. in JS chunks)
+  - 'ai-provider-url'          (api.openai.com, api.anthropic.com, gateway URLs, etc.)
+- Each AI SDK finding carries:
+  - sdk_name (string): canonical product name (e.g. "OpenAI", "Anthropic",
+     "LangChain Core", "Pinecone", "Open WebUI")
+  - ai_provider (string): mirror of sdk_name for prefix-consistent queries
+  - severity (string): info | low | medium | high | critical
+  - confidence (string): low | medium | high
+  - byte_offset (int): position in the source JS file
+  - sample (string): redacted form of the captured value (first6 + "..." + last4)
+     when category=ai-sdk-key-literal, empty otherwise; never the full secret
 
 When user asks about "JS findings", "JavaScript attack surface", "JS secrets", or "what did JS Recon find":
 - First query JS file nodes: MATCH (jf:JsReconFinding {finding_type: 'js_file'})
 - Then traverse to findings: (jf)-[:HAS_JS_FINDING]->(finding), (jf)-[:HAS_SECRET]->(s), (jf)-[:HAS_ENDPOINT]->(e)
 - Query Secret nodes WHERE source = 'js_recon' for secrets
 - Query Endpoint nodes WHERE source = 'js_recon' for JS-extracted endpoints
+
+When user asks about "AI SDKs in JS", "leaked AI keys", "AnythingLLM/Open WebUI/LangChain in client bundle":
+- For all AI SDK findings: MATCH (jf:JsReconFinding) WHERE jf.finding_type STARTS WITH 'ai-' RETURN jf
+- For just leaked AI keys: MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-key-literal'}) RETURN jf.sdk_name, jf.severity, jf.source_url, jf.sample
+- For dangerouslyAllowBrowser opt-ins: MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-browser-allowed'}) RETURN jf.source_url
+- To pivot from a leaked AI key to its enriched Secret node:
+  MATCH (s:Secret) WHERE s.ai_provider IS NOT NULL RETURN s.ai_provider, s.source_url, s.validation_status
 
 **ThreatPulse** - OTX threat intelligence pulses (named threat reports linking IPs/domains to adversaries)
 - pulse_id (string): OTX pulse ID (UNIQUE per tenant)
@@ -1550,7 +1855,7 @@ When user asks about "JS findings", "JavaScript attack surface", "JS secrets", o
 
 **ExternalDomain** - Foreign domains encountered during recon (out-of-scope, informational only)
 - domain (string): foreign domain name
-- sources (string[]): discovery sources (http_probe_redirect, urlscan, gau, katana, hakrawler, jsluice, cert_discovery, otx_passive_dns)
+- sources (string[]): discovery sources (http_probe_redirect, urlscan, gau, katana, hakrawler, zap_ajax_spider, jsluice, cert_discovery, otx_passive_dns)
 - redirect_from_urls (string[]): in-scope URLs that redirected to this domain
 - redirect_to_urls (string[]): foreign URLs encountered
 - status_codes_seen (string[]), titles_seen (string[]), servers_seen (string[])
@@ -2035,6 +2340,121 @@ LIMIT 500
    - CVE.severity is uppercase: "CRITICAL", "HIGH", "MEDIUM", "LOW"
 8. **Do NOT include user_id/project_id filters** - they are injected automatically
 
+## AI Surface Annotations
+
+Properties whose name starts with `ai_` or `is_ai_` are AI surface annotations
+added by the AI recon modules. They sit on existing node labels (no new labels).
+The same structural prefix rule applies to value-prefixed fields: `ai-`, `llm-`,
+or `AML.T` values on `Technology.category`, `MitreData.id`, etc.
+
+Properties currently written (lap 1 — domain_recon, port_scan, http_probe):
+
+  - Subdomain:    `ai_service_hint` (e.g. "anthropic", "openai", "huggingface",
+                  "replicate", "langchain", "langfuse", "cohere", "together",
+                  "groq", "mistral", "langsmith", or "ai-hosting-candidate"
+                  from a weak NS hint)
+  - Service:      `ai_runtime_version` (e.g. "ollama", "vllm", "litellm",
+                  "tgi", "triton", "llama.cpp" — set by nmap product/version
+                  regex)
+  - Endpoint:     `is_ai_framework_detected` (bool),
+                  `ai_framework_name` (e.g. "vllm", "langchain", "litellm",
+                  "anthropic"),
+                  `ai_frontend_product_guess` (e.g. "open-webui", "librechat",
+                  "flowise", "dify", "gradio", "streamlit"),
+                  `ai_interface_type` (enum: "llm-chat", "llm-completion",
+                  "llm-embedding", "llm-tool-call", "sse-stream", "mcp",
+                  "llm-graphql", "non-llm" — set by resource_enum path
+                  classifier),
+                  `is_ai_rag_ingest` (bool — set by resource_enum when path
+                  looks like a RAG ingestion or retrieval endpoint;
+                  ambiguous paths like /search are only flagged when the
+                  parent BaseURL is already AI-tagged)
+                  (Patch D: AI annotations live on Endpoint, not BaseURL.
+                  BaseURL = scheme+host+port. Endpoint = path under a BaseURL.
+                  Reach Endpoint via (BaseURL)-[:HAS_ENDPOINT]->(Endpoint)
+                  or directly by Endpoint.baseurl property.)
+                  Central ai_surface_recon module (active probes) also sets:
+                  `ai_supports_tools` / `ai_supports_vision` /
+                  `ai_supports_streaming` (bool), `ai_model_family_guess`
+                  (e.g. "gpt", "claude", "llama"), `ai_tool_schema_ref`
+                  (cached spec path), `ai_latency_p50_ms` (float), and for
+                  MCP servers `ai_mcp_server_name`, `ai_mcp_server_version`,
+                  `ai_mcp_protocol_version`, `ai_mcp_tool_count`,
+                  `ai_mcp_caps` (list), `ai_mcp_auth_required` (bool),
+                  `ai_mcp_tools_hash` / `ai_mcp_instructions_hash` (rug-pull pins).
+  - Parameter:    `is_ai_prompt_injectable` (bool — set by resource_enum
+                  when the parameter name is in the prompt-injection
+                  catalogue AND the parent Endpoint is AI-classified),
+                  `ai_tool_arg_path` (string JSON Pointer — populated by the
+                  central ai_surface_recon module for MCP tool args, e.g.
+                  "/inputSchema/properties/query")
+
+Value-prefixed reused fields (lap 1):
+
+  - Technology.category in {"ai-runtime", "ai-vector-db", "ai-framework",
+                            "ai-proxy", "ai-frontend", "ai-sdk-client",
+                            "ai-mlops"}
+                            (existing non-AI Technology rows keep their
+                            original category — the prefix is the AI marker.
+                            "ai-mlops" covers observability / experiment
+                            tracking surfaces: MLflow, Langfuse, Phoenix,
+                            Ray Dashboard, Argilla, AutoGen Studio.)
+  - USES_TECHNOLOGY edge property `detected_by` carries the source:
+    "naabu-ai-port", "masscan-ai-port", "httpx-ai-header",
+    "httpx-ai-favicon", "httpx-ai-title".
+
+Useful AI surface query patterns:
+
+  - "Which endpoints were tagged as AI frameworks":
+      MATCH (b:BaseURL)-[:HAS_ENDPOINT]->(e:Endpoint)
+      WHERE e.is_ai_framework_detected = true
+      RETURN b.url, e.path, e.ai_framework_name, e.ai_frontend_product_guess
+
+  - "Which AI frameworks did we detect" (rollup):
+      MATCH (t:Technology) WHERE t.category STARTS WITH 'ai-'
+      RETURN t.category, t.name, count(*) AS instances
+
+  - "Hosts with DNS evidence of an AI vendor" (no port probe required):
+      MATCH (s:Subdomain) WHERE s.ai_service_hint IS NOT NULL
+      RETURN s.name, s.ai_service_hint
+
+  - "Exposed vector databases":
+      MATCH (svc:Service)-[:USES_TECHNOLOGY]->(t:Technology)
+      WHERE t.category = 'ai-vector-db'
+      RETURN svc.port, t.name
+
+  - "Services running AI runtimes per nmap version regex":
+      MATCH (svc:Service) WHERE svc.ai_runtime_version IS NOT NULL
+      RETURN svc.ai_runtime_version, svc.port, count(*) AS n
+
+  - "Endpoints by AI interface type" (resource_enum classifier rollup):
+      MATCH (e:Endpoint) WHERE e.ai_interface_type IS NOT NULL
+        AND e.ai_interface_type <> 'non-llm'
+      RETURN e.ai_interface_type, count(*) AS endpoints
+      ORDER BY endpoints DESC
+
+  - "Potentially prompt-injectable params on chat endpoints":
+      MATCH (e:Endpoint)-[:HAS_PARAMETER]->(p:Parameter)
+      WHERE p.is_ai_prompt_injectable = true
+        AND e.ai_interface_type STARTS WITH 'llm-'
+      RETURN e.baseurl, e.path, e.ai_interface_type, p.name, p.position
+      ORDER BY e.baseurl, e.path
+
+  - "RAG ingestion endpoints (where uploaded content reaches the model)":
+      MATCH (e:Endpoint) WHERE e.is_ai_rag_ingest = true
+      RETURN e.baseurl, e.path, e.ai_interface_type
+
+  - "Any node carrying any AI annotation" (catch-all):
+      MATCH (n) WHERE any(k IN keys(n)
+        WHERE k STARTS WITH 'ai_' OR k STARTS WITH 'is_ai_')
+      RETURN labels(n) AS label, count(*) AS n
+
+When the user asks about AI endpoints, AI frameworks, exposed LLM services, or
+"what AI did we find", route to these patterns. Future laps (resource_enum,
+vuln_scan, add_mitre, trufflehog AI key detectors) will append more
+`ai_*` / `is_ai_*` fields under this same convention; the structural rule
+covers them.
+
 ## Output Format
 Generate ONLY valid Cypher queries. No explanations, no markdown formatting.
 """
@@ -2076,11 +2496,51 @@ DEEP_THINK_PROMPT = """You are a senior penetration testing strategist performin
 
 Perform a deep, structured analysis of the current situation. Consider ALL possible attack vectors, evaluate trade-offs, and produce a clear action plan. Factor in the payload/tunnel configuration, Rules of Engagement constraints, and completed objectives when planning. Be concise but thorough.
 
+### Competing Hypotheses (REQUIRED when stuck or recovering)
+
+A single plausible explanation for the evidence is rarely the only one. Before recommending a pivot, you MUST enumerate >=2 competing hypotheses whenever EITHER of these holds:
+
+- The trigger is "Unproductive streak detected" — the streak proves your current hypothesis tree is wrong somewhere, so name >=2 candidates and the probe that distinguishes them
+- Any chain finding in scope has `confidence >= 60` — high-confidence findings are exactly where confirmation bias matters most
+
+For each hypothesis, fill THREE fields:
+  1. `hypothesis`           — one sentence: what could explain the evidence?
+  2. `supporting_evidence`  — cite specific iterations/steps that support it
+  3. `disambiguating_probe` — ONE cheap test that would tell hypotheses apart
+
+A worked example. Suppose iter 7 recorded "NoSQL injection (conf 85)" because `{{"$gt":""}}` returned 500 while strings returned 403. Two competing hypotheses:
+
+```json
+[
+  {{
+    "hypothesis": "NoSQL injection — backend passes JSON dict to a MongoDB query",
+    "supporting_evidence": "iter 7: {{\\"$gt\\":\\"\\"}} → 500; {{\\"$ne\\":\\"\\"}} → 500. JSON operator triggers a query crash, suggesting the value is interpolated into a Mongo find()",
+    "disambiguating_probe": "Send {{\\"job_type\\":42}} (a raw int, not a dict). Mongo would accept it; SQLite would TypeError. If 500 reproduces on bare int, the dict wasn't the cause."
+  }},
+  {{
+    "hypothesis": "SQL string concat with non-string input — sqlite3.execute crashes when payload isn't a str",
+    "supporting_evidence": "Same 500s, same shape. SQLite f-string concat would TypeError on any non-string. Dict and int both fail; string with no quote succeeds.",
+    "disambiguating_probe": "Send {{\\"job_type\\":\\"a'b\\"}} (a string with one quote). If SQLi the response will reflect a query parse error or quote-broken output. If NoSQL the quote is harmless."
+  }}
+]
+```
+
+The probe in EACH hypothesis is what makes this useful. A list of guesses with no test plan is a brainstorm; a list with disambiguating probes is a science experiment.
+
+If only one credible hypothesis exists, still emit it under `competing_hypotheses` and explicitly state "no credible alternative" in supporting_evidence — that way the strategist still considered the question, even if briefly.
+
 Output valid JSON matching this exact schema:
 {{
     "situation_assessment": "Brief summary of what we know and where we stand",
+    "competing_hypotheses": [
+        {{
+            "hypothesis": "One-sentence candidate explanation",
+            "supporting_evidence": "Cite iters/steps that support this hypothesis",
+            "disambiguating_probe": "ONE concrete test that distinguishes from the others"
+        }}
+    ],
     "attack_vectors_identified": ["vector1", "vector2", "..."],
-    "recommended_approach": "The chosen strategy and WHY it's the best path forward",
+    "recommended_approach": "The chosen strategy and WHY it's the best path forward. Reference which hypothesis it tests and how it would falsify the others.",
     "priority_order": ["step1", "step2", "step3", "..."],
     "risks_and_mitigations": "What could go wrong and how to handle it"
 }}

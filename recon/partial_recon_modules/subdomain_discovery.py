@@ -79,7 +79,7 @@ def run_subdomain_discovery(config: dict) -> None:
             result["subdomain_count"] = len(all_subs)
             dns_workers = settings.get('DNS_MAX_WORKERS', 50)
             dns_record_parallel = settings.get('DNS_RECORD_PARALLELISM', True)
-            result["dns"] = resolve_all_dns(domain, all_subs, max_workers=dns_workers, record_parallelism=dns_record_parallel)
+            result["dns"] = resolve_all_dns(domain, all_subs, max_workers=dns_workers, record_parallelism=dns_record_parallel, settings=settings)
 
             # Rebuild subdomain status map
             subdomain_status_map = {}

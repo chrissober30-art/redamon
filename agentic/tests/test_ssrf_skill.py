@@ -195,11 +195,13 @@ class TestProjectSettings(unittest.TestCase):
         config = DEFAULT_AGENT_SETTINGS['ATTACK_SKILL_CONFIG']
         self.assertIn('ssrf', config['builtIn'])
 
-    def test_ssrf_master_toggle_default_off(self):
-        """Per project decision: SSRF master toggle ships disabled-by-default
-        even though the individual sub-sections default to enabled."""
+    def test_ssrf_master_toggle_default_on(self):
+        """SSRF master toggle ships enabled-by-default, consistent with the
+        other web-skill defaults (sql_injection, xss, rce, path_traversal).
+        The earlier default-off decision was reversed; see git history of
+        agentic/project_settings.py:ATTACK_SKILL_CONFIG."""
         config = DEFAULT_AGENT_SETTINGS['ATTACK_SKILL_CONFIG']
-        self.assertFalse(config['builtIn']['ssrf'])
+        self.assertTrue(config['builtIn']['ssrf'])
 
     def test_all_sub_workflow_toggles_default_on(self):
         """When the master is flipped on, every sub-workflow should be enabled."""

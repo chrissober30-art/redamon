@@ -66,6 +66,16 @@ describe('workflowDefinition', () => {
         prev = tool.group
       }
     })
+
+    test('ZAP Ajax Spider is registered as an active group 5 tool', () => {
+      const zap = WORKFLOW_TOOLS.find(t => t.id === 'ZapAjaxSpider')
+      expect(zap).toMatchObject({
+        label: 'ZAP Ajax Spider',
+        enabledField: 'zapAjaxSpiderEnabled',
+        group: 5,
+        badge: 'active',
+      })
+    })
   })
 
   describe('data node sets', () => {

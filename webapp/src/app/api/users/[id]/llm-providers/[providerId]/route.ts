@@ -16,6 +16,7 @@ function maskProvider(provider: Record<string, unknown>): Record<string, unknown
     apiKey: maskSecret(provider.apiKey as string),
     awsAccessKeyId: maskSecret(provider.awsAccessKeyId as string),
     awsSecretKey: maskSecret(provider.awsSecretKey as string),
+    awsBearerToken: maskSecret(provider.awsBearerToken as string),
   }
 }
 
@@ -62,7 +63,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     // Preserve masked secrets
-    const secretFields = ['apiKey', 'awsAccessKeyId', 'awsSecretKey'] as const
+    const secretFields = ['apiKey', 'awsAccessKeyId', 'awsSecretKey', 'awsBearerToken'] as const
     const updateData: Record<string, unknown> = { ...body }
     delete updateData.id
     delete updateData.userId

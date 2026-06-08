@@ -44,6 +44,12 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'INFORMATIONAL_SYSTEM_PROMPT': '',
     'EXPL_SYSTEM_PROMPT': '',
     'POST_EXPL_SYSTEM_PROMPT': '',
+    # Anthropic prompt caching for the root think_node's system prompt.
+    # When True, the static prefix (persona + tool registry + attack skill)
+    # is marked cache_control={"type": "ephemeral"} so Anthropic caches it
+    # once per session and bills subsequent reads at ~10% of base input cost.
+    # Has no effect on non-Anthropic providers (gated by isinstance check).
+    'ANTHROPIC_PROMPT_CACHING_ENABLED': True,
 
     # Stealth Mode
     'STEALTH_MODE': False,
@@ -125,8 +131,51 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'KB_OVERFETCH_FACTOR': None,   # None = inherit from retrieval.overfetch_factor
     'KB_SOURCE_BOOSTS': None,      # None = inherit from source_boosts block; dict = merge overrides
 
-    # Deep Think (Strategic Reasoning)
-    'DEEP_THINK_ENABLED': True,
+    # Productivity Audit & Loop Detection
+    # The orchestrator audits the LLM's per-step productivity verdict
+    # (no_progress / duplicate / blocked / new_info / confirmation) and counts
+    # unproductive steps in a sliding window. When the count crosses the
+    # threshold, Deep Think is triggered (if enabled) and a prompt warning is
+    # injected. Catches "successful but useless" tool calls (HTTP 200 with
+    # empty body, identical fuzzing fingerprints, stable 404s) that the
+    # legacy keyword-only failure detector missed.
+    'PRODUCTIVITY_AUDIT_WINDOW': 6,         # how many recent steps the audit considers
+    'UNPRODUCTIVE_STREAK_THRESHOLD': 3,     # unproductive steps in window to trigger pivot
+
+    # Response-uniformity anomaly detector: complements the productivity audit
+    # by catching streaks of DIFFERENT payloads that return IDENTICAL short-
+    # duration failures (signature of probes being rejected at parse time
+    # before reaching the layer the agent thinks it's testing).
+    #
+    # Calibration history: original defaults (window=8, min=5, ms=50) were
+    # tuned for tight back-to-back probe bursts on localhost targets and
+    # never fired on real sessions — agents interleave probes across
+    # hypothesis classes, so 5 same-shape responses in 8 most-recent calls
+    # is unrealistic; and parse-time crashes on networked targets land at
+    # 100-150ms, above the 50ms "fast" threshold. Widened to catch the
+    # dispersed-probe pattern that real agents actually produce.
+    'UNIFORM_RESPONSE_WINDOW': 25,          # how many recent steps to consider
+    'UNIFORM_RESPONSE_MIN_COUNT': 3,        # min identical-signature steps to fire
+    'UNIFORM_RESPONSE_DURATION_MS': 200,    # below this ms, response is "front-door fast" (includes networked overhead)
+
+    # Productivity scoring v2 — continuous score replacing the binary 3/6
+    # streak counter. The score is a weighted sum of five observed signals:
+    # unproductive verdicts, iterations-since-state-grew, max axis-repeat
+    # count, same-pattern recent calls, minus rewards for recent new_info and
+    # actionable_findings. Tiered actions (hint / Deep Think / require
+    # justification / block) are triggered by configurable score thresholds.
+    'PRODUCTIVITY_SCORE_ENABLED': True,      # master switch; if False, falls back to legacy 3/6
+    'PRODUCTIVITY_SCORE_HINT_THRESHOLD': 3.0,
+    'PRODUCTIVITY_SCORE_DEEPTHINK_THRESHOLD': 5.0,
+    'PRODUCTIVITY_SCORE_REQUIRE_PIVOT_THRESHOLD': 7.0,
+    'PRODUCTIVITY_SCORE_BLOCK_THRESHOLD': 9.0,
+    'DEEP_THINK_COOLDOWN_ITERATIONS': 5,     # min iterations between Deep Thinks (override on self-request or critical score)
+    'DEEP_THINK_NOVELTY_JACCARD_MAX': 0.6,   # if new priority_order >= this similarity to prior, reject and re-prompt
+    'STATE_GROWTH_SOFT_HINT_THRESHOLD': 5,   # iterations since state grew → soft hint
+    'STATE_GROWTH_HARD_THRESHOLD': 10,       # iterations since state grew → Deep Think override
+    'AXIS_REPEAT_WARN_COUNT': 2,             # 2nd same-axis attempt → warn
+    'AXIS_REPEAT_REQUIRE_PIVOT_COUNT': 3,    # 3rd same-axis attempt → require what_is_different
+    'AXIS_REPEAT_BLOCK_COUNT': 4,            # 4th same-axis attempt → block
 
     # Debug
     'CREATE_GRAPH_IMAGE_ON_INIT': False,
@@ -159,7 +208,7 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'msf_restart': ['exploitation', 'post_exploitation'],
         'web_search': ['informational', 'exploitation', 'post_exploitation'],
         'cve_intel': ['informational', 'exploitation', 'post_exploitation'],
-        'shodan': ['informational', 'exploitation'],
+        'shodan': ['informational', 'exploitation', 'post_exploitation'],
         'google_dork': ['informational'],
         'tradecraft_lookup': ['exploitation', 'post_exploitation'],
     },
@@ -338,7 +387,6 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['PLAN_MAX_PARALLEL_TOOLS'] = int(project.get('agentPlanMaxParallelTools', DEFAULT_AGENT_SETTINGS['PLAN_MAX_PARALLEL_TOOLS']))
     settings['CYPHER_MAX_RETRIES'] = project.get('agentCypherMaxRetries', DEFAULT_AGENT_SETTINGS['CYPHER_MAX_RETRIES'])
     settings['LLM_PARSE_MAX_RETRIES'] = project.get('agentLlmParseMaxRetries', DEFAULT_AGENT_SETTINGS['LLM_PARSE_MAX_RETRIES'])
-    settings['DEEP_THINK_ENABLED'] = project.get('agentDeepThinkEnabled', DEFAULT_AGENT_SETTINGS['DEEP_THINK_ENABLED'])
     settings['CREATE_GRAPH_IMAGE_ON_INIT'] = project.get('agentCreateGraphImageOnInit', DEFAULT_AGENT_SETTINGS['CREATE_GRAPH_IMAGE_ON_INIT'])
     settings['LOG_MAX_MB'] = project.get('agentLogMaxMb', DEFAULT_AGENT_SETTINGS['LOG_MAX_MB'])
     settings['LOG_BACKUP_COUNT'] = project.get('agentLogBackupCount', DEFAULT_AGENT_SETTINGS['LOG_BACKUP_COUNT'])
@@ -634,10 +682,17 @@ def is_tool_allowed_in_phase(tool_name: str, phase: str) -> bool:
     """Check if a tool is allowed in the given phase.
 
     Resolution order:
-    1. Project's TOOL_PHASE_MAP override (per-project, per-tool, set via UI).
-    2. MCP manifest default_phases (for tools declared by user-managed MCP servers).
-    3. Default to all phases (when nothing else specifies).
+    1. Foundational fs_*/job_* tools: always allowed (phase-agnostic, like query_graph).
+    2. Project's TOOL_PHASE_MAP override (per-project, per-tool, set via UI).
+    3. MCP manifest default_phases (for tools declared by user-managed MCP servers).
+    4. Default to all phases (when nothing else specifies).
     """
+    # fs_* (workspace filesystem) and job_* (background runner) are infrastructure
+    # tools - blocking them by phase makes no sense. They cannot reach the network
+    # or run scans on their own; only what runs through them is phase-relevant.
+    if tool_name.startswith("fs_") or tool_name.startswith("job_"):
+        return True
+
     tool_phase_map = get_setting('TOOL_PHASE_MAP', {})
     if tool_name in tool_phase_map:
         return phase in tool_phase_map[tool_name]
@@ -657,7 +712,15 @@ def get_allowed_tools_for_phase(phase: str) -> list:
     """Get list of tool names allowed in the given phase.
 
     Includes both TOOL_PHASE_MAP entries and MCP-manifest-declared tools whose
-    effective default phases include ``phase``.
+    effective default phases include ``phase``. Always includes foundational
+    fs_*/job_* tools (Phase-2 bypass also lives in is_tool_allowed_in_phase).
+
+    BUG #20 regression: this function previously returned only TOOL_PHASE_MAP +
+    manifest tools, omitting the foundational fs_*/job_* set entirely. The
+    LLM's available-tools enum is built from this list - so the agent never
+    saw fs_mkdir / fs_write / job_spawn / etc. and fell back to
+    `kali_shell "mkdir -p"` for filesystem ops, defeating the whole point of
+    the in-process workspace tools.
     """
     tool_phase_map = get_setting('TOOL_PHASE_MAP', {})
     allowed = {
@@ -665,6 +728,17 @@ def get_allowed_tools_for_phase(phase: str) -> list:
         for tool_name, allowed_phases in tool_phase_map.items()
         if phase in allowed_phases
     }
+
+    # Always include foundational workspace + job tools (mirror of the
+    # fs_/job_ bypass in is_tool_allowed_in_phase). Import lazily to keep
+    # this module heavyweight-dep free.
+    try:
+        from workspace_fs import FS_TOOL_NAMES
+        from job_runner import JOB_TOOL_NAMES
+        allowed.update(FS_TOOL_NAMES)
+        allowed.update(JOB_TOOL_NAMES)
+    except Exception:
+        pass
 
     # Union with manifest-declared tools that allow this phase by default
     try:

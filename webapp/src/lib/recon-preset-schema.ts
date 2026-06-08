@@ -33,6 +33,9 @@ export const reconPresetSchema = z.object({
 
   // -- Subdomain Discovery --
   subdomainDiscoveryEnabled: bool,
+  // AI surface recon hooks inside domain_recon (TXT/NS hint annotation during DNS pass)
+  domainReconAiTxtHintEnabled: bool,
+  domainReconAiNsHintEnabled: bool,
   crtshEnabled: bool,
   crtshMaxResults: int,
   hackerTargetEnabled: bool,
@@ -66,6 +69,8 @@ export const reconPresetSchema = z.object({
   naabuSkipHostDiscovery: bool,
   naabuVerifyPorts: bool,
   naabuPassiveMode: bool,
+  // AI surface recon — annotate AI-bearing ports on naabu output
+  portScanAiPortCatalogEnabled: bool,
 
   // -- Port Scanning: Masscan --
   masscanEnabled: bool,
@@ -76,6 +81,8 @@ export const reconPresetSchema = z.object({
   masscanWait: int,
   masscanRetries: int,
   masscanExcludeTargets: str,
+  // AI surface recon — same AI port catalogue applied to masscan output
+  masscanAiPortCatalogEnabled: bool,
 
   // -- Port Scanning: Nmap --
   nmapEnabled: bool,
@@ -85,6 +92,8 @@ export const reconPresetSchema = z.object({
   nmapTimeout: int,
   nmapHostTimeout: int,
   nmapParallelism: int,
+  // AI surface recon — regex nmap product/version strings against AI runtimes
+  nmapAiVersionRegexEnabled: bool,
 
   // -- HTTP Probing: httpx --
   httpxEnabled: bool,
@@ -118,6 +127,11 @@ export const reconPresetSchema = z.object({
   httpxCustomHeaders: strArr,
   httpxMatchCodes: strArr,
   httpxFilterCodes: strArr,
+  // AI surface recon — annotate captured response data against AI vendor catalogues
+  httpProbeAiHeaderScanEnabled: bool,
+  httpProbeAiFaviconHashEnabled: bool,
+  httpProbeAiTitleDetectionEnabled: bool,
+  httpProbeAiWappalyzerEnabled: bool,
 
   // -- Wappalyzer --
   wappalyzerEnabled: bool,
@@ -132,6 +146,30 @@ export const reconPresetSchema = z.object({
   bannerGrabThreads: int,
   bannerGrabMaxLength: int,
 
+  // -- Resource Enum AI Classifier (cross-cutting endpoint + parameter tagging) --
+  resourceEnumAiClassifierEnabled: bool,
+  resourceEnumAiPathClassifierEnabled: bool,
+  resourceEnumAiRagPathFlagEnabled: bool,
+  resourceEnumAiParamInjectableFlagEnabled: bool,
+  resourceEnumAiToolArgPathEnabled: bool,
+
+  // -- AI Surface Recon (central module: active AI/LLM/MCP fingerprinting) --
+  aiSurfaceReconEnabled: bool,
+  aiSurfaceReconTimeout: int,
+  aiSurfaceReconMaxWorkers: int,
+  aiSurfaceReconUserAgent: str,
+  aiSurfaceReconChatShapeProbeEnabled: bool,
+  aiSurfaceReconMcpHandshakeEnabled: bool,
+  aiSurfaceReconMcpListToolsEnabled: bool,
+  aiSurfaceReconMcpYaraEnabled: bool,
+  aiSurfaceReconOpenapiDiscoveryEnabled: bool,
+  aiSurfaceReconModelListEnabled: bool,
+  aiSurfaceReconVectorDbReadEnabled: bool,
+  aiSurfaceReconJuliusProbePackEnabled: bool,
+  aiSurfaceReconLatencyBaselineEnabled: bool,
+  aiSurfaceReconCacheEnabled: bool,
+  aiSurfaceReconProbePackVersion: str,
+
   // -- Web Crawling: Katana --
   katanaEnabled: bool,
   katanaDepth: int,
@@ -145,6 +183,27 @@ export const reconPresetSchema = z.object({
   katanaCustomHeaders: strArr,
   katanaParallelism: int,
   katanaConcurrency: int,
+
+  // -- Web Crawling: ZAP Ajax Spider --
+  zapAjaxSpiderEnabled: bool,
+  zapAjaxSpiderDockerImage: str,
+  zapAjaxSpiderSeedMode: str,
+  zapAjaxSpiderMaxDuration: int,
+  zapAjaxSpiderMaxCrawlDepth: int,
+  zapAjaxSpiderMaxCrawlStates: int,
+  zapAjaxSpiderNumberOfBrowsers: int,
+  zapAjaxSpiderBrowserId: str,
+  zapAjaxSpiderEventWait: int,
+  zapAjaxSpiderReloadWait: int,
+  zapAjaxSpiderClickDefaultElems: bool,
+  zapAjaxSpiderClickElemsOnce: bool,
+  zapAjaxSpiderRandomInputs: bool,
+  zapAjaxSpiderLogoutAvoidance: bool,
+  zapAjaxSpiderScopeCheck: str,
+  zapAjaxSpiderCustomHeaders: strArr,
+  zapAjaxSpiderExcludePatterns: strArr,
+  zapAjaxSpiderMaxUrls: int,
+  zapAjaxSpiderParallelism: int,
 
   // -- Web Crawling: Hakrawler --
   hakrawlerEnabled: bool,
@@ -164,6 +223,13 @@ export const reconPresetSchema = z.object({
   jsluiceExtractSecrets: bool,
   jsluiceConcurrency: int,
   jsluiceParallelism: int,
+  jsluiceVerifyUrls: bool,
+  jsluiceVerifyDockerImage: str,
+  jsluiceVerifyTimeout: int,
+  jsluiceVerifyRateLimit: int,
+  jsluiceVerifyThreads: int,
+  jsluiceVerifyAcceptStatus: intArr,
+  jsluiceExcludePatterns: strArr,
 
   // -- JS Analysis: JS Recon --
   jsReconEnabled: bool,
@@ -184,6 +250,7 @@ export const reconPresetSchema = z.object({
   jsReconIncludeArchivedJs: bool,
   jsReconMinConfidence: str,
   jsReconStandaloneCrawlDepth: int,
+  jsReconAiSdkDetectionEnabled: bool,
 
   // -- GraphQL Security Scanner --
   graphqlSecurityEnabled: bool,
@@ -451,6 +518,8 @@ export const RECON_PARAMETER_CATALOG = `
 
 ## Subdomain Discovery
 - subdomainDiscoveryEnabled: boolean - Master switch for subdomain discovery
+- domainReconAiTxtHintEnabled: boolean - Regex TXT/SPF/DKIM/DMARC records for AI vendor domains (anthropic.com, openai.com, huggingface.co, replicate.com, langchain.com, langfuse.com, …) and set Subdomain.ai_service_hint
+- domainReconAiNsHintEnabled: boolean - Tag Subdomain.ai_service_hint="ai-hosting-candidate" when NS records point at AI-friendly hosts (Vercel, Netlify, Replit, Modal, HuggingFace Spaces). Weak signal; never overrides a TXT hint.
 - crtshEnabled: boolean - Query crt.sh certificate transparency
 - crtshMaxResults: integer
 - hackerTargetEnabled: boolean - Query HackerTarget
@@ -484,6 +553,7 @@ export const RECON_PARAMETER_CATALOG = `
 - naabuSkipHostDiscovery: boolean
 - naabuVerifyPorts: boolean
 - naabuPassiveMode: boolean - Use Shodan InternetDB instead of active scan
+- portScanAiPortCatalogEnabled: boolean - Annotate AI-bearing ports (Ollama 11434, Qdrant 6333, Open WebUI 8080, vLLM, LiteLLM, Triton, Milvus, …) on naabu output and MERGE Technology(category=ai-*) nodes
 
 ## Port Scanning - Masscan
 - masscanEnabled: boolean - Run Masscan
@@ -494,6 +564,7 @@ export const RECON_PARAMETER_CATALOG = `
 - masscanWait: integer - Wait time in seconds
 - masscanRetries: integer
 - masscanExcludeTargets: string - Comma-separated targets to exclude
+- masscanAiPortCatalogEnabled: boolean - Same AI port catalogue applied to masscan output (uses the same catalogue as portScanAiPortCatalogEnabled)
 
 ## Port Scanning - Nmap
 - nmapEnabled: boolean - Run Nmap service detection
@@ -503,6 +574,7 @@ export const RECON_PARAMETER_CATALOG = `
 - nmapTimeout: integer - Timeout in seconds
 - nmapHostTimeout: integer - Per-host timeout in seconds
 - nmapParallelism: integer - IPs scanned concurrently by Nmap
+- nmapAiVersionRegexEnabled: boolean - Regex nmap product/version strings against AI runtimes (Ollama, vLLM, LiteLLM, TGI, Triton, llama.cpp) and set Service.ai_runtime_version
 
 ## HTTP Probing - httpx
 - httpxEnabled: boolean - Run httpx HTTP prober
@@ -536,6 +608,10 @@ export const RECON_PARAMETER_CATALOG = `
 - httpxCustomHeaders: string[] - Custom HTTP headers
 - httpxMatchCodes: string[] - Only show responses with these status codes
 - httpxFilterCodes: string[] - Hide responses with these status codes
+- httpProbeAiHeaderScanEnabled: boolean - Regex captured response headers for AI runtime/framework/proxy/SDK-client markers (x-vllm-*, anthropic-ratelimit-*, x-langchain-*, x-litellm-*, cf-aig-*, x-mcp-*, …) and set BaseURL.is_ai_framework_detected / ai_framework_name
+- httpProbeAiFaviconHashEnabled: boolean - Match captured favicon MMH3 hash against the AI frontend catalogue (Open WebUI, LibreChat, Flowise, Dify, Gradio, Streamlit, ComfyUI, …) and set BaseURL.ai_frontend_product_guess
+- httpProbeAiTitleDetectionEnabled: boolean - Regex page title against AI frontend products; fills BaseURL.ai_frontend_product_guess when favicon hash is unknown
+- httpProbeAiWappalyzerEnabled: boolean - Local Wappalyzer fingerprint additions for AI frameworks (LangChain JS marker, vLLM cookie, TGI route, …); rides existing Wappalyzer pass
 
 ## Technology Fingerprinting - Wappalyzer
 - wappalyzerEnabled: boolean
@@ -550,6 +626,30 @@ export const RECON_PARAMETER_CATALOG = `
 - bannerGrabThreads: integer
 - bannerGrabMaxLength: integer
 
+## Resource Enum AI Classifier
+- resourceEnumAiClassifierEnabled: boolean - Master toggle for the cross-cutting AI endpoint + parameter classifier that runs after the URL discovery tools (Katana, Hakrawler, GAU, FFuf, ParamSpider, Arjun, Kiterunner, jsluice). Pure regex, no extra traffic.
+- resourceEnumAiPathClassifierEnabled: boolean - Stamp Endpoint.ai_interface_type by matching path against the LLM/completion/embedding/tool-call/SSE/MCP/GraphQL catalogue (OpenAI /v1/chat/completions, Anthropic /v1/messages, Ollama /api/chat, Gemini :generateContent, MCP /mcp, LangServe /stream, etc.)
+- resourceEnumAiRagPathFlagEnabled: boolean - Stamp Endpoint.is_ai_rag_ingest=true for known RAG paths (OpenAI Vector Stores, Pinecone /vectors/upsert, Weaviate /v1/objects, Qdrant /collections/.../points). Ambiguous paths (/upload, /search, /query) only fire when parent BaseURL is AI-tagged.
+- resourceEnumAiParamInjectableFlagEnabled: boolean - Stamp Parameter.is_ai_prompt_injectable=true on AI-classified endpoints when the parameter name matches the prompt-injection catalogue (prompt, messages, system, contents, inputs, arguments, etc.)
+- resourceEnumAiToolArgPathEnabled: boolean - Reserved for the future ai_surface_recon central module — resolves Parameter.ai_tool_arg_path against discovered OpenAPI / ai-plugin.json / MCP tools/list specs. No-op today.
+
+## AI Surface Recon (central module, ACTIVE)
+- aiSurfaceReconEnabled: boolean - Master toggle. Active protocol-aware AI/LLM/MCP fingerprinting that runs after resource_enum. Benign shape-probes only (1-token chat ping, MCP handshake, read-only GETs) against hosts already showing an AI signal.
+- aiSurfaceReconTimeout: number - Per-probe HTTP timeout in seconds (default 10).
+- aiSurfaceReconMaxWorkers: number - Per-host probe concurrency (default 5; stealth halves to 2).
+- aiSurfaceReconUserAgent: string - User-Agent sent on every probe.
+- aiSurfaceReconChatShapeProbeEnabled: boolean - POST a 1-token ping to candidate chat paths and classify the response shape; confirms Endpoint.ai_interface_type + streaming.
+- aiSurfaceReconMcpHandshakeEnabled: boolean - Run the MCP initialize handshake (Streamable HTTP + legacy SSE); capture server/version/protocol/capabilities/auth.
+- aiSurfaceReconMcpListToolsEnabled: boolean - Enumerate MCP tools/resources/prompts; create a Parameter per tool arg. Off in stealth.
+- aiSurfaceReconMcpYaraEnabled: boolean - Static YARA scan of MCP tool descriptions/schemas/instructions for tool poisoning / prompt injection / exfiltration; writes Vulnerability nodes.
+- aiSurfaceReconOpenapiDiscoveryEnabled: boolean - Fetch + parse openapi.json / ai-plugin.json to extract tool schemas and capability flags; sets ai_tool_schema_ref, ai_supports_tools/vision/streaming, ai_tool_arg_path.
+- aiSurfaceReconModelListEnabled: boolean - Read /v1/models and /api/tags to guess the model family (gpt/claude/llama/...). Sets Endpoint.ai_model_family_guess.
+- aiSurfaceReconVectorDbReadEnabled: boolean - One benign read to candidate vector-DB ports (Chroma/Qdrant/Weaviate/Milvus) to confirm Technology(category=ai-vector-db). Off in stealth.
+- aiSurfaceReconJuliusProbePackEnabled: boolean - Run the vendored Julius HTTP fingerprint packs to identify AI service software and promote a Technology node.
+- aiSurfaceReconLatencyBaselineEnabled: boolean - Record p50 latency of the chat ping on each LLM endpoint (Endpoint.ai_latency_p50_ms).
+- aiSurfaceReconCacheEnabled: boolean - Cache probe responses on disk so repeat scans skip already-tested payloads.
+- aiSurfaceReconProbePackVersion: string - Pinned probe-pack identifier recorded on every annotation (default "latest").
+
 ## Web Crawling - Katana
 - katanaEnabled: boolean - Run Katana web crawler
 - katanaDepth: integer - Crawl depth
@@ -563,6 +663,27 @@ export const RECON_PARAMETER_CATALOG = `
 - katanaCustomHeaders: string[] - Custom HTTP headers for crawler
 - katanaParallelism: integer - Targets crawled simultaneously
 - katanaConcurrency: integer - Concurrent fetchers per target
+
+## Web Crawling - ZAP Ajax Spider
+- zapAjaxSpiderEnabled: boolean - Enable browser-driven Ajax Spider crawling for modern SPAs and authenticated apps
+- zapAjaxSpiderDockerImage: string - Docker image used for the ZAP Ajax Spider runner
+- zapAjaxSpiderSeedMode: string - "base_urls" or "base_urls_and_endpoints" seed selection
+- zapAjaxSpiderMaxDuration: integer - Max Ajax Spider duration per seed in minutes
+- zapAjaxSpiderMaxCrawlDepth: integer - Max crawl depth per seed
+- zapAjaxSpiderMaxCrawlStates: integer - Max crawl states, or 0 for unlimited
+- zapAjaxSpiderNumberOfBrowsers: integer - Browser instances used by Ajax Spider
+- zapAjaxSpiderBrowserId: string - ZAP browser id, such as "firefox-headless"
+- zapAjaxSpiderEventWait: integer - Event wait time in milliseconds
+- zapAjaxSpiderReloadWait: integer - Reload wait time in milliseconds
+- zapAjaxSpiderClickDefaultElems: boolean - Click default clickable elements
+- zapAjaxSpiderClickElemsOnce: boolean - Click each element only once
+- zapAjaxSpiderRandomInputs: boolean - Fill inputs with random values
+- zapAjaxSpiderLogoutAvoidance: boolean - Avoid actions likely to log out
+- zapAjaxSpiderScopeCheck: string - Ajax Spider scope check mode
+- zapAjaxSpiderCustomHeaders: string[] - Header/cookie lines for authenticated crawling
+- zapAjaxSpiderExcludePatterns: string[] - Regex patterns to exclude from Ajax crawling
+- zapAjaxSpiderMaxUrls: integer - Max in-scope URLs to ingest
+- zapAjaxSpiderParallelism: integer - Seeds crawled simultaneously
 
 ## Web Crawling - Hakrawler
 - hakrawlerEnabled: boolean
@@ -582,6 +703,13 @@ export const RECON_PARAMETER_CATALOG = `
 - jsluiceExtractSecrets: boolean
 - jsluiceConcurrency: integer
 - jsluiceParallelism: integer - Base URLs analyzed in parallel
+- jsluiceVerifyUrls: boolean - After extraction, run extracted URLs through httpx and a deny-list filter so only live, non-asset URLs reach the graph. Disable to keep all extracted URLs (legacy behavior).
+- jsluiceVerifyDockerImage: string - httpx Docker image used for verification
+- jsluiceVerifyTimeout: integer - Per-request httpx timeout in seconds
+- jsluiceVerifyRateLimit: integer - Max probe requests per second
+- jsluiceVerifyThreads: integer - httpx worker threads
+- jsluiceVerifyAcceptStatus: array of integers - HTTP status codes treated as "live" by the verifier
+- jsluiceExcludePatterns: array of strings - Deny-list patterns. Extensions like ".js" match the path suffix only; everything else is a substring match against the URL path and query.
 
 ## JavaScript Analysis - JS Recon (deep)
 - jsReconEnabled: boolean - Run deep JS analysis
@@ -602,6 +730,7 @@ export const RECON_PARAMETER_CATALOG = `
 - jsReconIncludeArchivedJs: boolean
 - jsReconMinConfidence: string - "low", "medium", "high"
 - jsReconStandaloneCrawlDepth: integer
+- jsReconAiSdkDetectionEnabled: boolean - Adversarial AI Phase 6. Scan every harvested JS bundle for AI/LLM SDK imports (OpenAI, Anthropic, Gemini, LangChain, LlamaIndex, Vercel AI SDK, MCP, vector DBs), hard-coded provider keys (sk-, sk-ant-, hf_, lsv2_, gsk_, r8_, …), dangerouslyAllowBrowser opt-in, and AI-frontend product markers in async-loaded chunks the http_probe Wappalyzer pass cannot see. Writes JsReconFinding nodes with finding_type ai-sdk-client / ai-sdk-key-literal / ai-sdk-browser-allowed / ai-frontend-detected / ai-provider-url and enriches matching Secret nodes with ai_provider. Default true.
 
 ## GraphQL Security Scanner (Group 6 - active, sends introspection probes)
 - graphqlSecurityEnabled: boolean - Master toggle for GraphQL scanning (default false)

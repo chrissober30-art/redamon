@@ -28,7 +28,54 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Import IANA service lookup (15,000+ services from official registry)
 from helpers.iana_services import get_service_name_friendly as get_service_name
 
+# AI surface recon — port catalogue lookup for AI runtimes / vector DBs / frontends
+from helpers.ai_signal_catalog import lookup_ai_port
+
 # Settings are passed from main.py to avoid multiple database queries
+
+
+def _annotate_ai_port_catalog(by_host: dict, settings: dict | None, detected_by: str) -> int:
+    """Walk ``by_host`` and annotate each port entry whose port number matches
+    the AI port catalogue. Returns the count of annotations written.
+
+    Mutates ``by_host`` in place by adding ``ai_service`` to each matching
+    entry in ``port_details``. Each annotation has the shape:
+
+        {"name": "ollama", "category": "ai-runtime", "detected_by": "naabu-ai-port"}
+
+    Ports flagged ``disambiguate=True`` in the catalogue (e.g. 8000, 8080)
+    are *not* annotated here — they share their port with many non-AI
+    services. The central ``ai_surface_recon`` module (Phase 15) will
+    confirm them via chat-shape probes; until then, http_probe's header
+    or favicon signal is the only way they get promoted.
+
+    No-op when ``settings`` is None or when the relevant toggle is off.
+    """
+    if settings is None:
+        return 0
+    # Toggle key derived from detected_by to keep the helper reusable:
+    #   "naabu-ai-port"   -> PORT_SCAN_AI_PORT_CATALOG_ENABLED
+    #   "masscan-ai-port" -> MASSCAN_AI_PORT_CATALOG_ENABLED
+    toggle_key = {
+        "naabu-ai-port":   "PORT_SCAN_AI_PORT_CATALOG_ENABLED",
+        "masscan-ai-port": "MASSCAN_AI_PORT_CATALOG_ENABLED",
+    }.get(detected_by)
+    if toggle_key is None or not settings.get(toggle_key, True):
+        return 0
+
+    annotated = 0
+    for host_info in (by_host or {}).values():
+        for entry in host_info.get("port_details") or []:
+            port = entry.get("port")
+            descriptor = lookup_ai_port(port) if port is not None else None
+            if descriptor and not descriptor.get("disambiguate"):
+                entry["ai_service"] = {
+                    "name": descriptor["name"],
+                    "category": descriptor["category"],
+                    "detected_by": detected_by,
+                }
+                annotated += 1
+    return annotated
 
 
 # =============================================================================
@@ -282,13 +329,19 @@ def build_naabu_command(targets_file: str, output_file: str, settings: dict, use
 # Result Parsing
 # =============================================================================
 
-def parse_naabu_output(output_file: str) -> Dict:
+def parse_naabu_output(output_file: str, settings: dict = None) -> Dict:
     """
     Parse Naabu JSON Lines output into structured format.
 
     Naabu outputs one JSON object per line:
     {"host":"example.com","ip":"93.184.216.34","port":80}
     {"host":"example.com","ip":"93.184.216.34","port":443}
+
+    Args:
+        output_file: Path to naabu's JSONL output file.
+        settings: Optional settings dict; when provided, AI surface recon
+            port-catalogue annotation runs against each port_details entry
+            (gated by PORT_SCAN_AI_PORT_CATALOG_ENABLED).
 
     Returns:
         Structured dictionary with by_host, by_ip, and summary sections
@@ -383,6 +436,9 @@ def parse_naabu_output(output_file: str) -> Dict:
 
     all_ports_sorted = sorted(list(all_ports))
 
+    # AI surface recon — annotate AI-bearing ports on each port_details entry
+    ai_annotations = _annotate_ai_port_catalog(by_host, settings, detected_by="naabu-ai-port")
+
     # Build summary
     summary = {
         "hosts_scanned": len(by_host),
@@ -391,7 +447,8 @@ def parse_naabu_output(output_file: str) -> Dict:
         "total_open_ports": sum(len(h["ports"]) for h in by_host.values()),
         "unique_ports": all_ports_sorted,
         "unique_port_count": len(all_ports_sorted),
-        "cdn_hosts": len([h for h in by_host.values() if h.get("is_cdn")])
+        "cdn_hosts": len([h for h in by_host.values() if h.get("is_cdn")]),
+        "ai_ports_annotated": ai_annotations,
     }
 
     return {
@@ -619,7 +676,9 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
 
         # Parse results
         print(f"[*][Naabu] Parsing results...")
-        results = parse_naabu_output(str(naabu_output))
+        results = parse_naabu_output(str(naabu_output), settings=settings)
+        if results.get("summary", {}).get("ai_ports_annotated"):
+            print(f"[+][Naabu] AI port catalog matched {results['summary']['ai_ports_annotated']} port(s)")
 
         # Build final structure
         naabu_results = {

@@ -407,21 +407,32 @@ export function handleFireteamMemberCompleted(
       const authIn = Math.max(0, Number(p.input_tokens_used ?? 0))
       const authOut = Math.max(0, Number(p.output_tokens_used ?? 0))
       const authTotal = Math.max(0, Number(p.tokens_used ?? 0))
+      const authIters = Math.max(0, Number(p.iterations_used ?? 0))
+      const authFindings = Math.max(0, Number(p.findings_count ?? 0))
       // Prefer the authoritative backend totals if non-zero; fall back to the
       // per-turn accumulation we maintained via FIRETEAM_THINKING events.
+      // For iterations the live accumulator is `latest_iteration` (set per
+      // thinking event); for findings there is no live channel, so we
+      // preserve any prior non-zero value rather than overwrite to zero.
+      // This backstops a wave-timeout payload arriving with all zeros from
+      // older backends or a future regression.
       const finalIn = authIn > 0 ? authIn : (m.input_tokens_used ?? 0)
       const finalOut = authOut > 0 ? authOut : (m.output_tokens_used ?? 0)
       const finalTotal =
         authTotal > 0 ? authTotal : finalIn + finalOut || (m.tokens_used ?? 0)
+      const finalIters =
+        authIters > 0 ? authIters : (m.latest_iteration ?? m.iterations_used ?? 0)
+      const finalFindings =
+        authFindings > 0 ? authFindings : (m.findings_count ?? 0)
       return {
         ...m,
         status: p.status,
         completed_at: new Date(),
-        iterations_used: p.iterations_used,
+        iterations_used: finalIters,
         tokens_used: finalTotal,
         input_tokens_used: finalIn,
         output_tokens_used: finalOut,
-        findings_count: p.findings_count,
+        findings_count: finalFindings,
         completion_reason: undefined,
         error_message: p.error_message ?? undefined,
       }

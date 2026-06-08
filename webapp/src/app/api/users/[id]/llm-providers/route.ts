@@ -16,6 +16,7 @@ function maskProvider(provider: Record<string, unknown>): Record<string, unknown
     apiKey: maskSecret(provider.apiKey as string),
     awsAccessKeyId: maskSecret(provider.awsAccessKeyId as string),
     awsSecretKey: maskSecret(provider.awsSecretKey as string),
+    awsBearerToken: maskSecret(provider.awsBearerToken as string),
   }
 }
 
@@ -84,6 +85,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         awsRegion: body.awsRegion || 'us-east-1',
         awsAccessKeyId: body.awsAccessKeyId || '',
         awsSecretKey: body.awsSecretKey || '',
+        awsBearerToken: body.awsBearerToken || '',
       },
     })
 

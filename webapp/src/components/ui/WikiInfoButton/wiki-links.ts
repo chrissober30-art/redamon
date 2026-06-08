@@ -49,6 +49,7 @@ export const TOOL_WIKI: Record<string, { page: string; anchor?: string }> = {
 
   // Resource Enumeration
   Katana:             { page: 'Project-Settings-Reference', anchor: 'web-crawler-katana' },
+  ZapAjaxSpider:      { page: 'Project-Settings-Reference', anchor: 'web-crawler-zap-ajax-spider' },
   Hakrawler:          { page: 'Project-Settings-Reference', anchor: 'web-crawler-hakrawler' },
   Jsluice:            { page: 'Project-Settings-Reference', anchor: 'javascript-analysis-jsluice' },
   Ffuf:               { page: 'Project-Settings-Reference', anchor: 'directory-fuzzer-ffuf' },
@@ -59,6 +60,9 @@ export const TOOL_WIKI: Record<string, { page: string; anchor?: string }> = {
 
   // JS Recon
   JsRecon:            { page: 'JS-Reconnaissance' },
+
+  // AI Surface Recon (Phase 4.5)
+  AiSurfaceRecon:     { page: 'Adversarial-AI-Recon', anchor: 'ai-surface-recon-active-probing' },
 
   // Vulnerability Scanning
   Nuclei:             { page: 'Project-Settings-Reference', anchor: 'vulnerability-scanner-nuclei' },
@@ -89,6 +93,7 @@ export const SECTION_WIKI: Record<string, { page: string; anchor?: string }> = {
   ToolMatrix:       { page: 'AI-Agent-Guide' },
   AttackSkills:     { page: 'Agent-Skills' },
   CypherFixSettings:{ page: 'CypherFix-Automated-Remediation' },
+  EndpointAiClassifier: { page: 'Adversarial-AI-Recon', anchor: 'endpoint-ai-classifier' },
   Github:           { page: 'GitHub-Secret-Hunting' },
   Trufflehog:       { page: 'TruffleHog-Secret-Scanning' },
   GvmScan:          { page: 'GVM-Vulnerability-Scanning' },

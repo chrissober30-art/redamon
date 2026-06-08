@@ -153,6 +153,9 @@ export interface GraphInputs {
   existing_baseurls?: string[]
   existing_endpoints_count?: number
   existing_graphql_endpoints_count?: number
+  existing_ai_endpoints_count?: number
+  existing_mcp_endpoints_count?: number
+  existing_vector_db_services_count?: number
   existing_external_domains_count?: number
   source: 'graph' | 'settings'
 }
@@ -175,7 +178,7 @@ export interface PartialReconParams {
   settings_overrides?: Record<string, unknown>
 }
 
-export const PARTIAL_RECON_SUPPORTED_TOOLS = new Set(['SubdomainDiscovery', 'Naabu', 'Masscan', 'Nmap', 'Httpx', 'Katana', 'Hakrawler', 'Jsluice', 'Gau', 'Kiterunner', 'ParamSpider', 'Arjun', 'Ffuf', 'JsRecon', 'GraphqlScan', 'Nuclei', 'SubdomainTakeover', 'VhostSni', 'SecurityChecks', 'Shodan', 'Urlscan', 'Uncover', 'OsintEnrichment'])
+export const PARTIAL_RECON_SUPPORTED_TOOLS = new Set(['SubdomainDiscovery', 'Naabu', 'Masscan', 'Nmap', 'Httpx', 'Katana', 'ZapAjaxSpider', 'Hakrawler', 'Jsluice', 'Gau', 'Kiterunner', 'ParamSpider', 'Arjun', 'Ffuf', 'EndpointAiClassifier', 'AiSurfaceRecon', 'JsRecon', 'GraphqlScan', 'Nuclei', 'SubdomainTakeover', 'VhostSni', 'SecurityChecks', 'Shodan', 'Urlscan', 'Uncover', 'OsintEnrichment'])
 
 export const PARTIAL_RECON_PHASE_MAP: Record<string, readonly string[]> = {
   SubdomainDiscovery: ['Subdomain Discovery'],
@@ -184,6 +187,7 @@ export const PARTIAL_RECON_PHASE_MAP: Record<string, readonly string[]> = {
   Nmap: ['Nmap Service Detection'],
   Httpx: ['HTTP Probing'],
   Katana: ['Resource Enumeration'],
+  ZapAjaxSpider: ['Resource Enumeration'],
   Hakrawler: ['Resource Enumeration'],
   Jsluice: ['Resource Enumeration'],
   Gau: ['Resource Enumeration'],
@@ -191,6 +195,8 @@ export const PARTIAL_RECON_PHASE_MAP: Record<string, readonly string[]> = {
   ParamSpider: ['Resource Enumeration'],
   Arjun: ['Resource Enumeration'],
   Ffuf: ['Resource Enumeration'],
+  EndpointAiClassifier: ['Endpoint AI Classification'],
+  AiSurfaceRecon: ['AI Surface Recon'],
   JsRecon: ['JS Recon'],
   GraphqlScan: ['Endpoint Discovery', 'Introspection Testing', 'Schema Analysis', 'Vulnerability Detection'],
   Nuclei: ['Vulnerability Scanning'],

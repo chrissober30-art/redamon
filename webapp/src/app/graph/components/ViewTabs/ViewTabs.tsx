@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useState, useRef, useEffect, useCallback } from 'react'
-import { Waypoints, Table2, Terminal, Shield, Search, Download, Loader2, SquareTerminal, Filter, Plus, Trash2, X, ChevronDown, Code, Target, Zap, Flag, Key, Server, Boxes, LockKeyhole, Bug, Network, Mail, ShieldAlert, Package, History, Layers } from 'lucide-react'
+import { Waypoints, Table2, Terminal, Shield, Search, Download, Loader2, SquareTerminal, Filter, Plus, Trash2, X, ChevronDown, Code, Target, Zap, Flag, Key, Server, Boxes, LockKeyhole, Bug, Network, Mail, ShieldAlert, Package, History, Layers, Bot, Radiation } from 'lucide-react'
 import { Toggle } from '@/components/ui'
 import { AUTO_2D_THRESHOLD } from '../GraphCanvas'
 import styles from './ViewTabs.module.css'
@@ -12,6 +12,8 @@ export type TableViewMode =
   | 'nodeDetails'
   | 'all'
   | 'jsRecon'
+  | 'aiSurface'
+  | 'aiRisk'
   | 'killChain'
   | 'blastRadius'
   | 'takeover'
@@ -30,6 +32,8 @@ const TABLE_MODE_LABELS: Record<TableViewMode, string> = {
   nodeDetails: 'Node Inspector',
   all: 'All Nodes',
   jsRecon: 'JS Recon',
+  aiSurface: 'AI Surface',
+  aiRisk: 'AI Risk (LLM)',
   killChain: 'Kill-Chain',
   blastRadius: 'Blast Radius',
   takeover: 'Takeover',
@@ -281,6 +285,8 @@ export const ViewTabs = memo(function ViewTabs({
               const Icon =
                 mode === 'nodeDetails' ? Layers
                 : mode === 'jsRecon' ? Code
+                : mode === 'aiSurface' ? Bot
+                : mode === 'aiRisk' ? Radiation
                 : mode === 'killChain' ? Target
                 : mode === 'blastRadius' ? Zap
                 : mode === 'takeover' ? Flag
@@ -324,6 +330,18 @@ export const ViewTabs = memo(function ViewTabs({
                 onClick={() => { onTableViewModeChange?.('jsRecon'); setTableMenuOpen(false); onViewChange('table') }}
               >
                 <Code size={12} /> JS Recon
+              </button>
+              <button
+                className={`${styles.tableDropdownItem} ${tableViewMode === 'aiSurface' ? styles.tableDropdownItemActive : ''}`}
+                onClick={() => { onTableViewModeChange?.('aiSurface'); setTableMenuOpen(false); onViewChange('table') }}
+              >
+                <Bot size={12} /> AI Surface
+              </button>
+              <button
+                className={`${styles.tableDropdownItem} ${tableViewMode === 'aiRisk' ? styles.tableDropdownItemActive : ''}`}
+                onClick={() => { onTableViewModeChange?.('aiRisk'); setTableMenuOpen(false); onViewChange('table') }}
+              >
+                <Radiation size={12} /> AI Risk (LLM)
               </button>
               <button
                 className={`${styles.tableDropdownItem} ${tableViewMode === 'killChain' ? styles.tableDropdownItemActive : ''}`}

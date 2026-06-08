@@ -162,6 +162,59 @@ class PortMixin:
                             )
                             stats["relationships_created"] += 1
 
+                        # AI surface recon: MERGE Technology(category=ai-*) when the
+                        # port matched the AI port catalogue. Reuses the existing
+                        # USES_TECHNOLOGY (on Service) + HAS_TECHNOLOGY (on Port)
+                        # edges; new annotations are distinguished by the
+                        # detected_by relationship property.
+                        ai_service = port_info.get("ai_service") or {}
+                        ai_name = ai_service.get("name")
+                        ai_category = ai_service.get("category")
+                        ai_detected_by = ai_service.get("detected_by", "naabu-ai-port")
+                        if ai_name and ai_category and ip_addr:
+                            try:
+                                session.run(
+                                    """
+                                    MERGE (t:Technology {name: $name, user_id: $user_id, project_id: $project_id})
+                                    SET t.category = $category,
+                                        t.source = 'ai-port-catalog',
+                                        t.updated_at = datetime()
+                                    """,
+                                    name=ai_name, category=ai_category,
+                                    user_id=user_id, project_id=project_id,
+                                )
+                                stats.setdefault("ai_technologies_created", 0)
+                                stats["ai_technologies_created"] += 1
+
+                                # Link Port -> Technology
+                                session.run(
+                                    """
+                                    MATCH (p:Port {number: $port_number, protocol: $protocol, ip_address: $ip_addr, user_id: $user_id, project_id: $project_id})
+                                    MATCH (t:Technology {name: $name, user_id: $user_id, project_id: $project_id})
+                                    MERGE (p)-[r:HAS_TECHNOLOGY]->(t)
+                                    SET r.detected_by = $detected_by
+                                    """,
+                                    port_number=port_number, protocol=protocol, ip_addr=ip_addr,
+                                    name=ai_name, detected_by=ai_detected_by,
+                                    user_id=user_id, project_id=project_id,
+                                )
+                                # Link Service -> Technology when we have a Service
+                                if service_name:
+                                    session.run(
+                                        """
+                                        MATCH (svc:Service {name: $service_name, port_number: $port_number, ip_address: $ip_addr, user_id: $user_id, project_id: $project_id})
+                                        MATCH (t:Technology {name: $name, user_id: $user_id, project_id: $project_id})
+                                        MERGE (svc)-[r:USES_TECHNOLOGY]->(t)
+                                        SET r.detected_by = $detected_by
+                                        """,
+                                        service_name=service_name, port_number=port_number, ip_addr=ip_addr,
+                                        name=ai_name, detected_by=ai_detected_by,
+                                        user_id=user_id, project_id=project_id,
+                                    )
+                                stats["relationships_created"] += 1
+                            except Exception as e:
+                                stats["errors"].append(f"AI Technology {ai_name!r} on port {port_number} failed: {e}")
+
                     except Exception as e:
                         stats["errors"].append(f"Port {port_number}/{protocol} on {ip_addr} failed: {e}")
 
@@ -236,6 +289,9 @@ class PortMixin:
                     product = pd.get("product")
                     version = pd.get("version")
                     cpe = pd.get("cpe")
+                    # AI surface recon: set by parse_nmap_xml when product/version
+                    # matches the AI runtime catalogue (Ollama, vLLM, LiteLLM, …)
+                    ai_runtime_version = pd.get("ai_runtime_version")
 
                     if not port_number or not ip_addr:
                         continue
@@ -272,6 +328,22 @@ class PortMixin:
                                 user_id=user_id, project_id=project_id
                             )
                             stats["services_enriched"] += 1
+
+                        # AI surface recon: promote ai_runtime_version onto the Service
+                        # so downstream CVE lookups can join against AI library CVE clusters.
+                        if ai_runtime_version:
+                            session.run(
+                                """
+                                MATCH (svc:Service {port_number: $port_number, ip_address: $ip_addr, user_id: $user_id, project_id: $project_id})
+                                SET svc.ai_runtime_version = $ai_runtime_version,
+                                    svc.updated_at = datetime()
+                                """,
+                                port_number=port_number, ip_addr=ip_addr,
+                                ai_runtime_version=ai_runtime_version,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats.setdefault("ai_runtime_versions_set", 0)
+                            stats["ai_runtime_versions_set"] += 1
 
                     except Exception as e:
                         stats["errors"].append(f"Port {port_number} enrich failed: {e}")

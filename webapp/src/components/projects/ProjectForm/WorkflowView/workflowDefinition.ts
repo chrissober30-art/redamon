@@ -31,6 +31,7 @@ export const WORKFLOW_TOOLS: WorkflowToolDef[] = [
 
   // Group 5 - Resource Enumeration
   { id: 'Katana',      label: 'Katana',      enabledField: 'katanaEnabled',      group: 5, badge: 'active' },
+  { id: 'ZapAjaxSpider', label: 'ZAP Ajax Spider', enabledField: 'zapAjaxSpiderEnabled', group: 5, badge: 'active' },
   { id: 'Hakrawler',   label: 'Hakrawler',   enabledField: 'hakrawlerEnabled',   group: 5, badge: 'active' },
   { id: 'Jsluice',     label: 'jsluice',     enabledField: 'jsluiceEnabled',     group: 5, badge: 'both' },
   { id: 'Ffuf',        label: 'FFuf',        enabledField: 'ffufEnabled',        group: 5, badge: 'active' },
@@ -38,9 +39,12 @@ export const WORKFLOW_TOOLS: WorkflowToolDef[] = [
   { id: 'ParamSpider', label: 'ParamSpider', enabledField: 'paramspiderEnabled', group: 5, badge: 'passive' },
   { id: 'Kiterunner',  label: 'Kiterunner',  enabledField: 'kiterunnerEnabled',  group: 5, badge: 'active' },
   { id: 'Arjun',       label: 'Arjun',       enabledField: 'arjunEnabled',       group: 5, badge: 'active' },
+  { id: 'EndpointAiClassifier', label: 'Endpoint AI Classifier',
+    enabledField: 'resourceEnumAiClassifierEnabled', group: 5, badge: 'passive' },
 
   // Group 5.5 - JS Recon
   { id: 'JsRecon', label: 'JS Recon', enabledField: 'jsReconEnabled', group: 5.5, badge: 'both' },
+  { id: 'AiSurfaceRecon', label: 'AI Surface Recon', enabledField: 'aiSurfaceReconEnabled', group: 5.5, badge: 'active' },
 
   // Group 6 - Vulnerability Scanning
   { id: 'Nuclei',             label: 'Nuclei',             enabledField: 'nucleiEnabled',               group: 6, badge: 'active' },

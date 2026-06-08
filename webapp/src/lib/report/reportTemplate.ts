@@ -443,6 +443,7 @@ ${renderSecrets(data)}
 ${renderJsRecon(data)}
 ${renderGraphqlScan(data)}
 ${renderVhostSni(data)}
+${renderAiSurface(data)}
 ${renderOtx(data)}
 ${renderAttackChains(data)}
 ${renderFireteams(data)}
@@ -507,6 +508,10 @@ function renderTOC(data: ReportData): string {
   }
   if (data.vhostSni.totalFindings > 0 || data.vhostSni.ipsTested > 0) {
     dynamicSections.push({ id: 'vhost-sni', label: 'VHost & SNI Enumeration' })
+  }
+  if (data.aiSurface.totalAiEndpoints > 0 || data.aiSurface.ragIngestEndpoints > 0 || data.aiSurface.promptInjectableParams > 0
+      || data.aiSurface.mcpServers > 0 || data.aiSurface.mcpPoisoningFindings > 0 || data.aiSurface.vectorDbs > 0) {
+    dynamicSections.push({ id: 'ai-surface', label: 'AI Surface' })
   }
   if (data.otx.totalPulses > 0 || data.otx.totalMalware > 0) {
     dynamicSections.push({ id: 'otx', label: 'OTX Threat Intelligence' })
@@ -1174,7 +1179,7 @@ function renderJsRecon(data: ReportData): string {
 <div class="page-break"></div>
 <div class="section" id="js-recon">
   <h2 class="section-title">JavaScript Reconnaissance</h2>
-  <p style="margin-bottom:12px">Deep analysis of JavaScript files revealed ${js.totalFindings} finding(s) across dependency confusion risks, source map exposure, DOM sinks, developer comments, and framework detection.</p>
+  <p style="margin-bottom:12px">Deep analysis of JavaScript files revealed ${js.totalFindings} finding(s) across dependency confusion risks, source map exposure, DOM sinks, developer comments, framework detection, and AI/LLM SDK exposure (vendor SDK imports, hard-coded provider API keys, the dangerouslyAllowBrowser opt-in, AI-frontend product markers, and provider base URLs visible in shipped JS chunks).</p>
   <div class="two-col">
     <div>
       <h3>By Severity</h3>
@@ -1345,6 +1350,63 @@ function renderVhostSni(data: ReportData): string {
   ${vs.findings.length >= 50 ? '<p class="muted">Showing first 50 findings.</p>' : ''}` : '<p class="muted">No anomalies — all candidates returned the same response as the bare IP baseline.</p>'}
 </div>`
 }
+
+function renderAiSurface(data: ReportData): string {
+  const ai = data.aiSurface
+  if (ai.totalAiEndpoints === 0 && ai.ragIngestEndpoints === 0 && ai.promptInjectableParams === 0
+      && ai.mcpServers === 0 && ai.mcpPoisoningFindings === 0 && ai.vectorDbs === 0) return ''
+
+  const typeRows = ai.byInterfaceType.map(t =>
+    `<tr><td>${t.interfaceType}</td><td style="text-align: right">${t.count}</td></tr>`
+  ).join('\n')
+
+  const findingRows = ai.findings.map(f => {
+    const promptParamsLabel = f.hasPromptParams
+      ? `<span style="color: #ef4444; font-weight: 600">${f.promptInjectableParams.length}</span> (${f.promptInjectableParams.slice(0, 4).join(', ')}${f.promptInjectableParams.length > 4 ? ', ...' : ''})`
+      : '—'
+    const rag = f.isRagIngest ? '<span style="color: #f59e0b; font-weight: 600">yes</span>' : '—'
+    return `<tr>
+      <td><code>${f.baseUrl}</code></td>
+      <td><code>${f.path}</code></td>
+      <td>${f.interfaceType}</td>
+      <td style="text-align: center">${rag}</td>
+      <td>${promptParamsLabel}</td>
+    </tr>`
+  }).join('\n')
+
+  return `<div class="page-break"></div>
+<section id="ai-surface">
+  <h2>AI Surface</h2>
+  <p class="lead">
+    Endpoints classified by the AI surface recon module as carrying a known LLM,
+    embedding, tool-call, MCP, or RAG interface. Each finding indicates an attack
+    surface that the adversarial AI tooling (prompt injection, model extraction,
+    RAG corpus poisoning, tool misuse) can probe further.
+  </p>
+
+  <div class="kpi-grid">
+    <div class="kpi"><div class="kpi-value">${ai.totalAiEndpoints}</div><div class="kpi-label">AI Endpoints</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.ragIngestEndpoints}</div><div class="kpi-label">RAG Ingest Endpoints</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.promptInjectableParams}</div><div class="kpi-label">Prompt-Injectable Params</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.mcpServers}</div><div class="kpi-label">MCP Servers</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.mcpPoisoningFindings}</div><div class="kpi-label">MCP Tool-Poisoning Findings</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.vectorDbs}</div><div class="kpi-label">Vector DBs</div></div>
+  </div>
+
+  ${ai.modelFamilies.length ? `<p><strong>Model families detected:</strong> ${ai.modelFamilies.map(f => `<code>${f}</code>`).join(', ')}</p>` : ''}
+
+  ${typeRows ? `<h3>Distribution by Interface Type</h3>
+  <table><thead><tr><th>Interface Type</th><th style="text-align: right">Endpoints</th></tr></thead>
+  <tbody>${typeRows}</tbody></table>` : ''}
+
+  ${findingRows ? `<h3>Detected Endpoints (top 50)</h3>
+  <table><thead><tr>
+    <th>Base URL</th><th>Path</th><th>Type</th><th>RAG</th><th>Prompt-Injectable Params</th>
+  </tr></thead>
+  <tbody>${findingRows}</tbody></table>` : ''}
+</section>`
+}
+
 
 function renderOtx(data: ReportData): string {
   const otx = data.otx

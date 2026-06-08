@@ -614,8 +614,10 @@ def detect_kiterunner_methods(
                 for url in urls:
                     f.write(f"{url}\n")
 
+            # --net=host always — httpx verifier must reach loopback / local-lab
+            # targets. See recon/helpers/resource_enum/katana_helpers.py.
             cmd = [
-                "docker", "run", "--rm",
+                "docker", "run", "--rm", "--net=host",
                 "-v", f"{temp_path}:/data",
                 verify_docker_image,
                 "-l", "/data/urls.txt",
@@ -689,8 +691,10 @@ def detect_kiterunner_methods(
                     for url in urls:
                         f.write(f"{url}\n")
 
+                # --net=host always — httpx verifier must reach loopback / local-lab
+                # targets. See recon/helpers/resource_enum/katana_helpers.py.
                 cmd = [
-                    "docker", "run", "--rm",
+                    "docker", "run", "--rm", "--net=host",
                     "-v", f"{temp_path}:/data",
                     verify_docker_image,
                     "-l", f"/data/urls_{method.lower()}.txt",

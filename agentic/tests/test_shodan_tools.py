@@ -476,12 +476,12 @@ class TestToolRegistryEntries(unittest.TestCase):
         self.assertIn("action", entry["args_format"])
 
     def test_shodan_positioned_after_web_search(self):
-        """shodan comes after web_search in registry order."""
+        """shodan comes after web_search in registry order (relative order only)."""
         from prompts.tool_registry import TOOL_REGISTRY
         keys = list(TOOL_REGISTRY.keys())
         ws_idx = keys.index("web_search")
         sh_idx = keys.index("shodan")
-        self.assertEqual(sh_idx, ws_idx + 1)
+        self.assertGreater(sh_idx, ws_idx)
 
     def test_old_tool_names_not_in_registry(self):
         """Old shodan_search and shodan_host_info should not exist."""

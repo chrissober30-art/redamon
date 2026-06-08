@@ -412,6 +412,7 @@ class TriageOrchestrator:
             mistral_api_key=(mistral_p or {}).get("apiKey"),
             aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
             aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+            aws_bearer_token=(bedrock_p or {}).get("awsBearerToken"),
             aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
             custom_llm_config=custom_config,
         )

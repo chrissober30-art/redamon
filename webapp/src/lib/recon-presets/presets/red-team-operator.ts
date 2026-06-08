@@ -144,6 +144,7 @@ Red team operators running authorized engagements where some active probing is a
 
     // --- DISABLE Hakrawler ---
     hakrawlerEnabled: false,
+    zapAjaxSpiderEnabled: false,
 
     // --- GAU: passive archive discovery, all providers ---
     gauEnabled: true,
@@ -166,6 +167,7 @@ Red team operators running authorized engagements where some active probing is a
     // --- DISABLE JS Recon ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory fuzzing ---
     ffufEnabled: false,
 

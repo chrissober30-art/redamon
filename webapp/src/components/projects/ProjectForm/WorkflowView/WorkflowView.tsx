@@ -18,6 +18,7 @@ import { WorkflowNodeModal } from './WorkflowNodeModal'
 import { NodeListOverlay } from './NodeListOverlay'
 import { useDataNodeCounts } from './useToolNodeCounts'
 import { PARTIAL_RECON_SUPPORTED_TOOLS } from '@/lib/recon-types'
+import { useAlertModal } from '@/components/ui'
 import styles from './WorkflowView.module.css'
 
 type FormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
@@ -53,13 +54,32 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
   const { nodes: rawNodes, edges: graphEdges } = useWorkflowGraph(formData as unknown as Record<string, unknown>)
   const { dataNodeCounts } = useDataNodeCounts(projectId)
 
+  const { confirm } = useAlertModal()
+
   // Inject callbacks into tool node data
-  const handleToggle = useCallback((field: string, value: boolean) => {
+  const handleToggle = useCallback(async (field: string, value: boolean) => {
+    // Mirror the SubdomainDiscoverySection guard: turning OFF discovery with
+    // no prefixes and root not included would leave the pipeline with zero
+    // targets. Warn that Include Root Domain will be auto-enabled.
+    if (field === 'subdomainDiscoveryEnabled' && value === false) {
+      const subdomainList = (formData as { subdomainList?: string[] }).subdomainList ?? []
+      const hasPrefixes = subdomainList.some((s) => s !== '.' && s.replace(/\.$/, '').length > 0)
+      const includesRoot = subdomainList.includes('.')
+      if (!hasPrefixes && !includesRoot) {
+        const ok = await confirm(
+          'You are turning off Subdomain Discovery while no Subdomain Prefixes are set. ' +
+          'To keep the pipeline runnable, "Include Root Domain" will be automatically ' +
+          'enabled and locked ON — the root domain becomes the only scan target. Continue?',
+          'Disable Subdomain Discovery?'
+        )
+        if (!ok) return
+      }
+    }
     updateField(field as keyof FormData, value as FormData[keyof FormData])
     if (onAutoSaveField) {
       onAutoSaveField(field as keyof FormData, value as FormData[keyof FormData])
     }
-  }, [updateField, onAutoSaveField])
+  }, [updateField, onAutoSaveField, formData, confirm])
 
   const handleOpenSettings = useCallback((toolId: string) => {
     setSelectedToolId(toolId)
@@ -97,6 +117,16 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
 
   const hasHighlight = highlightedNodeId !== null
 
+  // SubdomainDiscovery is locked OFF when explicit Subdomain Prefixes are set —
+  // the backend runs in FILTERED mode and skips every discovery source.
+  const subdomainList = (formData as { subdomainList?: string[] }).subdomainList ?? []
+  const hasExplicitPrefixes = subdomainList.some(
+    (s) => s !== '.' && s.replace(/\.$/, '').length > 0
+  )
+  const subdomainDiscoveryLockReason = hasExplicitPrefixes
+    ? 'Locked: Subdomain Prefixes are set in Target Configuration, so the pipeline runs in FILTERED mode and skips all discovery sources. Clear the prefixes to re-enable.'
+    : ''
+
   const nodes = useMemo(() => {
     return rawNodes.map(node => {
       const isHighlighted = connectedNodeIds.has(node.id)
@@ -104,6 +134,7 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
 
       if (node.type === 'toolNode') {
         const toolId = (node.data as { toolId?: string }).toolId || ''
+        const isSubdomainDiscoveryLocked = toolId === 'SubdomainDiscovery' && hasExplicitPrefixes
         return {
           ...node,
           data: {
@@ -116,6 +147,8 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
             onNodeClick: handleNodeClick,
             highlighted: isHighlighted,
             dimmed,
+            toggleLocked: isSubdomainDiscoveryLocked,
+            toggleLockReason: isSubdomainDiscoveryLocked ? subdomainDiscoveryLockReason : undefined,
           },
         }
       }
@@ -145,7 +178,7 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
         },
       }
     })
-  }, [rawNodes, handleToggle, handleOpenSettings, onRunPartial, handleNodeClick, connectedNodeIds, hasHighlight, mode, projectId, dataNodeCounts, handleBadgeClick])
+  }, [rawNodes, handleToggle, handleOpenSettings, onRunPartial, handleNodeClick, connectedNodeIds, hasHighlight, mode, projectId, dataNodeCounts, handleBadgeClick, hasExplicitPrefixes, subdomainDiscoveryLockReason])
 
   const edges = useMemo(() => {
     if (!hasHighlight) return graphEdges

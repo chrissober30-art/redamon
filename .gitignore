@@ -1,3 +1,7 @@
+# Agent workspace bind-mount (per-project scratch / tool-outputs / jobs)
+agentic/agent-workspace/*
+!agentic/agent-workspace/.gitkeep
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -118,6 +122,57 @@ agentic/logs/
 agentic/cypherfix_codefix/logs/
 agentic/cypherfix_triage/logs/
 
+# Certificates & cryptographic key material
+*.pem
+*.key
+*.crt
+*.cer
+*.csr
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# SSH / PuTTY private keys (default filenames)
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.ppk
+
+# Cloud / cluster credentials
+.netrc
+.pgpass
+.kube/
+kubeconfig
+*.kubeconfig
+.aws/credentials
+
+# Password / secret stores
+*.kdbx
+*.kdb
+
+# Database dumps & local DB files
+# NOTE: *.sql is intentionally NOT ignored — Prisma migrations live in
+# webapp/prisma/migrations/**/migration.sql and must stay tracked.
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.dump
+*.sql.gz
+*.sql.bz2
+*.bak
+*.backup
+
+# Terraform state & vars (frequently contain plaintext secrets)
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+
+# Crash dumps
+*.dmp
+
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -162,6 +217,7 @@ internal/
 
 # Benchmark data
 bmark/
+validation-benchmarks/
 
 # Knowledge base runtime data
 knowledge_base/data/

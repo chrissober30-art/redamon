@@ -20,14 +20,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // Testing an unsaved config — full config in body
       config = body
     } else {
-      // Testing a saved config — fetch from DB with full keys
+      // Testing a saved config: start from DB (has full secrets), then
+      // overlay any fields the operator has edited in the form. Secret
+      // fields (apiKey, awsAccessKeyId, awsSecretKey) are returned masked
+      // by GET; if the body still carries the mask, keep the DB value.
+      // Otherwise the form-edited value wins (so a freshly typed key is
+      // actually what gets tested).
       const provider = await prisma.userLlmProvider.findFirst({
         where: { id: providerId, userId: id },
       })
       if (!provider) {
         return NextResponse.json({ error: 'Provider not found' }, { status: 404 })
       }
-      config = provider as unknown as Record<string, unknown>
+      const isMasked = (v: unknown) => typeof v === 'string' && v.startsWith('••••')
+      const SECRET_FIELDS = new Set(['apiKey', 'awsAccessKeyId', 'awsSecretKey', 'awsBearerToken'])
+      config = { ...(provider as unknown as Record<string, unknown>) }
+      for (const [key, value] of Object.entries(body)) {
+        if (SECRET_FIELDS.has(key) && isMasked(value)) {
+          // Keep DB value — user did not retype the secret
+          continue
+        }
+        config[key] = value
+      }
     }
 
     // Proxy to agent test endpoint

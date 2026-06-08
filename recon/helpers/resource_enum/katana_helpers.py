@@ -103,11 +103,18 @@ def run_katana_crawler(
         with open(url_file, 'w') as f:
             f.write('\n'.join(valid_urls))
 
-        # Build single Katana command with -list
-        cmd = ["docker", "run", "--rm"]
-
-        if use_proxy:
-            cmd.extend(["--network", "host"])
+        # Build single Katana command with -list.
+        #
+        # --net=host is ALWAYS passed so Katana can reach loopback / local-lab
+        # targets (127.0.0.1, our guinea pigs at agentic/labs/* and
+        # guinea_pigs/*, anything running on the host with `network_mode: host`).
+        # Without it, the spawned Katana container gets a fresh bridge network
+        # where `localhost` == the Katana container itself, causing every fetch
+        # to silently fail with ECONNREFUSED and Katana to sit at 0% CPU for
+        # the full crawl-duration window. For non-loopback targets host
+        # networking is equivalent to bridge — both have internet egress —
+        # so the flag is strictly an upgrade.
+        cmd = ["docker", "run", "--rm", "--net=host"]
 
         cmd.extend(["-v", "/tmp/redamon:/tmp/redamon"])
 

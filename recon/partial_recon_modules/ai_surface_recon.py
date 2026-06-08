@@ -1,0 +1,134 @@
+"""Partial recon for the AI Surface Recon central module.
+
+Re-runs the active AI/LLM/MCP probes against the AI surfaces already in the
+graph, without re-crawling. Reconstructs the minimal combined_result the full
+pipeline's run_ai_surface_recon() expects (resource_enum endpoints + http_probe
+AI flags + port_scan hosts), then reuses the SAME runner and graph mixin.
+
+Use cases: catalogue/probe-pack updated; the module was off during the original
+scan; re-confirm MCP servers / chat endpoints / vector DBs on demand.
+
+Reads:  BaseURL + Endpoint (AI-tagged) + IP/Port/Service(ai-vector-db).
+Writes: via update_graph_from_ai_surface_recon (Endpoint/Parameter/Technology
+        annotations + MCP tool-poisoning Vulnerability nodes).
+"""
+import os
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def run_ai_surface_recon(config: dict) -> None:
+    from recon.project_settings import get_settings
+    from recon.main_recon_modules.ai_surface_recon import (
+        run_ai_surface_recon as run_full,
+    )
+    from graph_db.neo4j_client import Neo4jClient
+
+    user_id = os.environ.get("USER_ID", "") or config.get("user_id", "")
+    project_id = os.environ.get("PROJECT_ID", "") or config.get("project_id", "")
+    if not (user_id and project_id):
+        print("[!][AISurfaceRecon] Missing USER_ID or PROJECT_ID — refusing to run")
+        return
+
+    print(f"\n{'=' * 50}")
+    print(f"[*][AISurfaceRecon] Partial recon: AI Surface Recon")
+    print(f"[*][AISurfaceRecon] Project: {project_id}")
+    print(f"{'=' * 50}\n")
+
+    settings = get_settings()
+    settings["AI_SURFACE_RECON_ENABLED"] = True  # operator explicitly asked
+
+    client = Neo4jClient()
+    recon_data: dict = {
+        "domain": config.get("domain", ""),
+        "metadata": {"project_id": project_id},
+        "resource_enum": {"by_base_url": {}},
+        "http_probe": {"by_url": {}},
+        "port_scan": {"by_host": {}},
+    }
+    by_base = recon_data["resource_enum"]["by_base_url"]
+
+    with client.driver.session() as session:
+        # AI-tagged endpoints (the §3a candidate set)
+        ep_rows = session.run(
+            """
+            MATCH (b:BaseURL {user_id:$u, project_id:$p})-[:HAS_ENDPOINT]->(e:Endpoint)
+            WHERE (e.ai_interface_type IS NOT NULL AND e.ai_interface_type <> 'non-llm')
+               OR e.is_ai_framework_detected = true
+            RETURN b.url AS base_url, e.path AS path,
+                   coalesce(e.method,'GET') AS method,
+                   e.ai_interface_type AS iface,
+                   coalesce(e.is_ai_framework_detected,false) AS ai_fw
+            """,
+            u=user_id, p=project_id,
+        )
+        ep_total = 0
+        for row in ep_rows:
+            ep_total += 1
+            base = row["base_url"] or "unknown"
+            path = row["path"] or "/"
+            bd = by_base.setdefault(base, {"endpoints": {}})
+            ep = bd["endpoints"].setdefault(path, {"methods": [], "parameters": {}})
+            if row["method"] not in ep["methods"]:
+                ep["methods"].append(row["method"])
+            if row["iface"]:
+                ep["ai_interface_type"] = row["iface"]
+            # populate http_probe AI flag so the host gate + static fallback fire
+            if row["ai_fw"]:
+                recon_data["http_probe"]["by_url"][base + "/"] = {
+                    "is_ai_framework_detected": True}
+
+        # Host-level AI flags for any base flagged by http_probe
+        host_rows = session.run(
+            """
+            MATCH (b:BaseURL {user_id:$u, project_id:$p})-[:HAS_ENDPOINT]->(e:Endpoint)
+            WHERE e.is_ai_framework_detected = true
+            RETURN DISTINCT b.url AS base_url
+            """,
+            u=user_id, p=project_id,
+        )
+        for row in host_rows:
+            base = row["base_url"]
+            if base:
+                recon_data["http_probe"]["by_url"][base + "/"] = {
+                    "is_ai_framework_detected": True}
+
+        # Open ports per IP. run_full's _confirm_vector_dbs filters these to AI
+        # vector-DB ports via the port catalogue and confirms with a benign read
+        # — the same catalogue-based confirmation the full pipeline performs over
+        # port_scan.by_host (which likewise contains all scanned ports).
+        vdb_rows = session.run(
+            """
+            MATCH (ip:IP {user_id:$u, project_id:$p})-[:HAS_PORT]->(p:Port)
+            RETURN DISTINCT ip.address AS ip, p.number AS port
+            """,
+            u=user_id, p=project_id,
+        )
+        for row in vdb_rows:
+            ip = row["ip"]
+            port = row["port"]
+            if ip is None or port is None:
+                continue
+            host = ip
+            rec = recon_data["port_scan"]["by_host"].setdefault(
+                host, {"ip": ip, "ports": []})
+            if port not in rec["ports"]:
+                rec["ports"].append(port)
+
+    print(f"[*][AISurfaceRecon] Loaded {ep_total} AI-tagged endpoint(s) from graph")
+    if ep_total == 0 and not recon_data["http_probe"]["by_url"]:
+        print("[-][AISurfaceRecon] No AI surfaces in graph — nothing to probe")
+        client.close()
+        return
+
+    # Reuse the exact same runner as the full pipeline.
+    recon_data = run_full(recon_data, output_file=None, settings=settings)
+
+    # Persist via the shared mixin.
+    client.update_graph_from_ai_surface_recon(recon_data, user_id, project_id)
+    client.close()
+    print(f"[+][AISurfaceRecon] Partial AI surface recon complete")

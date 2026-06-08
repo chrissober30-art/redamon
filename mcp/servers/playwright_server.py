@@ -199,6 +199,32 @@ _FORBIDDEN_ASYNC_PATTERNS = [
 ]
 
 
+# A script that opens its own `sync_playwright()` context is "self-contained":
+# it manages the full browser lifecycle itself. Wrapping such a script inside the
+# tool's own `with sync_playwright() as p:` block nests two sync contexts, and the
+# inner __enter__ aborts with the misleading "Sync API inside the asyncio loop"
+# error (the outer context's event loop is already running). Detect this case and
+# run the script raw instead of wrapping it.
+_SELF_CONTAINED_RE = re.compile(r'(?<![A-Za-z0-9_])sync_playwright\s*\(')
+
+# Preamble for self-contained scripts: force the Docker/root browser args onto every
+# launch() call so the agent does not have to remember --no-sandbox (chromium crashes
+# as root without it). Patches BrowserType.launch so it works for chromium/firefox/webkit.
+_LAUNCH_PATCH = textwrap.dedent(f"""\
+    import playwright.sync_api as _pw_sync
+    _pw_orig_launch = _pw_sync.BrowserType.launch
+    def _pw_patched_launch(self, **kw):
+        _args = list(kw.get("args") or [])
+        for _a in {BROWSER_ARGS!r}:
+            if _a not in _args:
+                _args.append(_a)
+        kw["args"] = _args
+        kw.setdefault("headless", True)
+        return _pw_orig_launch(self, **kw)
+    _pw_sync.BrowserType.launch = _pw_patched_launch
+""")
+
+
 def _execute_script_mode(user_script: str) -> str:
     """Mode 2: Run arbitrary Playwright Python script with pre-initialized browser."""
     for pattern, name in _FORBIDDEN_ASYNC_PATTERNS:
@@ -211,6 +237,11 @@ def _execute_script_mode(user_script: str) -> str:
                 f"Do NOT wrap your code in 'async def' or 'asyncio.run()' -- "
                 f"the wrapper already runs inside `with sync_playwright() as p:`."
             )
+
+    # Self-contained script (brings its own `sync_playwright()` context): run it raw
+    # so we don't nest two sync contexts. Inject browser args via a launch monkeypatch.
+    if _SELF_CONTAINED_RE.search(user_script):
+        return _run_playwright_script(_LAUNCH_PATCH + user_script, timeout=60)
 
     # Build wrapper script with correct indentation
     lines = [

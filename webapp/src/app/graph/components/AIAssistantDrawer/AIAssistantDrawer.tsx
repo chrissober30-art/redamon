@@ -44,6 +44,12 @@ import { ApiKeyModal } from './ApiKeyModal'
 // Types
 import type { AIAssistantDrawerProps } from './types'
 
+// Persisted drawer width (per-user via localStorage)
+const WIDTH_STORAGE_KEY = 'redamon-ai-assistant-drawer-width'
+const DEFAULT_WIDTH_PX = 672
+const MIN_WIDTH_PX = 360
+const MAX_WIDTH_PX = 1400
+
 export function AIAssistantDrawer({
   isOpen,
   onClose,
@@ -57,14 +63,13 @@ export function AIAssistantDrawer({
   toolPhaseMap,
   stealthMode = false,
   onToggleStealth,
-  deepThinkEnabled = true,
-  onToggleDeepThink,
   onRefetchGraph,
   isOtherChainsHidden = false,
   onToggleOtherChains,
   hasOtherChains = false,
   requireToolConfirmation = true,
   graphViewCypher,
+  onOpenFileSystem,
 }: AIAssistantDrawerProps) {
   // ─── State hooks ─────────────────────────────────────────────────────────────
   const [activeSkill, setActiveSkill] = useState<ActiveSkill | null>(null)
@@ -310,12 +315,69 @@ export function AIAssistantDrawer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
+  // ─── Drawer width (persisted per-user, drag handle on left edge) ───────────
+  const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_WIDTH_PX
+    const raw = window.localStorage.getItem(WIDTH_STORAGE_KEY)
+    if (!raw) return DEFAULT_WIDTH_PX
+    const n = parseInt(raw, 10)
+    if (!Number.isFinite(n)) return DEFAULT_WIDTH_PX
+    return Math.min(Math.max(n, MIN_WIDTH_PX), MAX_WIDTH_PX)
+  })
+  const [isResizing, setIsResizing] = useState(false)
+  const lastWidthRef = useRef<number>(drawerWidth)
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isResizing) return
+    const handleMouseMove = (e: MouseEvent) => {
+      const raw = window.innerWidth - e.clientX
+      const clamped = Math.min(Math.max(raw, MIN_WIDTH_PX), MAX_WIDTH_PX)
+      lastWidthRef.current = clamped
+      setDrawerWidth(clamped)
+    }
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      try {
+        window.localStorage.setItem(WIDTH_STORAGE_KEY, String(Math.round(lastWidthRef.current)))
+      } catch {
+        // localStorage unavailable — width still applies for the session.
+      }
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    const prevUserSelect = document.body.style.userSelect
+    const prevCursor = document.body.style.cursor
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.userSelect = prevUserSelect
+      document.body.style.cursor = prevCursor
+    }
+  }, [isResizing])
+
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div
-      className={`${styles.drawer} ${isOpen ? styles.drawerOpen : ''}`}
+      className={`${styles.drawer} ${isOpen ? styles.drawerOpen : ''} ${isResizing ? styles.drawerResizing : ''}`}
+      style={{ width: `${drawerWidth}px` }}
       aria-hidden={!isOpen}
     >
+      {isOpen && (
+        <div
+          className={styles.resizeHandle}
+          onMouseDown={handleResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize drawer"
+        />
+      )}
       <DrawerHeader
         status={status}
         reconnectAttempt={reconnectAttempt}
@@ -330,6 +392,7 @@ export function AIAssistantDrawer({
         handleDownloadMarkdown={handleDownloadMarkdown}
         chatItems={chatItems}
         onClose={onClose}
+        onOpenFileSystem={onOpenFileSystem}
         conversations={conversations}
         handleSelectConversation={handleSelectConversation}
         handleDeleteConversation={handleDeleteConversation}
@@ -344,8 +407,6 @@ export function AIAssistantDrawer({
         iterationCount={iterationCount}
         stealthMode={stealthMode}
         onToggleStealth={onToggleStealth}
-        deepThinkEnabled={deepThinkEnabled}
-        onToggleDeepThink={onToggleDeepThink}
         settingsDropdownRef={settingsDropdownRef}
         showSettingsDropdown={showSettingsDropdown}
         setShowSettingsDropdown={setShowSettingsDropdown}

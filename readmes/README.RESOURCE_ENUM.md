@@ -1416,6 +1416,12 @@ KITERUNNER_THREADS = 20
 
 ---
 
+## Related modules
+
+- **Downstream — [AI Surface Recon (Phase 4.5)](AI_SURFACE_RECON_MODULE.md):** consumes the
+  endpoints classified here (`ai_interface_type` = `llm-chat`/`mcp`/…) and
+  actively confirms the AI/LLM/MCP/vector-DB surfaces with benign protocol probes.
+
 ## References
 
 - [Katana Documentation](https://github.com/projectdiscovery/katana)

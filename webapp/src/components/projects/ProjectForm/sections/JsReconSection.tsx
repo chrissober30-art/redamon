@@ -602,6 +602,18 @@ export function JsReconSection({ data, updateField, projectId, mode, onRun }: Js
                     onChange={(checked) => updateField('jsReconDevComments' as any, checked)}
                   />
                 </div>
+                <div className={styles.toggleRow}>
+                  <div>
+                    <span className={styles.toggleLabel}>AI SDK Detection</span>
+                    <p className={styles.toggleDescription}>
+                      Adversarial AI Phase 6. Scan every harvested JS bundle for AI/LLM SDK imports (OpenAI, Anthropic, Gemini, LangChain, LlamaIndex, Vercel AI SDK, MCP, vector DBs), hard-coded provider keys (sk-, sk-ant-, hf_, lsv2_, gsk_, r8_, …), the OpenAI/Anthropic dangerouslyAllowBrowser opt-in, and AI-frontend product markers in async-loaded chunks the httpx Wappalyzer pass cannot see. Writes JsReconFinding nodes with finding_type ai-sdk-* and enriches matching Secret nodes with ai_provider. Pure regex, no extra traffic.
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={(data as any).jsReconAiSdkDetectionEnabled ?? true}
+                    onChange={(checked) => updateField('jsReconAiSdkDetectionEnabled' as any, checked)}
+                  />
+                </div>
               </div>
 
               {/* Key Validation */}

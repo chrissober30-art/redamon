@@ -142,18 +142,30 @@ class DomainMixin:
 
                     # Create Subdomain node
                     status = subdomain_status_map.get(subdomain)  # None for unresolved subs
+                    # AI surface recon: lap-1 TXT/NS hint set by domain_recon._annotate_ai_service_hint
+                    ai_service_hint = subdomain_info.get("ai_service_hint")
                     session.run(
                         """
                         MERGE (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
                         SET s.has_dns_records = $has_records,
                             s.status = coalesce(s.status, $status),
                             s.discovered_at = coalesce(s.discovered_at, datetime()),
-                            s.updated_at = datetime()
+                            s.updated_at = datetime(),
+                            s.ai_service_hint = CASE
+                                WHEN $ai_service_hint IS NULL THEN s.ai_service_hint
+                                WHEN s.ai_service_hint IS NULL THEN $ai_service_hint
+                                WHEN $ai_service_hint = 'ai-hosting-candidate' AND s.ai_service_hint <> 'ai-hosting-candidate' THEN s.ai_service_hint
+                                ELSE $ai_service_hint
+                            END
                         """,
                         name=subdomain, user_id=user_id, project_id=project_id,
-                        has_records=has_records, status=status
+                        has_records=has_records, status=status,
+                        ai_service_hint=ai_service_hint,
                     )
                     stats["subdomains_created"] += 1
+                    if ai_service_hint:
+                        stats.setdefault("ai_service_hint_set", 0)
+                        stats["ai_service_hint_set"] += 1
 
                     # Create relationships: Subdomain -[:BELONGS_TO]-> Domain and Domain -[:HAS_SUBDOMAIN]-> Subdomain
                     session.run(
@@ -336,6 +348,10 @@ class DomainMixin:
                     }
                     if actual_ip:
                         sub_props["actual_ip"] = actual_ip
+                    # AI surface recon (lap-1): TXT/NS hint set by domain_recon._annotate_ai_service_hint
+                    ai_hint = sub_dns.get("ai_service_hint")
+                    if ai_hint:
+                        sub_props["ai_service_hint"] = ai_hint
 
                     session.run(
                         """

@@ -25,6 +25,7 @@ from graph_db.mixins.recon.js_recon_mixin import JsReconMixin
 from graph_db.mixins.recon.user_input_mixin import UserInputMixin
 from graph_db.mixins.recon.takeover_mixin import TakeoverMixin
 from graph_db.mixins.recon.vhost_sni_mixin import VhostSniMixin
+from graph_db.mixins.recon.ai_surface_recon_mixin import AiSurfaceReconMixin
 
 
 class ReconMixin(
@@ -37,5 +38,6 @@ class ReconMixin(
     UserInputMixin,
     TakeoverMixin,
     VhostSniMixin,
+    AiSurfaceReconMixin,
 ):
     pass

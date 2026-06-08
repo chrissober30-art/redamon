@@ -83,6 +83,10 @@ class JsReconMixin:
                 url = ep.get("source_js", "")
                 if url:
                     all_source_urls.add(url)
+            for f in js_recon_data.get("ai_sdk_findings", []):
+                url = f.get("source_url", "")
+                if url:
+                    all_source_urls.add(url)
 
             # Map source_url -> file node id
             file_node_ids = {}
@@ -593,9 +597,116 @@ class JsReconMixin:
                 except Exception as e:
                     stats["errors"].append(f"JS Recon Endpoint node failed: {e}")
 
+            # --- 4. AI SDK findings (source='js_recon', finding_type='ai-sdk-*') ---
+            # Four channels: ai-sdk-client (imports), ai-sdk-key-literal (keys),
+            # ai-sdk-browser-allowed (dangerouslyAllowBrowser), ai-frontend-detected
+            # (product markers), and ai-provider-url (contextual URLs).
+            # For ai-sdk-key-literal findings we ALSO enrich any matching Secret
+            # node with `ai_provider`/`ai_finding_id` — value-prefixed reuse per
+            # AI_SURFACE_RECON.md §7.2, so existing Secret-based queries pick up
+            # AI context without a parallel taxonomy.
+            stats["ai_sdk_findings_created"] = 0
+            stats["ai_sdk_secrets_enriched"] = 0
+            created_ai_sdk = set()
+            for finding in js_recon_data.get("ai_sdk_findings", []):
+                try:
+                    fid = finding.get("id")
+                    if not fid:
+                        continue
+                    node_id = f"jsrf-{user_id}-{project_id}-{fid}"
+                    if node_id in created_ai_sdk:
+                        continue
+                    created_ai_sdk.add(node_id)
+
+                    source_url = finding.get("source_url", "")
+                    base_url = _derive_base_url(source_url)
+                    category = finding.get("category", "ai-sdk-client")
+                    sdk_name = finding.get("sdk_name", "unknown")
+
+                    props = {
+                        "id": node_id,
+                        "user_id": user_id,
+                        "project_id": project_id,
+                        "finding_type": category,
+                        "severity": finding.get("severity", "info"),
+                        "confidence": finding.get("confidence", "medium"),
+                        "title": sdk_name,
+                        "detail": finding.get("matched_text", "")[:500],
+                        "evidence": finding.get("matched_text", "")[:500],
+                        "sample": finding.get("sample", ""),
+                        "sdk_name": sdk_name,
+                        "ai_provider": sdk_name,
+                        "byte_offset": int(finding.get("byte_offset", 0)),
+                        "source_url": source_url,
+                        "base_url": base_url or 'upload',
+                        "source": "js_recon",
+                        "detection_method": finding.get("detection_method", "ai_sdk_catalogue"),
+                        "discovered_at": scan_ts,
+                    }
+                    session.run(
+                        "MERGE (jf:JsReconFinding {id: $id}) SET jf += $props, jf.updated_at = datetime()",
+                        id=node_id, props=props
+                    )
+                    stats["ai_sdk_findings_created"] += 1
+
+                    if _link_to_file(session, node_id, 'JsReconFinding', 'HAS_JS_FINDING', source_url):
+                        stats["relationships_created"] += 1
+
+                    # Enrich any pre-existing Secret found in the same JS file
+                    # whose stored value overlaps this AI key literal. Anchors:
+                    #   1. Use the captured key value (no surrounding context),
+                    #      not matched_text — matched_text can include the
+                    #      whole "apiKey:'sk-...'" wrapper and risk symmetric
+                    #      CONTAINS spuriously matching unrelated short secrets.
+                    #   2. Require the Secret's matched_text to start with a
+                    #      known AI-key prefix so we never enrich a Stripe /
+                    #      Slack / AWS literal that happens to live in the
+                    #      same byte range.
+                    captured = finding.get("captured_value", "") or ""
+                    if (category == "ai-sdk-key-literal" and source_url
+                            and captured and len(captured) >= 12):
+                        result = session.run(
+                            """
+                            MATCH (s:Secret {source_url: $source_url, user_id: $uid, project_id: $pid})
+                            WHERE (s.matched_text STARTS WITH 'sk-'
+                                OR s.matched_text STARTS WITH 'hf_'
+                                OR s.matched_text STARTS WITH 'lsv2_'
+                                OR s.matched_text STARTS WITH 'gsk_'
+                                OR s.matched_text STARTS WITH 'r8_'
+                                OR s.matched_text STARTS WITH 'pcsk_'
+                                OR s.matched_text STARTS WITH 'pplx-'
+                                OR s.matched_text STARTS WITH 'xai-'
+                                OR s.matched_text STARTS WITH 'csk-'
+                                OR s.matched_text STARTS WITH 'tgp_'
+                                OR s.matched_text STARTS WITH 'pa-'
+                                OR s.matched_text STARTS WITH 'AIzaSy'
+                                OR s.matched_text STARTS WITH 'co_'
+                                OR s.matched_text STARTS WITH 'rpa_'
+                                OR s.matched_text STARTS WITH 'pk-lf-'
+                                OR s.matched_text STARTS WITH 'fw_')
+                              AND (s.matched_text CONTAINS $needle
+                                   OR $needle CONTAINS s.matched_text)
+                            SET s.ai_provider = $sdk_name,
+                                s.ai_finding_id = $ai_finding_id,
+                                s.updated_at = datetime()
+                            RETURN count(s) AS enriched
+                            """,
+                            source_url=source_url, uid=user_id, pid=project_id,
+                            needle=captured,
+                            sdk_name=sdk_name, ai_finding_id=node_id,
+                        ).single()
+                        if result and result.get("enriched"):
+                            stats["ai_sdk_secrets_enriched"] += int(result["enriched"])
+
+                except Exception as e:
+                    stats["errors"].append(f"AI SDK finding failed: {e}")
+
         print(f"[+][graph-db] JS Recon: {stats['file_nodes_created']} files, "
               f"{stats['findings_created']} findings, {stats['secrets_created']} secrets, "
-              f"{stats['endpoints_created']} endpoints, {stats['relationships_created']} relationships")
+              f"{stats['endpoints_created']} endpoints, "
+              f"{stats.get('ai_sdk_findings_created', 0)} AI SDK findings "
+              f"({stats.get('ai_sdk_secrets_enriched', 0)} Secret nodes enriched), "
+              f"{stats['relationships_created']} relationships")
         if stats["errors"]:
             print(f"[!][graph-db] JS Recon: {len(stats['errors'])} errors")
 

@@ -64,14 +64,12 @@ def run_katana_crawler(
         if not base_url.startswith(('http://', 'https://')):
             continue
             
-        # Build Katana command
+        # Build Katana command. --net=host always — required for loopback /
+        # local-lab targets, equivalent to bridge for external targets. See
+        # recon/helpers/resource_enum/katana_helpers.py for the long comment.
         cmd = [
-            "docker", "run", "--rm",
+            "docker", "run", "--rm", "--net=host",
         ]
-
-        # Add network host mode for Tor proxy access
-        if use_proxy:
-            cmd.extend(["--network", "host"])
 
         # Mount tmp directory for Chrome/headless browser (needed for JS crawling)
         cmd.extend(["-v", "/tmp:/tmp"])

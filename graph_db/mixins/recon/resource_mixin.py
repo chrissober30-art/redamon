@@ -88,7 +88,34 @@ class ResourceMixin:
                             if endpoint_key in created_endpoints:
                                 continue
 
-                            # Create Endpoint node
+                            # Create Endpoint node. AI surface annotations
+                            # (ai_interface_type, is_ai_rag_ingest) are set
+                            # only when the resource_enum AI classifier (lap-2)
+                            # has stamped them onto the endpoint_info dict.
+                            # Null-skip: the SET clauses below use COALESCE so
+                            # re-runs don't clobber prior values when the
+                            # classifier toggle is off.
+                            ai_interface_type = endpoint_info.get("ai_interface_type")
+                            is_ai_rag_ingest = endpoint_info.get("is_ai_rag_ingest")
+
+                            # `source` (singular) is the high-level phase tag
+                            # ('resource_enum', 'vuln_scan', 'js_recon', etc.)
+                            # used by report queries to bucket by stage.
+                            # `sources` (plural) is the fine-grained tool list
+                            # ('katana', 'hakrawler', 'zap_ajax_spider', etc.)
+                            # set by each crawler's merge_X_into_by_base_url
+                            # helper. On overlap (multiple crawlers find the
+                            # same endpoint), we union the lists instead of
+                            # clobbering — preserves prior tool attribution.
+                            # Defensive normalisation: filter blanks/None and
+                            # dedup while preserving order, so a sloppy helper
+                            # output doesn't leak dupes into the graph on the
+                            # first MERGE (the Cypher CASE branch only dedups
+                            # against EXISTING sources on subsequent merges).
+                            ep_sources = list(dict.fromkeys(
+                                s for s in (endpoint_info.get("sources") or [])
+                                if s and isinstance(s, str)
+                            ))
                             session.run(
                                 """
                                 MERGE (e:Endpoint {path: $path, method: $method, baseurl: $baseurl, user_id: $user_id, project_id: $project_id})
@@ -101,6 +128,12 @@ class ResourceMixin:
                                     e.path_param_count = $path_count,
                                     e.urls_found = $urls_found,
                                     e.source = 'resource_enum',
+                                    e.sources = CASE
+                                        WHEN e.sources IS NULL THEN $sources
+                                        ELSE e.sources + [s IN $sources WHERE NOT s IN e.sources]
+                                    END,
+                                    e.ai_interface_type = COALESCE($ai_interface_type, e.ai_interface_type),
+                                    e.is_ai_rag_ingest = COALESCE($is_ai_rag_ingest, e.is_ai_rag_ingest),
                                     e.updated_at = datetime()
                                 """,
                                 path=path, method=method, baseurl=base_url,
@@ -110,7 +143,10 @@ class ResourceMixin:
                                 query_count=param_count.get('query', 0),
                                 body_count=param_count.get('body', 0),
                                 path_count=param_count.get('path', 0),
-                                urls_found=endpoint_info.get('urls_found', 1)
+                                urls_found=endpoint_info.get('urls_found', 1),
+                                sources=ep_sources,
+                                ai_interface_type=ai_interface_type,
+                                is_ai_rag_ingest=is_ai_rag_ingest,
                             )
                             stats["endpoints_created"] += 1
                             created_endpoints.add(endpoint_key)
@@ -145,6 +181,11 @@ class ResourceMixin:
 
                             sample_values = param.get("sample_values", [])
 
+                            # AI surface annotations for this parameter, set
+                            # by the resource_enum AI classifier (lap-2) only
+                            # when the parent endpoint is AI-classified.
+                            is_ai_prompt_injectable = param.get("is_ai_prompt_injectable")
+                            ai_tool_arg_path = param.get("ai_tool_arg_path")
                             session.run(
                                 """
                                 MERGE (p:Parameter {name: $name, position: $position, endpoint_path: $endpoint_path, baseurl: $baseurl, user_id: $user_id, project_id: $project_id})
@@ -155,13 +196,17 @@ class ResourceMixin:
                                     p.sample_values = $sample_values,
                                     p.is_injectable = false,
                                     p.source = 'resource_enum',
+                                    p.is_ai_prompt_injectable = COALESCE($is_ai_prompt_injectable, p.is_ai_prompt_injectable),
+                                    p.ai_tool_arg_path = COALESCE($ai_tool_arg_path, p.ai_tool_arg_path),
                                     p.updated_at = datetime()
                                 """,
                                 name=param_name, position="query", endpoint_path=path, baseurl=base_url,
                                 user_id=user_id, project_id=project_id,
                                 param_type=param.get("type", "string"),
                                 category=param.get("category", "other"),
-                                sample_values=sample_values[:5]  # Limit sample values
+                                sample_values=sample_values[:5],  # Limit sample values
+                                is_ai_prompt_injectable=is_ai_prompt_injectable,
+                                ai_tool_arg_path=ai_tool_arg_path,
                             )
                             stats["parameters_created"] += 1
                             created_parameters.add(param_key)
@@ -190,6 +235,8 @@ class ResourceMixin:
                             if param_key in created_parameters:
                                 continue
 
+                            is_ai_prompt_injectable = param.get("is_ai_prompt_injectable")
+                            ai_tool_arg_path = param.get("ai_tool_arg_path")
                             session.run(
                                 """
                                 MERGE (p:Parameter {name: $name, position: $position, endpoint_path: $endpoint_path, baseurl: $baseurl, user_id: $user_id, project_id: $project_id})
@@ -201,6 +248,8 @@ class ResourceMixin:
                                     p.required = $required,
                                     p.is_injectable = false,
                                     p.source = 'resource_enum',
+                                    p.is_ai_prompt_injectable = COALESCE($is_ai_prompt_injectable, p.is_ai_prompt_injectable),
+                                    p.ai_tool_arg_path = COALESCE($ai_tool_arg_path, p.ai_tool_arg_path),
                                     p.updated_at = datetime()
                                 """,
                                 name=param_name, position="body", endpoint_path=path, baseurl=base_url,
@@ -208,7 +257,9 @@ class ResourceMixin:
                                 param_type=param.get("type", "string"),
                                 category=param.get("category", "other"),
                                 input_type=param.get("input_type", "text"),
-                                required=param.get("required", False)
+                                required=param.get("required", False),
+                                is_ai_prompt_injectable=is_ai_prompt_injectable,
+                                ai_tool_arg_path=ai_tool_arg_path,
                             )
                             stats["parameters_created"] += 1
                             created_parameters.add(param_key)

@@ -34,7 +34,6 @@ def _make_settings(**overrides):
         'POST_EXPL_PHASE_TYPE': 'statefull',
         'MAX_ITERATIONS': 100,
         'ROE_ENABLED': False,
-        'DEEP_THINK_ENABLED': True,
         'ACTIVATE_POST_EXPL_PHASE': True,
         'STEALTH_MODE': False,
         'TOOL_OUTPUT_MAX_CHARS': 20000,

@@ -165,6 +165,7 @@ Pentesters running a final comprehensive sweep on a target they have full author
 
     // --- Hakrawler: maximum crawl ---
     hakrawlerEnabled: true,
+    zapAjaxSpiderEnabled: false,
     hakrawlerDepth: 5,
     hakrawlerThreads: 15,
     hakrawlerTimeout: 90,

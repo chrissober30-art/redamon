@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo } from 'react'
-import { Bot, Wifi, WifiOff, Loader2, AlertTriangle, Eye, EyeOff, History, Plus, Download } from 'lucide-react'
+import { Bot, Wifi, WifiOff, Loader2, AlertTriangle, Eye, EyeOff, History, Plus, Download, FolderOpen } from 'lucide-react'
 import { ConnectionStatus } from '@/lib/websocket-types'
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip'
 import { ConversationHistory } from './ConversationHistory'
@@ -24,6 +24,7 @@ interface DrawerHeaderProps {
   handleDownloadMarkdown: () => void | Promise<void>
   chatItems: ChatItem[]
   onClose: () => void
+  onOpenFileSystem?: () => void
   conversations: Conversation[]
   handleSelectConversation: (conv: Conversation) => void
   handleDeleteConversation: (id: string) => void
@@ -44,6 +45,7 @@ export function DrawerHeader({
   handleDownloadMarkdown,
   chatItems,
   onClose,
+  onOpenFileSystem,
   conversations,
   handleSelectConversation,
   handleDeleteConversation,
@@ -166,6 +168,16 @@ export function DrawerHeader({
           >
             <Download size={14} />
           </button>
+          {onOpenFileSystem && (
+            <button
+              className={styles.iconButton}
+              onClick={onOpenFileSystem}
+              title="Open Workspace (files + jobs)"
+              aria-label="Open Workspace"
+            >
+              <FolderOpen size={14} />
+            </button>
+          )}
           <button
             className={styles.closeButton}
             onClick={onClose}

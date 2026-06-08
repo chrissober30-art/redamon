@@ -30,7 +30,10 @@ export interface ProviderData {
   awsRegion: string
   awsAccessKeyId: string
   awsSecretKey: string
+  awsBearerToken: string
 }
+
+type BedrockAuthMethod = 'iam' | 'bearer'
 
 const EMPTY_PROVIDER: ProviderData = {
   providerType: '',
@@ -46,6 +49,7 @@ const EMPTY_PROVIDER: ProviderData = {
   awsRegion: 'us-east-1',
   awsAccessKeyId: '',
   awsSecretKey: '',
+  awsBearerToken: '',
 }
 
 export function LlmProviderForm({ userId, provider, existingProviderTypes = [], onSave, onCancel }: LlmProviderFormProps) {
@@ -59,6 +63,13 @@ export function LlmProviderForm({ userId, provider, existingProviderTypes = [], 
   const [showApiKey, setShowApiKey] = useState(false)
   const [headerKey, setHeaderKey] = useState('')
   const [headerValue, setHeaderValue] = useState('')
+  // Bedrock auth method derives from whichever field is currently populated.
+  // For a saved row the value is masked (••••...), so a non-empty bearer
+  // token still flips the toggle to "bearer". User picks via the segmented
+  // control; switching clears the other branch's fields.
+  const [bedrockAuth, setBedrockAuth] = useState<BedrockAuthMethod>(
+    () => (form.awsBearerToken ? 'bearer' : 'iam'),
+  )
 
   const updateForm = useCallback(<K extends keyof ProviderData>(field: K, value: ProviderData[K]) => {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -259,23 +270,75 @@ export function LlmProviderForm({ userId, provider, existingProviderTypes = [], 
             />
           </div>
           <div className="formGroup">
-            <label className="formLabel formLabelRequired">AWS Access Key ID</label>
-            <input
-              className="textInput"
-              type="password"
-              value={form.awsAccessKeyId}
-              onChange={e => updateForm('awsAccessKeyId', e.target.value)}
-            />
+            <label className="formLabel">Authentication Method</label>
+            <div className={styles.segmentedControl} role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={bedrockAuth === 'iam'}
+                className={`${styles.segmentedOption} ${bedrockAuth === 'iam' ? styles.segmentedOptionActive : ''}`}
+                onClick={() => {
+                  setBedrockAuth('iam')
+                  updateForm('awsBearerToken', '')
+                }}
+              >
+                IAM Access Keys
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={bedrockAuth === 'bearer'}
+                className={`${styles.segmentedOption} ${bedrockAuth === 'bearer' ? styles.segmentedOptionActive : ''}`}
+                onClick={() => {
+                  setBedrockAuth('bearer')
+                  updateForm('awsAccessKeyId', '')
+                  updateForm('awsSecretKey', '')
+                }}
+              >
+                Long-term API Key
+              </button>
+            </div>
+            <span className="formHint">
+              {bedrockAuth === 'iam'
+                ? 'IAM user access key + secret (SigV4). Long-lived, production-ready.'
+                : 'Bedrock console "Long-term API key". Single bearer token, simpler to rotate. Short-term keys are not supported (they expire with the AWS console session).'}
+            </span>
           </div>
-          <div className="formGroup">
-            <label className="formLabel formLabelRequired">AWS Secret Access Key</label>
-            <input
-              className="textInput"
-              type="password"
-              value={form.awsSecretKey}
-              onChange={e => updateForm('awsSecretKey', e.target.value)}
-            />
-          </div>
+          {bedrockAuth === 'iam' && (
+            <>
+              <div className="formGroup">
+                <label className="formLabel formLabelRequired">AWS Access Key ID</label>
+                <input
+                  className="textInput"
+                  type="password"
+                  value={form.awsAccessKeyId}
+                  onChange={e => updateForm('awsAccessKeyId', e.target.value)}
+                />
+              </div>
+              <div className="formGroup">
+                <label className="formLabel formLabelRequired">AWS Secret Access Key</label>
+                <input
+                  className="textInput"
+                  type="password"
+                  value={form.awsSecretKey}
+                  onChange={e => updateForm('awsSecretKey', e.target.value)}
+                />
+              </div>
+            </>
+          )}
+          {bedrockAuth === 'bearer' && (
+            <div className="formGroup">
+              <label className="formLabel formLabelRequired">Bedrock API Key</label>
+              <input
+                className="textInput"
+                type="password"
+                value={form.awsBearerToken}
+                onChange={e => updateForm('awsBearerToken', e.target.value)}
+                placeholder="bedrock-api-key-..."
+              />
+              <span className="formHint">Generate in AWS Bedrock console: API keys -&gt; Long-term API keys.</span>
+            </div>
+          )}
         </>
       )}
 
@@ -438,7 +501,14 @@ export function LlmProviderForm({ userId, provider, existingProviderTypes = [], 
         <button
           className="primaryButton"
           onClick={handleSave}
-          disabled={saving || !form.name || (!isCompat && !form.apiKey && !isBedrock) || (isBedrock && (!form.awsAccessKeyId || !form.awsSecretKey)) || (isCompat && (!form.baseUrl || !form.modelIdentifier))}
+          disabled={
+            saving ||
+            !form.name ||
+            (!isCompat && !form.apiKey && !isBedrock) ||
+            (isBedrock && bedrockAuth === 'iam' && (!form.awsAccessKeyId || !form.awsSecretKey)) ||
+            (isBedrock && bedrockAuth === 'bearer' && !form.awsBearerToken) ||
+            (isCompat && (!form.baseUrl || !form.modelIdentifier))
+          }
         >
           {saving ? <Loader2 size={14} className={styles.spin} /> : null}
           {isEditing ? 'Update' : 'Save'} Provider

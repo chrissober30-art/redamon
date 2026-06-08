@@ -5,9 +5,9 @@ export const BUG_BOUNTY_DEEP: ReconPreset = {
   name: 'Bug Bounty - Deep Dive',
   icon: '',
   image: '/preset-submarine.svg',
-  shortDescription: 'Thorough single-target assessment. Deep crawling, JS analysis, all Nuclei severities, balanced to avoid IP bans.',
+  shortDescription: 'Thorough single-target assessment. Deep crawling with bounded ZAP Ajax Spider, JS analysis, all Nuclei severities, balanced to avoid IP bans.',
   fullDescription: `### Pipeline Goal
-Go deep on a single target without getting blocked. This preset balances thoroughness with responsible rate limiting -- deep crawling, JS secret extraction, full Nuclei coverage, and parameter discovery, all with moderate concurrency to stay under WAF thresholds.
+Go deep on a single target without getting blocked. This preset balances thoroughness with responsible rate limiting -- deep crawling including bounded browser crawling, JS secret extraction, full Nuclei coverage, and parameter discovery, all with moderate concurrency to stay under WAF thresholds.
 
 ### Who is this for?
 Bug bounty hunters who have already triaged a target (perhaps with the Quick Wins preset) and want to go deeper. Pentesters doing a thorough web application assessment on a specific scope. You are willing to wait 1-2 hours for comprehensive results.
@@ -18,6 +18,7 @@ Bug bounty hunters who have already triaged a target (perhaps with the Quick Win
 - httpx probing with all probes enabled for full fingerprinting
 - Wappalyzer technology detection
 - Katana depth 3 with JS crawl + 1500 URLs for deep endpoint discovery
+- ZAP Ajax Spider with bounded browser crawling seeded from base URLs and endpoints
 - Hakrawler depth 3 for complementary crawl coverage
 - GAU with all providers for historical endpoint discovery
 - jsluice on 300 JS files for secret and URL extraction
@@ -39,7 +40,7 @@ Bug bounty hunters who have already triaged a target (perhaps with the Quick Win
 ### How it works
 1. All subdomain discovery tools run in parallel with high result limits
 2. httpx probes all discovered hosts with full technology fingerprinting
-3. Katana + Hakrawler crawl deeply in parallel, GAU adds historical URLs
+3. Katana + ZAP Ajax Spider + Hakrawler crawl deeply in parallel, GAU adds historical URLs
 4. jsluice extracts secrets and endpoints from all discovered JS files
 5. JS Recon performs deep analysis: source maps, DOM XSS sinks, dependency confusion, key validation
 6. Arjun discovers hidden parameters on found endpoints
@@ -127,6 +128,16 @@ Bug bounty hunters who have already triaged a target (perhaps with the Quick Win
     katanaJsCrawl: true,
     katanaParallelism: 8,
     katanaConcurrency: 15,
+
+    // --- ZAP Ajax Spider: bounded browser crawl to limit WAF pressure ---
+    zapAjaxSpiderEnabled: true,
+    zapAjaxSpiderSeedMode: 'base_urls_and_endpoints',
+    zapAjaxSpiderMaxDuration: 10,
+    zapAjaxSpiderMaxCrawlDepth: 5,
+    zapAjaxSpiderMaxCrawlStates: 100,
+    zapAjaxSpiderNumberOfBrowsers: 1,
+    zapAjaxSpiderMaxUrls: 1000,
+    zapAjaxSpiderParallelism: 3,
 
     // --- Hakrawler: deep crawl ---
     hakrawlerEnabled: true,

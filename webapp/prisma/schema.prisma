@@ -22,6 +22,10 @@ model User {
   tradecraftResources UserTradecraftResource[]
   settings        UserSettings?
   uiPreferences Json              @default("{}") @map("ui_preferences")
+  // Per-user remembered model choices, used to pre-fill new projects.
+  // Null until the user creates their first project and picks models.
+  defaultAgentModel      String?  @map("default_agent_model")
+  defaultAiPipelineModel String?  @map("default_ai_pipeline_model")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @updatedAt @map("updated_at")
 
@@ -49,10 +53,14 @@ model UserLlmProvider {
   maxTokens       Int      @default(16384) @map("max_tokens")
   sslVerify       Boolean  @default(true) @map("ssl_verify")
 
-  // Bedrock only
+  // Bedrock only. Two mutually exclusive auth modes:
+  //   - IAM: awsAccessKeyId + awsSecretKey (legacy SigV4 path)
+  //   - Long-term API key: awsBearerToken (Bearer auth via boto3 >= 1.39)
+  // Backend chooses bearer when awsBearerToken is non-empty, else falls back to IAM.
   awsRegion       String   @default("us-east-1") @map("aws_region")
   awsAccessKeyId  String   @default("") @map("aws_access_key_id")
   awsSecretKey    String   @default("") @map("aws_secret_key")
+  awsBearerToken  String   @default("") @map("aws_bearer_token")
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -259,6 +267,8 @@ model Project {
   naabuSkipHostDiscovery      Boolean  @default(true) @map("naabu_skip_host_discovery")
   naabuVerifyPorts            Boolean  @default(true) @map("naabu_verify_ports")
   naabuPassiveMode            Boolean  @default(false) @map("naabu_passive_mode")
+  // AI surface recon — annotate AI-bearing ports (Ollama 11434, Qdrant 6333, Open WebUI 8080, …) on naabu output
+  portScanAiPortCatalogEnabled Boolean @default(true) @map("port_scan_ai_port_catalog_enabled")
 
   // ========== MASSCAN PORT SCANNER ==========
   masscanEnabled              Boolean  @default(true) @map("masscan_enabled")
@@ -269,6 +279,8 @@ model Project {
   masscanWait                 Int      @default(10) @map("masscan_wait")
   masscanRetries              Int      @default(1) @map("masscan_retries")
   masscanExcludeTargets       String   @default("") @map("masscan_exclude_targets")
+  // AI surface recon — same AI port catalogue applied to masscan output
+  masscanAiPortCatalogEnabled Boolean  @default(true) @map("masscan_ai_port_catalog_enabled")
 
   // ========== NMAP SERVICE DETECTION & NSE VULN SCRIPTS ==========
   nmapEnabled                 Boolean  @default(true) @map("nmap_enabled")
@@ -278,6 +290,8 @@ model Project {
   nmapTimeout                 Int      @default(600) @map("nmap_timeout")
   nmapHostTimeout             Int      @default(300) @map("nmap_host_timeout")
   nmapParallelism             Int      @default(5) @map("nmap_parallelism")
+  // AI surface recon — regex nmap product/version strings against AI runtimes (Ollama, vLLM, LiteLLM, TGI, …)
+  nmapAiVersionRegexEnabled   Boolean  @default(true) @map("nmap_ai_version_regex_enabled")
 
   // ========== HTTPX HTTP PROBING ==========
   httpxEnabled                Boolean  @default(true)  @map("httpx_enabled")
@@ -312,6 +326,11 @@ model Project {
   httpxCustomHeaders          String[] @default([]) @map("httpx_custom_headers")
   httpxMatchCodes             String[] @default([]) @map("httpx_match_codes")
   httpxFilterCodes            String[] @default([]) @map("httpx_filter_codes")
+  // AI surface recon — annotate captured response headers / favicon / title against AI vendor catalogues
+  httpProbeAiHeaderScanEnabled     Boolean @default(true) @map("http_probe_ai_header_scan_enabled")
+  httpProbeAiFaviconHashEnabled    Boolean @default(true) @map("http_probe_ai_favicon_hash_enabled")
+  httpProbeAiTitleDetectionEnabled Boolean @default(true) @map("http_probe_ai_title_detection_enabled")
+  httpProbeAiWappalyzerEnabled     Boolean @default(true) @map("http_probe_ai_wappalyzer_enabled")
 
   // ========== WAPPALYZER ==========
   wappalyzerEnabled           Boolean  @default(true) @map("wappalyzer_enabled")
@@ -392,6 +411,34 @@ model Project {
   vhostSniCustomWordlist           String   @default("") @map("vhost_sni_custom_wordlist") @db.Text
   vhostSniMaxCandidatesPerIp       Int      @default(2000) @map("vhost_sni_max_candidates_per_ip")
 
+  // ========== RESOURCE ENUM AI CLASSIFIER ==========
+  // Cross-cutting AI classifier — runs after Katana/Hakrawler/GAU/FFuf/jsluice/
+  // ParamSpider/Kiterunner/Arjun have produced endpoints. Tags every Endpoint
+  // with ai_interface_type / is_ai_rag_ingest and every Parameter with
+  // is_ai_prompt_injectable / ai_tool_arg_path. Pure regex, no extra traffic.
+  resourceEnumAiClassifierEnabled         Boolean @default(true) @map("resource_enum_ai_classifier_enabled")
+  resourceEnumAiPathClassifierEnabled     Boolean @default(true) @map("resource_enum_ai_path_classifier_enabled")
+  resourceEnumAiRagPathFlagEnabled        Boolean @default(true) @map("resource_enum_ai_rag_path_flag_enabled")
+  resourceEnumAiParamInjectableFlagEnabled Boolean @default(true) @map("resource_enum_ai_param_injectable_flag_enabled")
+  resourceEnumAiToolArgPathEnabled        Boolean @default(true) @map("resource_enum_ai_tool_arg_path_enabled")
+
+  // ========== AI SURFACE RECON (central module) ==========
+  aiSurfaceReconEnabled                   Boolean @default(true) @map("ai_surface_recon_enabled")
+  aiSurfaceReconTimeout                   Int     @default(10) @map("ai_surface_recon_timeout")
+  aiSurfaceReconMaxWorkers                Int     @default(5) @map("ai_surface_recon_max_workers")
+  aiSurfaceReconUserAgent                 String  @default("RedAmon-AISurfaceRecon/1.0") @map("ai_surface_recon_user_agent")
+  aiSurfaceReconChatShapeProbeEnabled     Boolean @default(true) @map("ai_surface_recon_chat_shape_probe_enabled")
+  aiSurfaceReconMcpHandshakeEnabled       Boolean @default(true) @map("ai_surface_recon_mcp_handshake_enabled")
+  aiSurfaceReconMcpListToolsEnabled       Boolean @default(true) @map("ai_surface_recon_mcp_list_tools_enabled")
+  aiSurfaceReconMcpYaraEnabled            Boolean @default(true) @map("ai_surface_recon_mcp_yara_enabled")
+  aiSurfaceReconOpenapiDiscoveryEnabled   Boolean @default(true) @map("ai_surface_recon_openapi_discovery_enabled")
+  aiSurfaceReconModelListEnabled          Boolean @default(true) @map("ai_surface_recon_model_list_enabled")
+  aiSurfaceReconVectorDbReadEnabled       Boolean @default(true) @map("ai_surface_recon_vector_db_read_enabled")
+  aiSurfaceReconJuliusProbePackEnabled    Boolean @default(true) @map("ai_surface_recon_julius_probe_pack_enabled")
+  aiSurfaceReconLatencyBaselineEnabled    Boolean @default(true) @map("ai_surface_recon_latency_baseline_enabled")
+  aiSurfaceReconCacheEnabled              Boolean @default(true) @map("ai_surface_recon_cache_enabled")
+  aiSurfaceReconProbePackVersion          String  @default("latest") @map("ai_surface_recon_probe_pack_version")
+
   // ========== KATANA WEB CRAWLER ==========
   katanaEnabled               Boolean  @default(true) @map("katana_enabled")
   katanaDockerImage           String   @default("projectdiscovery/katana:latest") @map("katana_docker_image")
@@ -406,6 +453,27 @@ model Project {
   katanaCustomHeaders         String[] @default([]) @map("katana_custom_headers")
   katanaParallelism           Int      @default(8) @map("katana_parallelism")
   katanaConcurrency           Int      @default(15) @map("katana_concurrency")
+
+  // ========== ZAP AJAX SPIDER ==========
+  zapAjaxSpiderEnabled           Boolean  @default(false) @map("zap_ajax_spider_enabled")
+  zapAjaxSpiderDockerImage       String   @default("ghcr.io/zaproxy/zaproxy:stable") @map("zap_ajax_spider_docker_image")
+  zapAjaxSpiderSeedMode          String   @default("base_urls") @map("zap_ajax_spider_seed_mode")
+  zapAjaxSpiderMaxDuration       Int      @default(10) @map("zap_ajax_spider_max_duration")
+  zapAjaxSpiderMaxCrawlDepth     Int      @default(5) @map("zap_ajax_spider_max_crawl_depth")
+  zapAjaxSpiderMaxCrawlStates    Int      @default(0) @map("zap_ajax_spider_max_crawl_states")
+  zapAjaxSpiderNumberOfBrowsers  Int      @default(1) @map("zap_ajax_spider_number_of_browsers")
+  zapAjaxSpiderBrowserId         String   @default("firefox-headless") @map("zap_ajax_spider_browser_id")
+  zapAjaxSpiderEventWait         Int      @default(1000) @map("zap_ajax_spider_event_wait")
+  zapAjaxSpiderReloadWait        Int      @default(1000) @map("zap_ajax_spider_reload_wait")
+  zapAjaxSpiderClickDefaultElems Boolean  @default(true) @map("zap_ajax_spider_click_default_elems")
+  zapAjaxSpiderClickElemsOnce    Boolean  @default(true) @map("zap_ajax_spider_click_elems_once")
+  zapAjaxSpiderRandomInputs      Boolean  @default(false) @map("zap_ajax_spider_random_inputs")
+  zapAjaxSpiderLogoutAvoidance   Boolean  @default(true) @map("zap_ajax_spider_logout_avoidance")
+  zapAjaxSpiderScopeCheck        String   @default("Strict") @map("zap_ajax_spider_scope_check")
+  zapAjaxSpiderCustomHeaders     String[] @default([]) @map("zap_ajax_spider_custom_headers")
+  zapAjaxSpiderExcludePatterns   String[] @default([]) @map("zap_ajax_spider_exclude_patterns")
+  zapAjaxSpiderMaxUrls           Int      @default(1000) @map("zap_ajax_spider_max_urls")
+  zapAjaxSpiderParallelism       Int      @default(3) @map("zap_ajax_spider_parallelism")
 
   // ========== HAKRAWLER WEB CRAWLER ==========
   hakrawlerEnabled            Boolean  @default(true) @map("hakrawler_enabled")
@@ -427,6 +495,13 @@ model Project {
   jsluiceExtractSecrets       Boolean  @default(true) @map("jsluice_extract_secrets")
   jsluiceConcurrency          Int      @default(5) @map("jsluice_concurrency")
   jsluiceParallelism          Int      @default(5) @map("jsluice_parallelism")
+  jsluiceVerifyUrls           Boolean  @default(true) @map("jsluice_verify_urls")
+  jsluiceVerifyDockerImage    String   @default("projectdiscovery/httpx:latest") @map("jsluice_verify_docker_image")
+  jsluiceVerifyTimeout        Int      @default(5) @map("jsluice_verify_timeout")
+  jsluiceVerifyRateLimit      Int      @default(50) @map("jsluice_verify_rate_limit")
+  jsluiceVerifyThreads        Int      @default(50) @map("jsluice_verify_threads")
+  jsluiceVerifyAcceptStatus   Int[]    @default([200, 201, 301, 302, 307, 308, 401, 403]) @map("jsluice_verify_accept_status")
+  jsluiceExcludePatterns      String[] @default([]) @map("jsluice_exclude_patterns")
 
   // ========== JS RECON SCANNER ==========
   jsReconEnabled              Boolean  @default(false) @map("js_recon_enabled")
@@ -454,6 +529,11 @@ model Project {
   jsReconCustomPackages       String   @default("")    @map("js_recon_custom_packages")
   jsReconCustomEndpointKeywords String @default("")    @map("js_recon_custom_endpoint_keywords")
   jsReconCustomFrameworks     String   @default("")    @map("js_recon_custom_frameworks")
+  // Adversarial AI surface recon Phase 6 — detect AI/LLM SDK imports,
+  // hard-coded provider keys, dangerouslyAllowBrowser flags, and AI-frontend
+  // product markers inside discovered JS bundles. Pure regex over data
+  // js_recon already harvested; no extra traffic.
+  jsReconAiSdkDetectionEnabled Boolean @default(true)  @map("js_recon_ai_sdk_detection_enabled")
 
   // ========== GRAPHQL SECURITY SCANNER ==========
   graphqlSecurityEnabled      Boolean  @default(false) @map("graphql_security_enabled")
@@ -650,7 +730,6 @@ model Project {
   agentPlanMaxParallelTools             Int      @default(10) @map("agent_plan_max_parallel_tools")
   agentCypherMaxRetries                 Int      @default(3) @map("agent_cypher_max_retries")
   agentLlmParseMaxRetries               Int      @default(3) @map("agent_llm_parse_max_retries")
-  agentDeepThinkEnabled                 Boolean  @default(true) @map("agent_deep_think_enabled")
   agentCreateGraphImageOnInit           Boolean  @default(false) @map("agent_create_graph_image_on_init")
   agentLogMaxMb                         Int      @default(10) @map("agent_log_max_mb")
   agentLogBackupCount                   Int      @default(5) @map("agent_log_backup_count")
@@ -723,6 +802,10 @@ model Project {
 
   // Subdomain Discovery Master Switch
   subdomainDiscoveryEnabled             Boolean  @default(true)  @map("subdomain_discovery_enabled")
+
+  // AI surface recon hooks inside domain_recon (TXT/NS hint annotation during DNS pass)
+  domainReconAiTxtHintEnabled           Boolean  @default(true)  @map("domain_recon_ai_txt_hint_enabled")
+  domainReconAiNsHintEnabled            Boolean  @default(true)  @map("domain_recon_ai_ns_hint_enabled")
 
   // Subdomain Discovery Tool Toggles
   crtshEnabled                          Boolean  @default(true)  @map("crtsh_enabled")
@@ -1115,6 +1198,12 @@ model UserTradecraftResource {
   // Crawl-only metadata (only set when resourceType=agentic-crawl):
   crawlStoppedBecause  String   @default("") @map("crawl_stopped_because")
   crawlStats           Json     @default("{}") @map("crawl_stats")
+
+  // LLM model used for crawl decisions + summary at verify time. Empty string
+  // means "fall back to the project's agent model" (same convention as
+  // Project.cypherfixLlmModel). Lets the user pick a cheaper/faster model
+  // for tradecraft ingestion without changing the chat model.
+  llmModel             String   @default("") @map("llm_model")
 
   // Auth + caching tunables
   githubTokenOverride  String   @default("") @map("github_token_override")

@@ -106,6 +106,7 @@ Bug bounty hunters and red teamers who want to maximize credential and secret di
 
     // Hakrawler
     hakrawlerEnabled: true,
+    zapAjaxSpiderEnabled: false,
     hakrawlerDepth: 3,
     hakrawlerThreads: 5,
     hakrawlerTimeout: 45,

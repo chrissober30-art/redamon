@@ -29,7 +29,10 @@ import { NmapSection } from './sections/NmapSection'
 import { HttpxSection } from './sections/HttpxSection'
 import { NucleiSection } from './sections/NucleiSection'
 import { KatanaSection } from './sections/KatanaSection'
+import { ZapAjaxSpiderSection } from './sections/ZapAjaxSpiderSection'
 import { HakrawlerSection } from './sections/HakrawlerSection'
+import { ResourceEnumAiSection } from './sections/ResourceEnumAiSection'
+import { AiSurfaceReconSection } from './sections/AiSurfaceReconSection'
 import { JsluiceSection } from './sections/JsluiceSection'
 import { FfufSection } from './sections/FfufSection'
 import { GauSection } from './sections/GauSection'
@@ -57,6 +60,8 @@ import { TakeoverSection } from './sections/TakeoverSection'
 import { VhostSniSection } from './sections/VhostSniSection'
 import { PartialReconModal } from './WorkflowView/PartialReconModal'
 import { ReconPresetModal } from './ReconPresetModal'
+import { ProviderRequiredModal, ModelSelectionModal } from './ProjectLlmGate'
+import { seedInitialModels, needsModelGate, hasNoConfiguredProvider } from './projectLlmGate.logic'
 import { SavePresetModal } from './SavePresetModal'
 import { UserPresetDrawer } from './UserPresetDrawer'
 import { getPresetById, type ReconPreset } from '@/lib/recon-presets'
@@ -209,6 +214,16 @@ export function ProjectForm({
   // Guardrail block modal
   const [guardrailError, setGuardrailError] = useState<string | null>(null)
 
+  // LLM provider / model gates (create mode only)
+  const [showProviderGate, setShowProviderGate] = useState(false)
+  // create mode: false until the provider check resolves; gates the form render
+  // so a no-provider user sees the "configure provider" gate immediately, not
+  // the project form flashing first.
+  const [providerChecked, setProviderChecked] = useState(mode !== 'create')
+  const [showModelGate, setShowModelGate] = useState(false)
+  // Which save action to resume once both models are picked in the gate
+  const [pendingSaveAction, setPendingSaveAction] = useState<'submit' | 'stay' | null>(null)
+
   // RoE document file (held in memory until project creation)
   const [roeFile, setRoeFile] = useState<File | null>(null)
 
@@ -273,15 +288,44 @@ export function ProjectForm({
     onComplete: () => { refetchPartialReconStatuses() },
   })
 
-  // Fetch defaults from backend on mount (only for create mode)
+  // Fetch defaults from backend on mount (only for create mode).
+  // For a new project the LLM model fields are NOT taken from the backend
+  // defaults (which are a hardcoded claude-* model). Instead they are seeded
+  // from the user's remembered choices, or left empty to force an explicit
+  // selection via the model gate on save.
   useEffect(() => {
-    if (mode === 'create') {
-      fetchDefaults().then(defaults => {
-        setFormData(prev => ({ ...defaults, ...prev, ...initialData } as ProjectFormData))
-        setIsLoadingDefaults(false)
+    if (mode !== 'create') return
+    Promise.all([
+      fetchDefaults(),
+      userId
+        ? fetch(`/api/users/${userId}`).then(r => (r.ok ? r.json() : null)).catch(() => null)
+        : Promise.resolve(null),
+    ]).then(([defaults, user]) => {
+      const seeded = seedInitialModels(user)
+      setFormData(prev => ({
+        ...defaults,
+        ...prev,
+        ...initialData,
+        agentOpenaiModel: seeded.agentOpenaiModel,
+        aiPipelineModel: seeded.aiPipelineModel,
+      } as ProjectFormData))
+      setIsLoadingDefaults(false)
+    })
+  }, [mode, initialData, userId])
+
+  // Provider gate: block creating a project when no LLM provider is configured.
+  useEffect(() => {
+    if (mode !== 'create' || !userId) return
+    fetch(`/api/users/${userId}/llm-providers`)
+      .then(r => (r.ok ? r.json() : []))
+      .then((providers) => {
+        if (hasNoConfiguredProvider(providers)) {
+          setShowProviderGate(true)
+        }
+        setProviderChecked(true)
       })
-    }
-  }, [mode, initialData])
+      .catch(() => { setProviderChecked(true) /* network error: don't hard-block, model gate still applies */ })
+  }, [mode, userId])
 
   // Track body wrapper position so fixed-position log drawers pin to the main content area
   useEffect(() => {
@@ -356,6 +400,25 @@ export function ProjectForm({
     }
   }, [])
 
+  // On save (create only), confirm an LLM provider exists before the model gate.
+  // Without a provider the model picker can't load any models, so route the user
+  // to "Configure an LLM provider first" instead of a broken model-selection modal.
+  // Fetched fresh on save so a provider added/removed since mount is honored.
+  const ensureProviderConfigured = async (): Promise<boolean> => {
+    if (mode !== 'create' || !userId) return true
+    try {
+      const r = await fetch(`/api/users/${userId}/llm-providers`)
+      const providers = r.ok ? await r.json() : []
+      if (hasNoConfiguredProvider(providers)) {
+        setShowProviderGate(true)
+        return false
+      }
+    } catch {
+      /* network error: don't hard-block; the model gate still applies */
+    }
+    return true
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -383,6 +446,16 @@ export function ProjectForm({
         setGuardrailError(hardCheck.reason)
         return
       }
+    }
+
+    // No LLM provider configured -> ask to set one up, don't open the model picker.
+    if (!(await ensureProviderConfigured())) return
+
+    // Force explicit LLM model selection on create (agent + AI recon pipeline)
+    if (needsModelGate(mode, formData.agentOpenaiModel, formData.aiPipelineModel)) {
+      setPendingSaveAction('submit')
+      setShowModelGate(true)
+      return
     }
 
     try {
@@ -429,6 +502,15 @@ export function ProjectForm({
         setGuardrailError(hardCheck.reason)
         return
       }
+    }
+    // No LLM provider configured -> ask to set one up, don't open the model picker.
+    if (!(await ensureProviderConfigured())) return
+
+    // Force explicit LLM model selection on create (agent + AI recon pipeline)
+    if (needsModelGate(mode, formData.agentOpenaiModel, formData.aiPipelineModel)) {
+      setPendingSaveAction('stay')
+      setShowModelGate(true)
+      return
     }
     try {
       const submitData = {
@@ -482,6 +564,21 @@ export function ProjectForm({
 
   // Determine if form can be submitted
   const canSubmit = !isSubmitting && !isLoadingDefaults
+
+  // Create mode: resolve the LLM-provider gate BEFORE rendering the project form.
+  // While the check is in flight, show a brief loader (not the form); if no
+  // provider exists, show ONLY the "configure provider" gate.
+  if (mode === 'create' && !providerChecked) {
+    return (
+      <div className={styles.loadingContainer}>
+        <Loader2 size={24} className={styles.spinner} />
+        <p>Checking LLM provider...</p>
+      </div>
+    )
+  }
+  if (mode === 'create' && showProviderGate) {
+    return <ProviderRequiredModal onCancel={onCancel} />
+  }
 
   return (
     <form onSubmit={handleSubmit} className={styles.form}>
@@ -743,6 +840,7 @@ export function ProjectForm({
         {activeTab === 'resource' && viewMode === 'tabs' && (
           <>
             <KatanaSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Katana') : undefined} />
+            <ZapAjaxSpiderSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('ZapAjaxSpider') : undefined} />
             <HakrawlerSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Hakrawler') : undefined} />
             <JsluiceSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Jsluice') : undefined} />
             <FfufSection data={formData} updateField={updateField} projectId={projectId} mode={mode} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Ffuf') : undefined} />
@@ -750,6 +848,8 @@ export function ProjectForm({
             <ParamSpiderSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('ParamSpider') : undefined} />
             <KiterunnerSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Kiterunner') : undefined} />
             <ArjunSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('Arjun') : undefined} />
+            <ResourceEnumAiSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('EndpointAiClassifier') : undefined} />
+            <AiSurfaceReconSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('AiSurfaceRecon') : undefined} />
           </>
         )}
 
@@ -891,6 +991,33 @@ export function ProjectForm({
             </button>
           </div>
         </div>
+      )}
+
+      {/* LLM provider gate: no provider configured -> can't create a project */}
+      {showProviderGate && (
+        <ProviderRequiredModal onCancel={onCancel} />
+      )}
+
+      {/* Model selection gate: force picking both models before saving */}
+      {showModelGate && (
+        <ModelSelectionModal
+          userId={userId}
+          agentModel={(formData.agentOpenaiModel as string) || ''}
+          aiPipelineModel={(formData.aiPipelineModel as string) || ''}
+          onChangeAgent={(id) => updateField('agentOpenaiModel', id)}
+          onChangeAiPipeline={(id) => updateField('aiPipelineModel', id)}
+          onCancel={() => { setShowModelGate(false); setPendingSaveAction(null) }}
+          onConfirm={() => {
+            setShowModelGate(false)
+            const action = pendingSaveAction
+            setPendingSaveAction(null)
+            if (action === 'submit') {
+              void handleSubmit({ preventDefault: () => {} } as React.FormEvent)
+            } else if (action === 'stay') {
+              void handleSaveAndStay()
+            }
+          }}
+        />
       )}
     </form>
   )

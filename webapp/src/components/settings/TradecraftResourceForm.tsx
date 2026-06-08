@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Loader2, Eye, EyeOff, Search } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal/Modal'
+import { ModelPicker } from '@/components/shared/ModelPicker'
 import styles from './Settings.module.css'
 
 export interface TradecraftResource {
@@ -15,6 +16,7 @@ export interface TradecraftResource {
   summary?: string
   githubTokenOverride?: string
   cacheTtlSec?: number
+  llmModel?: string
   lastVerifiedAt?: string | null
   lastRefreshedAt?: string | null
   lastError?: string
@@ -216,6 +218,7 @@ export function TradecraftResourceForm({
   const [githubToken, setGithubToken] = useState(resource?.githubTokenOverride || '')
   const [cacheTtl, setCacheTtl] = useState<number>(resource?.cacheTtlSec ?? 0)
   const [enabled, setEnabled] = useState(resource?.enabled ?? true)
+  const [llmModel, setLlmModel] = useState(resource?.llmModel || '')
   const [showToken, setShowToken] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -237,6 +240,7 @@ export function TradecraftResourceForm({
     setGithubToken(resource?.githubTokenOverride || '')
     setCacheTtl(resource?.cacheTtlSec ?? 0)
     setEnabled(resource?.enabled ?? true)
+    setLlmModel(resource?.llmModel || '')
   }, [resource])
 
   const handleQuickAdd = (preset: QuickAdd) => {
@@ -249,6 +253,10 @@ export function TradecraftResourceForm({
       setError('Name and URL are required')
       return
     }
+    if (!llmModel.trim()) {
+      setError('Pick an LLM model. The resource only becomes usable once a model is selected.')
+      return
+    }
     setSubmitting(true)
     setError('')
     try {
@@ -257,6 +265,7 @@ export function TradecraftResourceForm({
         url: url.trim(),
         enabled,
         cacheTtlSec: Number(cacheTtl) || 0,
+        llmModel: llmModel.trim(),
       }
       // Type is always auto-detected at verify time; no manual override.
       // Only send the token override when the user typed something real
@@ -489,6 +498,21 @@ export function TradecraftResourceForm({
             value={cacheTtl}
             onChange={e => setCacheTtl(Number(e.target.value))}
           />
+        </div>
+
+        <div className="formGroup">
+          <label className="formLabel formLabelRequired">LLM Model</label>
+          <ModelPicker
+            userId={userId}
+            value={llmModel}
+            onChange={setLlmModel}
+            placeholder="pick the model used to crawl + summarize this resource"
+          />
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginTop: '4px' }}>
+            Required. Used at verify time (crawl decisions + summary) and at agent runtime. The
+            resource is unusable until a model is selected. Pick a small/cheap model — this task
+            doesn&apos;t need your main reasoning model.
+          </span>
         </div>
 
         <label className={styles.checkboxLabel}>

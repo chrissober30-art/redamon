@@ -151,6 +151,7 @@ Use \`API Security Audit\` if you also need heavy REST endpoint discovery via Ki
 
     // --- Hakrawler: secondary crawler for corroboration ---
     hakrawlerEnabled: true,
+    zapAjaxSpiderEnabled: false,
     hakrawlerDepth: 2,
     hakrawlerThreads: 10,
 

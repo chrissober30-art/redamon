@@ -23,6 +23,8 @@ interface ToolNodeData {
   onNodeClick?: (nodeId: string) => void
   highlighted?: boolean
   dimmed?: boolean
+  toggleLocked?: boolean
+  toggleLockReason?: string
 }
 
 function ToolNodeComponent({ data }: NodeProps) {
@@ -43,12 +45,15 @@ function ToolNodeComponent({ data }: NodeProps) {
     onNodeClick,
     highlighted,
     dimmed,
+    toggleLocked,
+    toggleLockReason,
   } = data as unknown as ToolNodeData
 
   const handleToggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
+    if (toggleLocked) return
     onToggle?.(enabledField, !enabled)
-  }, [onToggle, enabledField, enabled])
+  }, [onToggle, enabledField, enabled, toggleLocked])
 
   const handleSettingsClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
@@ -86,6 +91,9 @@ function ToolNodeComponent({ data }: NodeProps) {
               className={`${styles.toolToggle} ${enabled ? styles.toolToggleOn : ''}`}
               onClick={handleToggle}
               aria-label={`${enabled ? 'Disable' : 'Enable'} ${label}`}
+              disabled={toggleLocked}
+              title={toggleLocked ? toggleLockReason : undefined}
+              style={toggleLocked ? { cursor: 'not-allowed', opacity: 0.5 } : undefined}
             >
               <span className={styles.toolToggleThumb} />
             </button>

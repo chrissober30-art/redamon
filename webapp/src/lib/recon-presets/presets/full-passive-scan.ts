@@ -115,6 +115,7 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
     // --- DISABLE all active crawlers ---
     katanaEnabled: false,
     hakrawlerEnabled: false,
+    zapAjaxSpiderEnabled: false,
 
     // --- DISABLE jsluice (downloads JS files from target) ---
     jsluiceEnabled: false,
@@ -122,6 +123,7 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
     // --- DISABLE JS Recon (crawls and downloads from target) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory fuzzing ---
     ffufEnabled: false,
 

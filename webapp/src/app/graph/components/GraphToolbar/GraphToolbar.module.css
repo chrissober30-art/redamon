@@ -242,6 +242,27 @@
   color: var(--text-on-accent);
 }
 
+/* Split-button group: AI Agent + Workspace folder share a single visual unit.
+   The left half (AI Agent) keeps its left corners rounded; the right half
+   (Workspace) keeps its right corners rounded; the seam between them is a
+   1px divider so they read as one button with two click targets. */
+.aiButtonGroup {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.aiButtonGroupStart {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 1px solid var(--accent-primary-hover, rgba(0, 0, 0, 0.25));
+}
+
+.aiButtonGroupEnd {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+}
+
 /* Recon Buttons */
 .reconButton {
   display: flex;

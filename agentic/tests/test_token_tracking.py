@@ -489,36 +489,36 @@ class MemberThinkTokenAccumulationTests(unittest.TestCase):
 class ThinkNodeDeepThinkVarInitTests(unittest.TestCase):
     """Regression for UnboundLocalError on `_dt_in` / `_dt_out`.
 
-    The deep-think block is guarded by `if get_setting('DEEP_THINK_ENABLED'):`.
-    Inside the block, `_dt_in` / `_dt_out` track the deep-think ainvoke's
-    token usage, and the main think-loop reads them to seed its per-turn
-    counter. If the guard is False (the default), the variables never
-    get assigned — but the main loop still references them, producing:
+    `_dt_in` / `_dt_out` track the deep-think ainvoke's token usage and the
+    main think-loop reads them to seed its per-turn counter. They're only
+    actually written inside the Deep Think trigger branch (Condition 1-3),
+    which may not fire on a given iteration — but the main loop downstream
+    still reads them. If the initialization is removed, the loop produces:
 
         UnboundLocalError: cannot access local variable '_dt_in'
                          where it is not associated with a value
 
-    This test doesn't run think_node end-to-end (that would require a
-    full LLM + Neo4j + config fixture). Instead it asserts, via source
-    inspection, that the variables are initialized unconditionally at
-    the module scope of think_node, BEFORE the `if DEEP_THINK_ENABLED:`
-    guard. That's the exact invariant a future refactor could break.
+    This test doesn't run think_node end-to-end (that would require a full
+    LLM + Neo4j + config fixture). Instead it asserts, via source
+    inspection, that the variables are initialized unconditionally near
+    the top of think_node — BEFORE the `if trigger_reason:` block that
+    conditionally invokes the deep-think LLM.
     """
 
-    def test_dt_vars_initialized_before_deep_think_guard(self):
+    def test_dt_vars_initialized_before_deep_think_branch(self):
         import inspect
         from orchestrator_helpers.nodes.think_node import think_node
         src = inspect.getsource(think_node)
 
-        # The initializer MUST appear before the guard.
+        # The initializers MUST appear before the conditional deep-think branch.
         init_idx = src.find("_dt_in = 0")
-        guard_idx = src.find("if get_setting('DEEP_THINK_ENABLED'")
+        branch_idx = src.find("if trigger_reason:")
         self.assertNotEqual(init_idx, -1, "Missing _dt_in initializer in think_node")
-        self.assertNotEqual(guard_idx, -1, "Missing DEEP_THINK_ENABLED guard in think_node")
+        self.assertNotEqual(branch_idx, -1, "Missing `if trigger_reason:` branch in think_node")
         self.assertLess(
-            init_idx, guard_idx,
-            "_dt_in must be initialized BEFORE the DEEP_THINK_ENABLED guard "
-            "so the main loop can read it when deep-think is disabled.",
+            init_idx, branch_idx,
+            "_dt_in must be initialized BEFORE the Deep Think trigger branch "
+            "so the main loop can read it when no trigger fires this iteration.",
         )
         # And _dt_out too.
         self.assertIn("_dt_out = 0", src)

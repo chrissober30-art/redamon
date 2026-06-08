@@ -28,6 +28,19 @@ from langgraph.graph.message import add_messages
 Phase = Literal["informational", "exploitation", "post_exploitation"]
 TodoStatus = Literal["pending", "in_progress", "completed", "blocked"]
 Priority = Literal["high", "medium", "low"]
+
+# LLM occasionally emits severity-style words ("info", "critical") in the
+# todo-item priority slot — observed in a 2026-05-16 think step where
+# `priority: "info"` triggered a pydantic retry that cost one LLM round-trip.
+# Coerce the common confusables to the canonical 3 values before the Literal
+# validator runs, so the parse succeeds on attempt 1.
+_PRIORITY_SYNONYMS = {"info": "low", "critical": "high", "urgent": "high"}
+
+
+def _coerce_priority(value):
+    if isinstance(value, str):
+        return _PRIORITY_SYNONYMS.get(value.lower().strip(), value)
+    return value
 ApprovalDecision = Literal["approve", "modify", "abort"]
 QuestionFormat = Literal["text", "single_choice", "multi_choice"]
 
@@ -58,6 +71,11 @@ class TodoItem(BaseModel):
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     completed_at: Optional[datetime] = None
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _coerce_priority_synonyms(cls, v):
+        return _coerce_priority(v)
 
     def mark_complete(self) -> "TodoItem":
         """Mark this todo as completed."""
@@ -237,6 +255,11 @@ class TodoItemUpdate(BaseModel):
     status: TodoStatus = "pending"
     priority: Priority = "medium"
 
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _coerce_priority_synonyms(cls, v):
+        return _coerce_priority(v)
+
 
 class ExtractedTargetInfo(BaseModel):
     """Target information extracted from tool output analysis."""
@@ -273,6 +296,24 @@ class ChainFindingExtract(BaseModel):
     step_iteration: int = 0
 
 
+class ProductivityVerdict(BaseModel):
+    """LLM-emitted verdict on whether the last tool call advanced the engagement.
+
+    Consumed by the orchestrator's loop detector in place of keyword-based
+    failure heuristics. The closed `verdict` enum prevents free-form dodging
+    and the rationale + what_was_new fields force the model to cite evidence.
+
+    The orchestrator cross-checks `new_information_gained` against actual
+    state delta (findings_grew, extracted_info populated) and downgrades
+    dishonest claims to `no_progress` before the loop counter consumes it.
+    """
+    verdict: Literal["new_info", "confirmation", "no_progress", "blocked", "duplicate", "diagnostic_progress"] = "new_info"
+    new_information_gained: bool = True
+    what_was_new: str = Field(default="", description="One sentence; empty if nothing new.")
+    should_repeat_similar_call: bool = False
+    rationale: str = Field(default="", description="One sentence citing specific evidence from the output.")
+
+
 class OutputAnalysisInline(BaseModel):
     """Inline output analysis embedded in LLMDecision when tool output is pending."""
     interpretation: str = ""
@@ -282,15 +323,65 @@ class OutputAnalysisInline(BaseModel):
     exploit_succeeded: bool = False
     exploit_details: Optional[dict] = None
     chain_findings: List[ChainFindingExtract] = Field(default_factory=list)
+    productivity: ProductivityVerdict = Field(default_factory=ProductivityVerdict)
 
 
 # =============================================================================
 # DEEP THINK MODEL
 # =============================================================================
 
+class CompetingHypothesis(BaseModel):
+    """One candidate explanation for the current evidence.
+
+    Deep Think MUST emit >=2 of these whenever a chain finding with non-trivial
+    confidence is in scope. The point is to force the strategist to articulate
+    what ELSE the evidence could mean — and crucially, the single cheapest
+    probe that would tell the alternatives apart.
+
+    Without this structure, the model writes a high-confidence finding
+    ("NoSQL injection confirmed") on iter 7 from a single 500 differential,
+    and every subsequent deep-think starts from that as established fact.
+    With it, deep-think becomes a hypothesis-engineering exercise instead
+    of a brainstorm.
+    """
+    hypothesis: str = Field(
+        description=(
+            "One sentence stating what could explain the current evidence — "
+            "e.g., 'NoSQL injection in job_type' or 'SQL parse error from "
+            "non-string input crashing sqlite3.execute'."
+        )
+    )
+    supporting_evidence: str = Field(
+        description=(
+            "Cite the specific observation(s) that support THIS hypothesis. "
+            "Reference iteration numbers / step ids where possible."
+        )
+    )
+    disambiguating_probe: str = Field(
+        description=(
+            "ONE cheap, concrete test that would distinguish this hypothesis "
+            "from the OTHER hypotheses in this list. Describe the exact "
+            "tool call and what an expected confirming/refuting response looks like."
+        )
+    )
+
+
 class DeepThinkResult(BaseModel):
-    """Deep Think reasoning output — structured analysis before complex decisions."""
+    """Deep Think reasoning output — structured analysis before complex decisions.
+
+    The `competing_hypotheses` field is the structural fix for confirmation
+    bias: forcing the strategist to enumerate >=2 explanations for current
+    evidence prevents locking onto the first plausible-sounding inference.
+    """
     situation_assessment: str = Field(description="Current state summary")
+    competing_hypotheses: List[CompetingHypothesis] = Field(
+        default_factory=list,
+        description=(
+            "REQUIRED when any chain finding has confidence >= 60 OR when "
+            "trigger_reason is 'Unproductive streak detected'. Provide >=2 "
+            "competing explanations and the probe that would tell them apart."
+        ),
+    )
     attack_vectors_identified: List[str] = Field(default_factory=list, description="All possible attack vectors")
     recommended_approach: str = Field(description="Chosen approach and rationale")
     priority_order: List[str] = Field(default_factory=list, description="Ordered action steps")
@@ -714,6 +805,11 @@ class AgentState(TypedDict):
     chain_findings_memory: List[dict]    # Accumulated findings for this session
     chain_failures_memory: List[dict]    # Accumulated failures for this session
     chain_decisions_memory: List[dict]   # Accumulated decisions for this session
+    # Wave-completion history (one entry per completed fireteam wave). Written
+    # unconditionally by fireteam_collect_node — including for zero-finding
+    # waves — so the planner can see "wave X already covered scope Y" even
+    # when the wave produced no findings to attribute via source_agent tags.
+    chain_waves_memory: List[dict]
 
     # Internal: previous step ID for NEXT_STEP linking in chain graph
     _last_chain_step_id: Optional[str]
@@ -727,6 +823,30 @@ class AgentState(TypedDict):
     # Deep Think result (persists for chain, replaced on re-trigger)
     deep_think_result: Optional[str]
     _need_deep_think: bool  # LLM self-requested Deep Think for next iteration
+
+    # Productivity scoring v2 — dynamic, multi-signal loop detection.
+    # `_deep_think_cooldown_until` suppresses redundant Deep Thinks for N
+    # iterations after one fires (override on self-request or critical score).
+    # `_iterations_since_state_grew` is an observed counter (incremented every
+    # turn, reset whenever target_info / chain_findings_memory grows). It's the
+    # most reliable "is the agent stuck" signal because it does not depend on
+    # the LLM's self-reported productivity verdict.
+    # `_previous_priority_order` lets the orchestrator compare the latest Deep
+    # Think's plan against the prior one and reject paraphrased repeats.
+    # `tested_axes` is a session-long ledger keyed by semantic axis (per
+    # tool-family axis extractor) — addresses the slow-loop case where the same
+    # logical attack is retried with bigger N across iterations spaced too far
+    # apart for the 6-step verdict window to catch.
+    _deep_think_cooldown_until: int  # iteration number; current_iteration < this → suppress
+    _iterations_since_state_grew: int
+    # `_diagnostic_progress_streak` counts consecutive stall-counter resets that
+    # came from *diagnostic* progress (debugging a failing-but-correct approach)
+    # rather than real target-state growth. Capped so diagnostic progress cannot
+    # suppress the unproductive streak forever on a dead approach.
+    _diagnostic_progress_streak: int
+    _previous_priority_order: Optional[List[str]]
+    tested_axes: dict  # axis_key (str) -> list of {iteration, verdict, tool} dicts
+    _last_productivity_score: Optional[dict]  # diagnostic: last computed score + components
 
     # Metasploit state tracking
     msf_session_reset_done: bool  # True if metasploit was reset at start of this session
@@ -883,12 +1003,20 @@ def create_initial_state(
         "chain_findings_memory": [],
         "chain_failures_memory": [],
         "chain_decisions_memory": [],
+        "chain_waves_memory": [],
         "_last_chain_step_id": None,
         "_prior_chain_context": None,
         "_response_tier": None,
         # Deep Think
         "deep_think_result": None,
         "_need_deep_think": False,
+        # Productivity scoring v2
+        "_deep_think_cooldown_until": 0,
+        "_iterations_since_state_grew": 0,
+        "_diagnostic_progress_streak": 0,
+        "_previous_priority_order": None,
+        "tested_axes": {},
+        "_last_productivity_score": None,
         # Metasploit state
         "msf_session_reset_done": False,
         # Fireteam (multi-agent) deployment
@@ -1193,12 +1321,58 @@ def _group_trace_by_iteration(execution_trace: List[dict]) -> List[dict]:
     return result
 
 
+def _format_step_diagnostics(tool_entry: dict) -> str:
+    """Build the inline `[12ms, application_5xx_fast: parse-time crash...]`
+    diagnostic suffix that follows a tool's args in the chain context.
+    Returns empty string when the entry has no diagnostic data (older entries
+    without duration_ms / error_class written before this feature shipped —
+    backward compatible).
+
+    Surfacing duration alongside the error-class HINT is the cheap fix for
+    the "all 12 SQL payloads returned 500" trap: 500-in-3ms and 500-in-150ms
+    have the same status code but completely different meanings (parse-time
+    crash vs. DB-level error), and the LLM cannot tell them apart from the
+    status code alone.
+
+    Format: `[duration, class_label: terse hint]`
+
+    The class LABEL is preserved (engineers grep agent.log for it, and
+    programmatic consumers in tests assertIn on it). The HINT is appended
+    after a colon so the LLM gets plain English next to the cryptic label.
+    Together they cost ~30-80 chars per step, which is acceptable for the
+    information density gained.
+
+    Falls back to label-only rendering when no hint is registered for the
+    class — defensive, keeps the chain context informative even if a new
+    class is added without a matching ERROR_CLASS_HINTS entry.
+    """
+    from orchestrator_helpers.error_class import ERROR_CLASS_HINTS
+
+    dur = tool_entry.get("duration_ms")
+    ec = tool_entry.get("error_class")
+    parts: list[str] = []
+    if isinstance(dur, (int, float)) and dur >= 0:
+        parts.append(f"{int(dur)}ms")
+    if ec and ec != "success":
+        hint = ERROR_CLASS_HINTS.get(ec)
+        if hint:
+            parts.append(f"{ec}: {hint}")
+        else:
+            # Unknown class — show just the label so the chain context still
+            # carries the diagnostic, even if the hint registry is stale.
+            parts.append(str(ec))
+    if not parts:
+        return ""
+    return f" [{', '.join(parts)}]"
+
+
 def format_chain_context(
     chain_findings: List[dict],
     chain_failures: List[dict],
     chain_decisions: List[dict],
     execution_trace: List[dict],
     recent_iterations: int = 20,
+    chain_waves: Optional[List[dict]] = None,
 ) -> str:
     """Format attack chain memory for the LLM system prompt.
 
@@ -1206,8 +1380,19 @@ def format_chain_context(
     Shows the last *recent_iterations* steps with wave tools collapsed
     into a compact summary.  Findings/failures/decisions are listed up
     front for instant signal.
+
+    ``chain_waves`` lists completed fireteam waves (one entry per wave,
+    including zero-finding waves). Rendered in its own section so the planner
+    can detect "this wave already covered scope X" even when no findings were
+    attributed via source_agent.
     """
-    if not execution_trace and not chain_findings and not chain_failures:
+    chain_waves = chain_waves or []
+    if (
+        not execution_trace
+        and not chain_findings
+        and not chain_failures
+        and not chain_waves
+    ):
         return "No steps executed yet."
 
     lines: list[str] = []
@@ -1272,6 +1457,47 @@ def format_chain_context(
             lines.append(f"  [step {step}] {dtype}: {from_s} → {to_s} ({by} {approved})")
         lines.append("")
 
+    # ── Fireteam Waves ──────────────────────────────────
+    # One entry per completed fireteam wave, including zero-finding waves.
+    # The planner consults this to recognize "wave X already covered scope Y"
+    # even when no findings were attributed via source_agent tags. Without
+    # this section, a zero-finding wave leaves the planner with the same
+    # context a brand-new session sees, and the "DO NOT redeploy the same
+    # plan" directive in the system prompt has no checkable referent.
+    if chain_waves:
+        lines.append("── Fireteam Waves ────────────────────────────────")
+        for w in chain_waves:
+            wave_id = w.get("wave_id") or "?"
+            it = w.get("completed_at_iteration", "?")
+            n_members = w.get("n_members", 0)
+            n_success = w.get("n_success", 0)
+            n_timeout = w.get("n_timeout", 0)
+            n_error = w.get("n_error", 0)
+            total_findings = w.get("total_findings", 0)
+            status_parts = [f"{n_success}/{n_members} succeeded"]
+            if n_timeout:
+                status_parts.append(f"{n_timeout} timed out")
+            if n_error:
+                status_parts.append(f"{n_error} errored")
+            status_parts.append(f"{total_findings} findings")
+            lines.append(
+                f"  Wave {wave_id} [iter {it}] {', '.join(status_parts)}"
+            )
+            for m in (w.get("members") or []):
+                name = m.get("name") or "(unnamed)"
+                task = (m.get("task_summary") or "").strip()
+                status = m.get("status") or "unknown"
+                iters = m.get("iterations_used", 0)
+                f_count = m.get("findings_count", 0)
+                reason = (m.get("completion_reason") or "").strip()
+                task_str = f" — {task}" if task else ""
+                reason_str = f" — {reason}" if reason else ""
+                lines.append(
+                    f"    - {name}{task_str}: {status}, {iters} iter, "
+                    f"{f_count} findings{reason_str}"
+                )
+        lines.append("")
+
     # ── Recent Steps (grouped by iteration) ─────────────
     if execution_trace:
         iter_groups = _group_trace_by_iteration(execution_trace)
@@ -1314,6 +1540,27 @@ def format_chain_context(
                 else:
                     tool_name = tools[0].get("tool_name") or "none"
                     lines.append(f"  {it} [{phase}]: {tool_name} ->{fail_marker} {analysis[:10000]}")
+                # A+B: tool digest with args + tiny output fingerprint. Without
+                # this, older iterations lose all per-tool detail and the
+                # Self-Check duplicate-target rule has nothing to match on.
+                digest_parts: list = []
+                for t in tools:
+                    tname = t.get("tool_name") or "unknown"
+                    targs = t.get("tool_args") or {}
+                    args_str = str(targs)[:80] if targs else ""
+                    entry = f"{tname}({args_str})" if args_str else tname
+                    diag = _format_step_diagnostics(t)
+                    if diag:
+                        entry = f"{entry}{diag}"
+                    if t.get("success", True):
+                        raw = t.get("tool_output") or t.get("output_summary") or ""
+                        if raw:
+                            fp = str(raw).replace("\n", " ").strip()[:60]
+                            if fp:
+                                entry = f"{entry} -> {fp}"
+                    digest_parts.append(entry)
+                if digest_parts:
+                    lines.append(f"      tools: {'; '.join(digest_parts)}")
             lines.append("")
 
         if total_iterations > recent_iterations:
@@ -1341,22 +1588,34 @@ def format_chain_context(
                 ok_count = 0
                 fail_count = 0
                 failed_tools: list = []
-                tool_args_list: list = []
+                # C: per-tool entries carry (args_line, output_preview). The
+                # output preview lets the Self-Check duplicate-target rule
+                # match prior probes by result, not just by args.
+                tool_entries: list = []
                 for t in tools:
                     tname = t.get("tool_name") or "unknown"
                     tool_counts[tname] = tool_counts.get(tname, 0) + 1
+                    diag = _format_step_diagnostics(t)
                     if t.get("success", True):
                         ok_count += 1
                     else:
                         fail_count += 1
+                        # Annotate failed tools with their diagnostic class so
+                        # 12 "FAILED" lines aren't all the same to the LLM.
+                        ec = t.get("error_class") or ""
+                        ec_str = f"[{ec}] " if ec and ec != "success" else ""
                         failed_tools.append(
-                            f"{tname}: {(t.get('error_message') or '')[:300]}"
+                            f"{tname}{diag}: {ec_str}{(t.get('error_message') or '')[:300]}"
                         )
                     targs = t.get("tool_args") or {}
                     if targs:
-                        tool_args_list.append(
-                            f"    - {tname}: {str(targs)[:300]}"
-                        )
+                        args_line = f"    - {tname}{diag}: {str(targs)[:300]}"
+                        preview = ""
+                        if t.get("success", True):
+                            raw = t.get("tool_output") or t.get("output_summary") or ""
+                            if raw:
+                                preview = str(raw).replace("\n", " ").strip()[:200]
+                        tool_entries.append((args_line, preview))
 
                 tool_summary = ", ".join(
                     f"{cnt} {name}" for name, cnt in tool_counts.items()
@@ -1377,11 +1636,15 @@ def format_chain_context(
                 if rationale:
                     lines.append(f"    Rationale: {rationale[:400]}")
 
-                # Individual tool args (compact, one line each)
-                if tool_args_list:
+                # Individual tool args + short output preview. The preview
+                # makes prior probes visible to the duplicate-target rule
+                # without the LLM having to consult Analysis prose.
+                if tool_entries:
                     lines.append("    Tools:")
-                    for arg_line in tool_args_list:
-                        lines.append(arg_line)
+                    for args_line, preview in tool_entries:
+                        lines.append(args_line)
+                        if preview:
+                            lines.append(f"      -> {preview}")
 
                 # Failures
                 for ft in failed_tools:
@@ -1400,8 +1663,9 @@ def format_chain_context(
                 err = tool_entry.get("error_message") or ""
                 thought = tool_entry.get("thought", "")
                 output = tool_entry.get("tool_output", "")
+                diag = _format_step_diagnostics(tool_entry)
 
-                lines.append(f"  Step {it} [{phase}]: {tool}")
+                lines.append(f"  Step {it} [{phase}]: {tool}{diag}")
                 if thought:
                     lines.append(f"    Thought: {thought[:500]}")
                 if args and tool != "none":
@@ -1412,8 +1676,21 @@ def format_chain_context(
                         lines.append(f"    OK | {out_preview}")
                     else:
                         lines.append(f"    OK")
+                    # D: when analysis exists AND raw output is non-empty, the
+                    # OK line carries the analysis (LLM's interpretation) but
+                    # shadows the raw response. Surface a short raw-output
+                    # preview separately so the duplicate-target rule sees the
+                    # actual probe result, not just the interpretation.
+                    if analysis and output:
+                        raw_preview = str(output).replace("\n", " ").strip()[:300]
+                        if raw_preview:
+                            lines.append(f"    Raw: {raw_preview}")
                 else:
-                    lines.append(f"    FAILED | {err[:300]}")
+                    # Tag the FAILED line with error_class so the LLM
+                    # distinguishes a shell-quoting glitch from a real 4xx.
+                    ec = tool_entry.get("error_class") or ""
+                    ec_str = f"[{ec}] " if ec and ec != "success" else ""
+                    lines.append(f"    FAILED | {ec_str}{err[:300]}")
 
             # Full output for the very last iteration's last tool
             if is_last:

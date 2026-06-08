@@ -36,6 +36,56 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # Strip ANSI escape codes (terminal colors) from output
 ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
+
+def _format_subprocess_result(
+    result: subprocess.CompletedProcess,
+    *,
+    tool_name: str,
+    no_match_msg: str,
+    stderr_filter=None,
+) -> str:
+    """Build a wrapper return string that distinguishes success-with-no-match
+    from tool failure based on result.returncode.
+
+    The previous shape (`return output if output.strip() else "[INFO] ..."`
+    without inspecting returncode) conflated three different outcomes:
+    success-no-match, per-host timeout, and silent tool failure. The agent
+    then mis-classified live targets as dead. This helper centralises the
+    three-way contract every wrapper needs:
+
+    - returncode != 0: "[ERROR] {tool_name} failed: returncode=N, stderr=..."
+      The trimmed stderr is included so the LLM has context to decide
+      retry-vs-give-up (e.g. DNS resolution failed vs binary missing).
+    - returncode == 0 and stdout empty after stripping: no_match_msg.
+    - returncode == 0 and stdout has content: the stdout (with any kept
+      stderr lines appended via the existing "[STDERR]: ..." convention).
+
+    Args:
+        result: Output of subprocess.run.
+        tool_name: Name surfaced in error strings (e.g. "execute_httpx").
+        no_match_msg: Informational string for the legitimate-no-match case.
+        stderr_filter: Optional predicate(line) -> bool; True keeps the line.
+                       ANSI codes are stripped before filtering. Default keeps
+                       all non-empty lines.
+    """
+    clean_stdout = ANSI_ESCAPE.sub('', result.stdout or '')
+    clean_stderr = ANSI_ESCAPE.sub('', result.stderr or '')
+    if stderr_filter is None:
+        stderr_filter = lambda line: bool(line)
+    kept_stderr = [line for line in clean_stderr.split('\n') if stderr_filter(line)]
+
+    if result.returncode != 0:
+        stderr_trim = '\n'.join(kept_stderr)[:2000]
+        msg = f"[ERROR] {tool_name} failed: returncode={result.returncode}"
+        if stderr_trim:
+            msg += f", stderr={stderr_trim}"
+        return msg
+
+    output = clean_stdout
+    if kept_stderr:
+        output += f"\n[STDERR]: {chr(10).join(kept_stderr)}"
+    return output if output.strip() else no_match_msg
+
 # Server configuration
 SERVER_NAME = "network_recon"
 SERVER_HOST = os.getenv("MCP_HOST", "0.0.0.0")
@@ -117,10 +167,11 @@ def execute_curl(args: str) -> str:
             text=True,
             timeout=60
         )
-        output = result.stdout
-        if result.stderr:
-            output += f"\n[STDERR]: {result.stderr}"
-        return output if output.strip() else "[INFO] No response received"
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_curl",
+            no_match_msg="[INFO] No response received",
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 60 seconds. Consider using --connect-timeout and --max-time flags."
     except FileNotFoundError:
@@ -171,17 +222,12 @@ def execute_naabu(args: str) -> str:
             text=True,
             timeout=300
         )
-        output = ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            # Strip ANSI codes then filter out progress/info messages, keep errors
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line and not line.startswith('[INF]')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-        return output if output.strip() else "[INFO] No open ports found"
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_naabu",
+            no_match_msg="[INFO] No open ports found",
+            stderr_filter=lambda l: bool(l) and not l.startswith('[INF]'),
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 300 seconds. Consider using a smaller port range or higher rate."
     except FileNotFoundError:
@@ -235,16 +281,12 @@ def execute_httpx(args: str) -> str:
             text=True,
             timeout=300
         )
-        output = ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line and not line.startswith('[INF]')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-        return output if output.strip() else "[INFO] No live hosts found"
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_httpx",
+            no_match_msg="[INFO] No live hosts found",
+            stderr_filter=lambda l: bool(l) and not l.startswith('[INF]'),
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 300 seconds. Consider using fewer targets or adding -timeout flag."
     except FileNotFoundError:
@@ -302,16 +344,12 @@ def execute_subfinder(args: str) -> str:
             text=True,
             timeout=120
         )
-        output = ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line and not line.startswith('[INF]')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-        return output if output.strip() else "[INFO] No subdomains found"
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_subfinder",
+            no_match_msg="[INFO] No subdomains found",
+            stderr_filter=lambda l: bool(l) and not l.startswith('[INF]'),
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 120 seconds. Consider using -timeout flag to limit per-source timeout."
     except FileNotFoundError:
@@ -378,18 +416,16 @@ def execute_gau(args: str, urlscan_api_key: str = "") -> str:
             text=True,
             timeout=300
         )
-        output = ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line
-                and not line.startswith('[INF]')
-                and 'using default config' not in line
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-        return output if output.strip() else "[INFO] No URLs found in archives for this domain"
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_gau",
+            no_match_msg="[INFO] No URLs found in archives for this domain",
+            stderr_filter=lambda l: (
+                bool(l)
+                and not l.startswith('[INF]')
+                and 'using default config' not in l
+            ),
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 300 seconds. Consider using --blacklist to filter extensions or --providers to limit sources."
     except FileNotFoundError:
@@ -439,10 +475,11 @@ def kali_shell(command: str) -> str:
             text=True,
             timeout=300
         )
-        output = result.stdout
-        if result.stderr:
-            output += f"\n[STDERR]: {result.stderr}"
-        return output if output.strip() else "[INFO] Command completed with no output"
+        return _format_subprocess_result(
+            result,
+            tool_name="kali_shell",
+            no_match_msg="[INFO] Command completed with no output",
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 300 seconds."
     except Exception as e:
@@ -659,6 +696,21 @@ def execute_hydra(args: str) -> str:
             _hydra_active = False
 
         output = '\n'.join(output_lines)
+        # Distinguish a clean run (returncode 0) that found no creds from a
+        # hydra-level failure (e.g. unsupported service, bad target). Hydra's
+        # stderr was merged into stdout above, so any error context is already
+        # in `output`. We only synthesize an [ERROR] envelope on non-zero exit
+        # AND empty/uninformative output — when output is rich (e.g. it has a
+        # hydra panic message) the LLM can read it directly.
+        if proc.returncode != 0 and not output.strip():
+            return (
+                f"[ERROR] execute_hydra failed: returncode={proc.returncode} "
+                f"(no output captured; check target/protocol/credentials list)"
+            )
+        if proc.returncode != 0 and output.strip():
+            # Surface non-zero exit even when output is present, so the LLM
+            # doesn't mistake a partial-failure dump for a clean negative.
+            return f"[ERROR] execute_hydra failed: returncode={proc.returncode}\n{output}"
         return output if output.strip() else "[INFO] No valid credentials found"
 
     except FileNotFoundError:
@@ -713,16 +765,12 @@ def execute_jsluice(args: str) -> str:
             text=True,
             timeout=120
         )
-        output = result.stdout
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line.strip()
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-        return output if output.strip() else "[INFO] No results found in the analyzed files"
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_jsluice",
+            no_match_msg="[INFO] No results found in the analyzed files",
+            stderr_filter=lambda l: bool(l.strip()),
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 120 seconds."
     except FileNotFoundError:
@@ -782,17 +830,12 @@ def execute_masscan(args: str) -> str:
             text=True,
             timeout=600
         )
-
-        output = ""
-        if result.stdout:
-            output += result.stdout
-        if result.stderr:
-            stderr_lines = result.stderr.strip().split('\n')
-            useful_stderr = [l for l in stderr_lines if not l.startswith('rate:')]
-            if useful_stderr:
-                output += "\n[STDERR]\n" + "\n".join(useful_stderr)
-
-        return output.strip() if output.strip() else "[INFO] Scan completed with no output."
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_masscan",
+            no_match_msg="[INFO] Scan completed with no output.",
+            stderr_filter=lambda l: bool(l) and not l.startswith('rate:'),
+        )
 
     except subprocess.TimeoutExpired:
         return "[ERROR] Command timed out after 600 seconds. Use smaller target ranges or fewer ports."
@@ -838,23 +881,16 @@ def execute_wpscan(args: str) -> str:
             text=True,
             timeout=600
         )
-
-        output = ""
-        if result.stdout:
-            output += ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line and not line.startswith('[i]') and 'warning:' not in line.lower()
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-
-        if not output.strip():
-            return "[INFO] WPScan completed with no output. Target may not be a WordPress site."
-
-        return output
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_wpscan",
+            no_match_msg="[INFO] WPScan completed with no output. Target may not be a WordPress site.",
+            stderr_filter=lambda l: (
+                bool(l)
+                and not l.startswith('[i]')
+                and 'warning:' not in l.lower()
+            ),
+        )
 
     except subprocess.TimeoutExpired:
         return "[ERROR] WPScan timed out after 600 seconds."
@@ -908,24 +944,16 @@ def execute_amass(args: str) -> str:
             text=True,
             timeout=1800  # 30 min hard limit — passive+active enum on real domains often needs 15-25 min
         )
-
-        output = ""
-        if result.stdout:
-            output += ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line and not line.startswith('Querying ')
-                and not line.startswith('[INF]')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-
-        if not output.strip():
-            return "[INFO] Amass completed with no output. No subdomains found for the target."
-
-        return output
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_amass",
+            no_match_msg="[INFO] Amass completed with no output. No subdomains found for the target.",
+            stderr_filter=lambda l: (
+                bool(l)
+                and not l.startswith('Querying ')
+                and not l.startswith('[INF]')
+            ),
+        )
 
     except subprocess.TimeoutExpired:
         return "[ERROR] Amass timed out after 660 seconds. Use -timeout flag to set a shorter amass timeout."
@@ -979,25 +1007,16 @@ def execute_katana(args: str) -> str:
             text=True,
             timeout=1800  # 30 min -- depth=2 + JS crawling on real sites routinely exceeds 10 min
         )
-
-        output = ""
-        if result.stdout:
-            output += ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line.strip()
-                and not line.startswith('[INF]')
-                and not line.startswith('[WRN]')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-
-        if not output.strip():
-            return "[INFO] Katana completed with no output. No URLs/endpoints discovered for the target."
-
-        return output
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_katana",
+            no_match_msg="[INFO] Katana completed with no output. No URLs/endpoints discovered for the target.",
+            stderr_filter=lambda l: (
+                bool(l.strip())
+                and not l.startswith('[INF]')
+                and not l.startswith('[WRN]')
+            ),
+        )
 
     except subprocess.TimeoutExpired:
         return "[ERROR] Katana timed out after 600 seconds. Consider reducing -d (depth), lowering -c (concurrency), or narrowing scope."
@@ -1054,18 +1073,23 @@ def execute_arjun(args: str) -> str:
             text=True,
             timeout=1200
         )
+        # arjun has post-processing (reads -oJ JSON output file), so we can't
+        # use _format_subprocess_result directly. Do the returncode-aware
+        # error path inline, then build the success-path output with the
+        # JSON file injection.
+        stderr_filter = lambda l: bool(l.strip()) and not l.strip().startswith('[*]')
+        clean_stderr_raw = ANSI_ESCAPE.sub('', result.stderr or '')
+        kept_stderr = [l for l in clean_stderr_raw.split('\n') if stderr_filter(l)]
+        if result.returncode != 0:
+            stderr_trim = '\n'.join(kept_stderr)[:2000]
+            msg = f"[ERROR] execute_arjun failed: returncode={result.returncode}"
+            if stderr_trim:
+                msg += f", stderr={stderr_trim}"
+            return msg
 
-        output = ""
-        if result.stdout:
-            output += ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line.strip() and not line.strip().startswith('[*]')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
+        output = ANSI_ESCAPE.sub('', result.stdout or '')
+        if kept_stderr:
+            output += f"\n[STDERR]: {chr(10).join(kept_stderr)}"
 
         # Arjun writes JSON results to file (not stdout). Auto-read if -oJ was used.
         for i, arg in enumerate(cmd_args):
@@ -1148,31 +1172,22 @@ def execute_ffuf(args: str) -> str:
             text=True,
             timeout=1200
         )
-
-        output = ""
-        if result.stdout:
-            output += ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line.strip()
-                and not line.strip().startswith(':: ')
-                and 'progress:' not in line.lower()
-                and 'job #' not in line.lower()
-                and '___' not in line
-                and '\\/' not in line
-                and '/\\' not in line
-                and line.strip() not in ('', '_' * 48)
-                and not line.strip().startswith('v2.')
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-
-        if not output.strip():
-            return "[INFO] No results found matching the specified filters."
-
-        return output
+        return _format_subprocess_result(
+            result,
+            tool_name="execute_ffuf",
+            no_match_msg="[INFO] No results found matching the specified filters.",
+            stderr_filter=lambda l: (
+                bool(l.strip())
+                and not l.strip().startswith(':: ')
+                and 'progress:' not in l.lower()
+                and 'job #' not in l.lower()
+                and '___' not in l
+                and '\\/' not in l
+                and '/\\' not in l
+                and l.strip() not in ('', '_' * 48)
+                and not l.strip().startswith('v2.')
+            ),
+        )
 
     except subprocess.TimeoutExpired:
         return "[ERROR] FFuf timed out after 600 seconds. Consider narrowing scope with -mc/-fc/-fs filters or a smaller wordlist."
@@ -1257,19 +1272,17 @@ def cve_intel(args: str, api_key: str = "") -> str:
             timeout=60,
             env=env,
         )
-        output = ANSI_ESCAPE.sub('', result.stdout)
-        if result.stderr:
-            clean_stderr = ANSI_ESCAPE.sub('', result.stderr)
-            stderr_lines = [
-                line for line in clean_stderr.split('\n')
-                if line
-                and not line.startswith('[INF]')
-                and 'Current vulnx version' not in line
-                and 'using default config' not in line
-            ]
-            if stderr_lines:
-                output += f"\n[STDERR]: {chr(10).join(stderr_lines)}"
-        return output if output.strip() else "[INFO] No CVEs matched the query"
+        return _format_subprocess_result(
+            result,
+            tool_name="cve_intel",
+            no_match_msg="[INFO] No CVEs matched the query",
+            stderr_filter=lambda l: (
+                bool(l)
+                and not l.startswith('[INF]')
+                and 'Current vulnx version' not in l
+                and 'using default config' not in l
+            ),
+        )
     except subprocess.TimeoutExpired:
         return "[ERROR] vulnx timed out after 60 seconds. Tighten the query (add --limit, narrow filters)."
     except FileNotFoundError:

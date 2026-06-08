@@ -360,7 +360,10 @@ class TestRunGraphqlCop(unittest.TestCase):
         cmd = mock_run.call_args[0][0]
         self.assertIn('-d', cmd)
 
-    def test_tor_adds_network_host_and_capital_T(self):
+    def test_tor_adds_net_host_and_capital_T(self):
+        # Host networking is now ALWAYS on (single `--net=host` flag) so the
+        # spawned graphql-cop container can reach loopback / local-lab
+        # endpoints. Tor still drives the in-process `-T` flag.
         mock_result = MagicMock(returncode=0, stdout='[]', stderr='')
         with patch('subprocess.run', return_value=mock_result) as mock_run:
             run_graphql_cop(
@@ -368,8 +371,7 @@ class TestRunGraphqlCop(unittest.TestCase):
                 {'GRAPHQL_COP_ENABLED': True, 'USE_TOR_FOR_RECON': True},
             )
         cmd = mock_run.call_args[0][0]
-        self.assertIn('--network', cmd)
-        self.assertIn('host', cmd)
+        self.assertIn('--net=host', cmd)
         self.assertIn('-T', cmd)
 
     def test_no_e_flag_in_cmd_v1_14_does_not_support_it(self):

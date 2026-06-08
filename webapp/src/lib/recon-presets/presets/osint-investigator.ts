@@ -110,6 +110,7 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
     // --- DISABLE all active crawlers ---
     katanaEnabled: false,
     hakrawlerEnabled: false,
+    zapAjaxSpiderEnabled: false,
 
     // --- GAU: all providers, max results, NO verification (would hit target) ---
     gauEnabled: true,
@@ -132,6 +133,7 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
     // --- DISABLE JS Recon (crawls target) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory/API fuzzing ---
     ffufEnabled: false,
     kiterunnerEnabled: false,

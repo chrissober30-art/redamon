@@ -152,10 +152,10 @@ async def generate_report_narratives(
         return result
 
     except json.JSONDecodeError as e:
-        logger.error(f"Report summarizer: invalid JSON from LLM: {e}")
+        logger.error(f"Report summarizer: invalid JSON from LLM: {type(e).__name__}: {e}")
         return _empty_narratives()
     except Exception as e:
-        logger.error(f"Report summarizer error: {e}")
+        logger.error(f"Report summarizer error: {type(e).__name__}: {e}")
         return _empty_narratives()
 
 

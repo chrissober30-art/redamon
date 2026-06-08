@@ -33,3 +33,17 @@ paramspider @ git+https://github.com/devanshbatham/ParamSpider.git  # Passive UR
 
 # MITRE enrichment
 # (uses requests - already included above)
+
+# AI surface recon — favicon hashing for AI-frontend product detection
+mmh3>=4.1.0                  # MurmurHash3, used by ai_signal_catalog favicon lookup
+
+# AI surface recon (central module) — protocol-aware AI/LLM/MCP fingerprinting.
+# Imported lazily inside ai_surface_recon.py so a missing dep degrades that one
+# module instead of crashing the whole recon job. Rebuild the recon image after
+# adding these: docker compose --profile tools build recon
+PyYAML>=6.0                  # Parse vendored Julius probe-pack YAML (probe_pack_engine); MIT
+mcp>=1.27.0                  # Official Model Context Protocol SDK (initialize + tools/list); MIT
+yara-python>=4.5.0          # Static MCP tool-poisoning rules (deterministic, no-LLM); Apache-2.0
+prance>=23.6.21.0           # OpenAPI/Swagger $ref-resolving parser; MIT
+openapi-spec-validator>=0.7.1,<0.8  # prance validation backend (OpenAPI 2.0/3.0/3.1); Apache-2.0. Pinned <0.8 to match prance's osv extra (~=0.7.1); newer osv breaks prance's validator import.
+jq>=1.6.0                    # jq.py — Julius models.extract expressions; BSD-2 (bundles libjq)

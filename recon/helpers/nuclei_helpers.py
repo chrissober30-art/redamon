@@ -98,8 +98,13 @@ def build_nuclei_command(
     targets_filename = Path(targets_file).name
     output_filename = Path(output_file).name
 
+    # --net=host is ALWAYS passed so Nuclei can reach loopback / local-lab
+    # targets. See recon/helpers/resource_enum/katana_helpers.py for the long
+    # comment on sibling-container network isolation. Nuclei sends HTTP probes
+    # to the targets, so without --net=host every fetch against 127.0.0.1
+    # silently fails with ECONNREFUSED.
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", "--net=host",
         "-v", f"{targets_host_path}:/targets:ro",
         "-v", f"{output_host_path}:/output",
         "-v", f"{NUCLEI_TEMPLATES_VOLUME}:/root/nuclei-templates",
@@ -109,10 +114,6 @@ def build_nuclei_command(
     host_custom_templates = os.environ.get("HOST_CUSTOM_TEMPLATES_PATH", "")
     if selected_custom_templates and host_custom_templates:
         cmd.extend(["-v", f"{host_custom_templates}:/custom-templates:ro"])
-
-    # Add network host mode for Tor proxy access
-    if use_proxy:
-        cmd.extend(["--network", "host"])
     
     cmd.extend([
         docker_image,

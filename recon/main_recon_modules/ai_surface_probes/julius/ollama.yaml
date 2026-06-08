@@ -1,0 +1,35 @@
+# Vendored from github.com/praetorian-inc/julius (probes/ollama.yaml), Apache-2.0.
+# Reference: https://github.com/ollama/ollama/blob/main/docs/api.md
+name: ollama
+description: Ollama local LLM server
+category: ai-runtime
+port_hint: 11434
+specificity: 100
+require: all
+api_docs: https://github.com/ollama/ollama/blob/main/docs/api.md
+
+requests:
+  - type: http
+    path: /
+    method: GET
+    match:
+      - type: status
+        value: 200
+      - type: body.contains
+        value: "Ollama is running"
+
+  - type: http
+    path: /api/tags
+    method: GET
+    match:
+      - type: status
+        value: 200
+      - type: content-type
+        value: application/json
+      - type: body.contains
+        value: '"models"'
+
+models:
+  path: /api/tags
+  method: GET
+  extract: ".models[].name"

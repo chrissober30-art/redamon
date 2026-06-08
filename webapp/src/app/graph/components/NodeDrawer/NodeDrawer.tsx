@@ -36,9 +36,16 @@ export function NodeDrawer({
     setShowDeleteConfirm(true)
   }
 
+  // Determine what to display:
+  // - Root is a cluster with nothing expanded → show its child list
+  // - Root is a cluster with expanded node that is ALSO a cluster → show that cluster's list (nested)
+  // - Root is a cluster with expanded leaf node → show that leaf's properties
+  // - Root is a regular node → show its properties
   const isCluster = !!node?.isCluster
-  const displayNode: GraphNode | null = isCluster ? (expandedChild ?? null) : node
-  const showList = isCluster && !expandedChild
+  const topOfStack = expandedChild ?? null
+  const showList = (isCluster && !topOfStack) || !!topOfStack?.isCluster
+  const listCluster: GraphNode | null = topOfStack?.isCluster ? topOfStack : (isCluster ? node : null)
+  const displayNode: GraphNode | null = showList ? null : (topOfStack ?? node)
 
   const handleDeleteConfirm = async () => {
     if (!displayNode || !onDeleteNode) return
@@ -72,11 +79,11 @@ export function NodeDrawer({
     : []
 
   const drawerTitle = node
-    ? isCluster
-      ? expandedChild
-        ? `${expandedChild.type}: ${expandedChild.name}`
-        : `Cluster: ${node.clusterChildType ?? ''}`
-      : `${node.type}: ${node.name}`
+    ? showList && listCluster
+      ? `Cluster: ${listCluster.clusterChildType ?? ''}`
+      : displayNode
+        ? `${displayNode.type}: ${displayNode.name}`
+        : undefined
     : undefined
 
   return (
@@ -87,11 +94,22 @@ export function NodeDrawer({
       mode="overlay"
       title={drawerTitle}
     >
-      {node && showList && (
-        <ClusterNodeList
-          cluster={node}
-          onSelectChild={(child) => onExpandChild?.(child)}
-        />
+      {showList && listCluster && (
+        <>
+          {topOfStack && onCollapseChild && (
+            <button
+              className={clusterStyles.backBtn}
+              onClick={onCollapseChild}
+            >
+              <ArrowLeft size={14} />
+              Back
+            </button>
+          )}
+          <ClusterNodeList
+            cluster={listCluster}
+            onSelectChild={(child) => onExpandChild?.(child)}
+          />
+        </>
       )}
 
       {displayNode && !showList && (

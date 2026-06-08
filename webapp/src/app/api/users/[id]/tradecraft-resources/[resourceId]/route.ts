@@ -78,6 +78,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // llmModel is required if explicitly being updated. Empty string would
+    // make the resource unusable, so reject it. Callers that don't touch
+    // llmModel just omit the key — existing value is preserved.
+    if ('llmModel' in updateData) {
+      const val = updateData.llmModel
+      if (typeof val !== 'string' || !val.trim()) {
+        return NextResponse.json(
+          { error: 'llmModel cannot be empty' },
+          { status: 400 }
+        )
+      }
+      updateData.llmModel = val.trim()
+    }
+
     const updated = await prisma.userTradecraftResource.update({
       where: { id: resourceId },
       data: updateData,

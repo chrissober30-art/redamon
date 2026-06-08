@@ -56,7 +56,7 @@ async def save_chat_message(
                     f"Chat persistence failed ({resp.status_code}): {resp.text[:200]}"
                 )
     except Exception as e:
-        logger.warning(f"Chat persistence error: {e}")
+        logger.warning(f"Chat persistence error: {type(e).__name__}: {e}")
 
 
 async def update_conversation(
@@ -76,4 +76,4 @@ async def update_conversation(
                     f"Conversation update failed ({resp.status_code}): {resp.text[:200]}"
                 )
     except Exception as e:
-        logger.warning(f"Conversation update error: {e}")
+        logger.warning(f"Conversation update error: {type(e).__name__}: {e}")

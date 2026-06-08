@@ -217,7 +217,7 @@ async def emit_streaming_events(state: dict, callback) -> None:
                     )
                     callback._emitted_thinking_ids.add(think_id)
                 except Exception as e:
-                    logger.error(f"Error emitting thinking event: {e}")
+                    logger.error(f"Error emitting thinking event: {type(e).__name__}: {e}")
 
         # 3. Emit tool_start and output chunks for CURRENT step (new tool)
         #    Skip if tool confirmation is pending — tool hasn't actually started yet.
@@ -282,6 +282,6 @@ async def emit_streaming_events(state: dict, callback) -> None:
             )
 
     except Exception as e:
-        logger.error(f"Error emitting streaming events: {e}")
+        logger.error(f"Error emitting streaming events: {type(e).__name__}: {e}")
         # Don't fail the whole operation if streaming fails
         pass

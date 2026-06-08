@@ -26,6 +26,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from helpers.iana_services import get_service_name_friendly as get_service_name
 
+# AI surface recon — reuse the port-catalogue annotator defined in port_scan.py.
+# Importing from there (instead of duplicating the helper) keeps the catalogue
+# rules single-sourced and means a future change (e.g. promoting an ambiguous
+# port via http-probe confirmation) only needs to land once.
+from main_recon_modules.port_scan import _annotate_ai_port_catalog
+
 
 # =============================================================================
 # Prerequisites
@@ -152,9 +158,13 @@ def build_masscan_command(targets_file: str, output_file: str, settings: dict) -
 # Result Parsing
 # =============================================================================
 
-def parse_masscan_output(output_file: str, ip_to_hostnames: Dict[str, List[str]]) -> Dict:
+def parse_masscan_output(output_file: str, ip_to_hostnames: Dict[str, List[str]], settings: dict = None) -> Dict:
     """
     Parse Masscan NDJSON (-oD) output into the same structure as Naabu's parser.
+
+    AI surface recon: when ``settings`` is provided, ports matching the AI
+    port catalogue receive an ``ai_service`` annotation on their port_details
+    entry (gated by MASSCAN_AI_PORT_CATALOG_ENABLED).
 
     Masscan NDJSON format — one record per line, one port per record:
     {"ip":"x.x.x.x","timestamp":"...","port":80,"proto":"tcp","rec_type":"status","data":{"status":"open","reason":"syn-ack","ttl":48}}
@@ -269,6 +279,9 @@ def parse_masscan_output(output_file: str, ip_to_hostnames: Dict[str, List[str]]
 
     all_ports_sorted = sorted(list(all_ports))
 
+    # AI surface recon — annotate AI-bearing ports on each port_details entry
+    ai_annotations = _annotate_ai_port_catalog(by_host, settings, detected_by="masscan-ai-port")
+
     summary = {
         "hosts_scanned": len(by_host),
         "ips_scanned": len(by_ip),
@@ -277,6 +290,7 @@ def parse_masscan_output(output_file: str, ip_to_hostnames: Dict[str, List[str]]
         "unique_ports": all_ports_sorted,
         "unique_port_count": len(all_ports_sorted),
         "cdn_hosts": 0,
+        "ai_ports_annotated": ai_annotations,
     }
 
     return {
@@ -436,7 +450,9 @@ def run_masscan_scan(recon_data: dict, output_file: Path = None, settings: dict 
 
         # Parse results
         print(f"[*][Masscan] Parsing results...")
-        results = parse_masscan_output(str(masscan_output), ip_to_hostnames)
+        results = parse_masscan_output(str(masscan_output), ip_to_hostnames, settings=settings)
+        if results.get("summary", {}).get("ai_ports_annotated"):
+            print(f"[+][Masscan] AI port catalog matched {results['summary']['ai_ports_annotated']} port(s)")
 
         masscan_results = {
             "scan_metadata": {

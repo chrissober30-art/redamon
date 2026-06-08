@@ -65,21 +65,6 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
                 onChange={(checked) => updateField('agentActivatePostExplPhase', checked)}
               />
             </div>
-            <div className={styles.toggleRow}>
-              <div>
-                <span className={styles.toggleLabel}>Deep Think</span>
-                <p className={styles.toggleDescription}>
-                  When enabled, the agent performs an explicit deep reasoning step at key decision points
-                  (start of session, phase transitions, failure loops) to plan multi-step attack strategies
-                  before acting. Adds ~1 extra LLM call at these moments. Recommended for complex targets
-                  with multiple services.
-                </p>
-              </div>
-              <Toggle
-                checked={data.agentDeepThinkEnabled}
-                onChange={(checked) => updateField('agentDeepThinkEnabled', checked)}
-              />
-            </div>
             <div className={styles.fieldRow}>
               <div className={styles.fieldGroup}>
                 <label className={styles.fieldLabel}>Post-Exploitation Type</label>

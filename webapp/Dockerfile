@@ -19,7 +19,7 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY . ./
 
 ARG REDAMON_VERSION=0.0.0
 ENV NEXT_PUBLIC_REDAMON_VERSION=$REDAMON_VERSION

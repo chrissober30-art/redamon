@@ -65,6 +65,348 @@ TOOL_REGISTRY = {
             '   - Use AFTER query_graph when you need context not in the graph.'
         ),
     },
+
+    # =========================================================================
+    # WORKSPACE FILESYSTEM (fs_*) - 24 in-process tools operating inside
+    # /workspace/<projectId>/. All paths are project-scoped; .. traversal and
+    # absolute paths outside the workspace are rejected. Per-call output_mode
+    # override ('inline'|'file'|'auto') works on every tool but fs_*/job_*
+    # outputs are already structured so offload is bypassed for them.
+    # =========================================================================
+
+    # --- Read (3) ----------------------------------------------------------
+
+    "fs_read": {
+        "purpose": "Read a file from the project workspace with line numbers",
+        "when_to_use": "Inspect a file you wrote earlier or that was produced by an offloaded tool result. ALWAYS use this to drill into tool-outputs/ files after seeing an [Output offloaded:] marker.",
+        "args_format": '"path": "relative path under /workspace/<projectId>/", "offset": int (optional, 1-indexed start line), "limit": int (optional, default 2000)',
+        "description": (
+            '**fs_read** (workspace file read)\n'
+            '   - Cat-n style output with line numbers. Default 2000 lines; pass `offset`/`limit` to window.\n'
+            '   - Auto-detects binary: returns `[binary file]` header + base64 for non-text (screenshots, certs, PCAPs).\n'
+            '   - Records a snapshot internally so `fs_diff(path, vs_last_read=True)` can detect concurrent writes.\n'
+            '   - Common path roots: `notes/` (your scratch), `tool-outputs/` (offloaded results), `jobs/` (background-job logs).\n'
+            '   - Example: `fs_read("tool-outputs/2026-05-14T10-22-01Z-execute_nuclei.txt", offset=1230, limit=50)` after grep narrows the line range.'
+        ),
+    },
+    "fs_read_many": {
+        "purpose": "Batched read of multiple workspace files with a hard total-payload cap",
+        "when_to_use": "Triage N small files in one call (N <= ~50). Each file is delimited by `=== <path> ===`; reading stops when `max_total_bytes` is reached.",
+        "args_format": '"paths": ["a.txt", "b.txt", ...], "max_total_bytes": int (optional, default 200000)',
+        "description": (
+            '**fs_read_many** (batched workspace read)\n'
+            '   - Token-efficient when scanning many small files (e.g. several offloaded tool outputs).\n'
+            '   - Files concatenated with `=== <path> ===` headers; binary files render as a stub, not base64.\n'
+            '   - Hard cap on total payload prevents context blowup - last-read files may be truncated.'
+        ),
+    },
+    "fs_stat": {
+        "purpose": "Filesystem metadata (size, mtime, mode, type) with optional sha256",
+        "when_to_use": "Confirm a file exists / check size before reading; record evidence integrity hashes; spot symlinks.",
+        "args_format": '"path": "relative path", "include_hash": bool (optional, computes sha256 over file content)',
+        "description": (
+            '**fs_stat** (workspace metadata)\n'
+            '   - Returns type (file|dir|symlink), size in bytes, octal mode, ISO mtime.\n'
+            '   - `include_hash=True` adds a sha256 line - use it for evidence integrity / dedupe across scan runs.'
+        ),
+    },
+
+    # --- Write & Mutate (10) -----------------------------------------------
+
+    "fs_write": {
+        "purpose": "Atomic create / overwrite / append a workspace file",
+        "when_to_use": "Save notes, intermediate findings, payload files, evidence. Three modes: `overwrite` (default, atomic via tmp+rename), `create_only` (errors if exists), `append`.",
+        "args_format": '"path": "relative path", "content": "string", "mode": "overwrite|create_only|append" (optional, default overwrite)',
+        "description": (
+            '**fs_write** (workspace write)\n'
+            '   - Creates parent directories automatically.\n'
+            '   - `overwrite` mode is atomic - a crashed write leaves the original file intact, never a half-written file.\n'
+            '   - `create_only` rejects if path exists - use to guard against clobbering prior evidence.\n'
+            '   - `append` is plain append - prefer for log-style scratch.'
+        ),
+    },
+    "fs_edit": {
+        "purpose": "Exact-string replacement in a workspace file with uniqueness check",
+        "when_to_use": "Surgical edit to an existing file. Errors if `old_string` matches multiple times unless `replace_all=True`. Pushes a snapshot onto an undo stack.",
+        "args_format": '"path": "relative path", "old_string": "exact match", "new_string": "replacement", "replace_all": bool (optional, default false)',
+        "description": (
+            '**fs_edit** (workspace surgical edit)\n'
+            '   - Requires an EXACT string match. If it occurs more than once, you must either add more surrounding context to make it unique OR pass `replace_all=True`.\n'
+            '   - Errors if `old_string == new_string` (catches no-op edits).\n'
+            '   - Snapshot pushed to per-file undo stack (depth 20). Use `fs_undo_edit` to revert.'
+        ),
+    },
+    "fs_multi_edit": {
+        "purpose": "Multiple ordered edits to one file, all-or-nothing",
+        "when_to_use": "Apply N coordinated changes to a single file atomically. If ANY edit fails its uniqueness check, NO changes land. Prefer over N sequential fs_edit calls when the edits are related.",
+        "args_format": '"path": "relative path", "edits": [{"old_string": "...", "new_string": "...", "replace_all": bool}, ...]',
+        "description": (
+            '**fs_multi_edit** (batched atomic edits)\n'
+            '   - Edits applied in order; each one sees the post-prior-edit content.\n'
+            '   - Atomic: any failure rolls back ALL changes (the file is not touched until every edit checks out).\n'
+            '   - Pushes ONE snapshot (the pre-batch content) to the undo stack.'
+        ),
+    },
+    "fs_undo_edit": {
+        "purpose": "Revert the most recent fs_edit / fs_multi_edit on a file",
+        "when_to_use": "Roll back an edit you made earlier in the same session. Undo history is in-memory only (lost on agent restart) and capped at 20 snapshots per file.",
+        "args_format": '"path": "relative path"',
+        "description": (
+            '**fs_undo_edit** (revert last edit)\n'
+            '   - Pops one snapshot off the stack. Returns the current depth in the response.\n'
+            '   - No-op if the stack is empty - returns "No undo history".'
+        ),
+    },
+    "fs_delete": {
+        "purpose": "Delete a workspace file or directory",
+        "when_to_use": "Remove obsolete scratch / failed-experiment files. For directories you MUST pass `recursive=True` (safety default).",
+        "args_format": '"path": "relative path", "recursive": bool (optional, required for dirs)',
+        "description": (
+            '**fs_delete** (workspace delete)\n'
+            '   - Files: removed immediately.\n'
+            '   - Dirs: error unless `recursive=True` - prevents accidental tree wipes.'
+        ),
+    },
+    "fs_move": {
+        "purpose": "Move / rename a workspace path",
+        "when_to_use": "Rename a file or relocate it under a different subdir. Both endpoints must stay inside the project workspace.",
+        "args_format": '"src": "relative source path", "dst": "relative destination path"',
+        "description": (
+            '**fs_move** (workspace move/rename)\n'
+            '   - Creates destination parent directories as needed.\n'
+            '   - Works across subdirs (notes/ -> tool-outputs/, etc.) within the same project.'
+        ),
+    },
+    "fs_copy": {
+        "purpose": "Copy a workspace file or directory tree",
+        "when_to_use": "Promote a scratch file to evidence (e.g. `notes/probe.txt` -> `tool-outputs/findings.txt`) before further edits, or duplicate an offloaded result for safe modification.",
+        "args_format": '"src": "relative source", "dst": "relative destination", "recursive": bool (optional, required for dirs)',
+        "description": (
+            '**fs_copy** (workspace copy)\n'
+            '   - Files use shutil.copy2 (preserves mtime).\n'
+            '   - Dirs require `recursive=True`.'
+        ),
+    },
+    "fs_mkdir": {
+        "purpose": "Create a workspace directory",
+        "when_to_use": "Pre-create an output subtree before writing many files into it. Default subdirs (notes/, tool-outputs/, jobs/, uploads/) are auto-created on first access; you only need fs_mkdir for custom layouts.",
+        "args_format": '"path": "relative directory path", "parents": bool (optional, default true)',
+        "description": (
+            '**fs_mkdir** (workspace mkdir)\n'
+            '   - Idempotent (no error if it already exists).\n'
+            '   - With `parents=True`, creates intermediate dirs as needed (like `mkdir -p`).'
+        ),
+    },
+    "fs_chmod": {
+        "purpose": "Change permission bits on a workspace file",
+        "when_to_use": "Make a payload script executable before running it through kali_shell. Auditable + parameter-validated alternative to `kali_shell chmod`.",
+        "args_format": '"path": "relative path", "mode_str": "octal (e.g. 755) or symbolic (+x, -w)"',
+        "description": (
+            '**fs_chmod** (workspace chmod)\n'
+            '   - Octal: `"755"`, `"644"`.\n'
+            '   - Symbolic: `+x`, `-x`, `+w`, `-w`, `+r`, `-r` (simple form only - no u/g/o targeting).'
+        ),
+    },
+    "fs_symlink_create": {
+        "purpose": "Create a symlink inside the workspace",
+        "when_to_use": "Stable shortcut to a frequently-referenced offloaded file or wordlist. Both target and link must resolve inside the workspace.",
+        "args_format": '"target": "relative path of the existing file", "linkname": "relative path of the link to create", "type": "soft|hard" (optional, default soft)',
+        "description": (
+            '**fs_symlink_create** (workspace symlink)\n'
+            '   - Refuses if the link path already exists.\n'
+            '   - Refuses if either endpoint escapes the workspace.\n'
+            '   - Hard links require both endpoints on the same filesystem (bind-mount usually fine).'
+        ),
+    },
+
+    # --- Search & Navigate (7) ---------------------------------------------
+
+    "fs_grep": {
+        "purpose": "Ripgrep over the workspace (or a subtree of it)",
+        "when_to_use": "Find specific strings across many offloaded files, search inside a running job's log (jobs/<id>.log), narrow a huge tool output to relevant lines before fs_read.",
+        "args_format": '"pattern": "regex", "path": "subdir" (optional, default \\".\\"), "glob": "*.json" (optional), "output_mode": "files_with_matches|content|count" (optional), "context": int (optional), "case_insensitive": bool, "head_limit": int (optional, default 50)',
+        "description": (
+            '**fs_grep** (workspace ripgrep)\n'
+            '   - 30s subprocess timeout; hard cap of 1000 matches.\n'
+            '   - `output_mode="content"` returns matching lines with `-n` line numbers; `"count"` shows per-file counts.\n'
+            '   - Common pattern: `fs_grep("CVE-", path="tool-outputs", output_mode="content", head_limit=100)`.\n'
+            '   - Works MID-FLIGHT on a job\'s log file - `fs_grep("vulnerable", path="jobs")` while a background scan is still running.'
+        ),
+    },
+    "fs_glob": {
+        "purpose": "Find workspace files by glob pattern, sorted newest-first",
+        "when_to_use": "Locate files when you know the name pattern but not the exact path (e.g. `*.json`, `**/findings-*.txt`). Sorted by mtime descending so the most-recently-written hits come first.",
+        "args_format": '"pattern": "glob pattern", "path": "search root" (optional, default workspace root)',
+        "description": (
+            '**fs_glob** (workspace glob)\n'
+            '   - Supports `**` recursive globs.\n'
+            '   - Caps at 500 results.\n'
+            '   - Common: `fs_glob("tool-outputs/*-execute_nuclei.txt")` to list all nuclei runs.'
+        ),
+    },
+    "fs_find": {
+        "purpose": "Metadata-based file search (name pattern + mtime + size + type filters)",
+        "when_to_use": "When glob alone is not enough - filter by recency (mtime=<1h), size (size=>10M), or type (file/dir/symlink).",
+        "args_format": '"path": "search root" (optional), "name": "glob" (optional), "mtime": "<24h | >7d | <1m" (optional), "size": "<10M | >1K" (optional), "type": "file|dir|symlink" (optional), "max_results": int (optional, default 200)',
+        "description": (
+            '**fs_find** (workspace metadata search)\n'
+            '   - 30s walk timeout; results capped at `max_results` (hard ceiling 5000).\n'
+            '   - Time units: `s`, `m`, `h`, `d`, `w`. Size units: `B`, `K`, `M`, `G`.\n'
+            '   - Bad spec values are silently dropped (the filter just doesn\'t apply).\n'
+            '   - Example: `fs_find(name="*.txt", mtime="<1h", size=">10K")` finds recent large text files.'
+        ),
+    },
+    "fs_list": {
+        "purpose": "Single-directory listing with type indicator, size, mtime",
+        "when_to_use": "Look inside one specific directory. Use fs_tree for a hierarchical view, fs_glob/fs_find for pattern-based search.",
+        "args_format": '"path": "relative directory" (optional, default \\".\\")',
+        "description": (
+            '**fs_list** (workspace ls)\n'
+            '   - Dirs sorted before files, then alphabetical.\n'
+            '   - Shows type column (`dir`/`lnk`/blank), human-readable size, ISO mtime.\n'
+            '   - Caps at 200 entries with a "showing N of M" footer.'
+        ),
+    },
+    "fs_tree": {
+        "purpose": "Depth-limited ASCII tree of a workspace subtree",
+        "when_to_use": "Get oriented in an unfamiliar subdir or after a scan dumps many files. Skips .git / node_modules / __pycache__ / hidden dirs.",
+        "args_format": '"path": "root" (optional), "max_depth": int (optional, default 3), "max_entries": int (optional, default 500)',
+        "description": (
+            '**fs_tree** (workspace tree)\n'
+            '   - Pretty-prints with `├──`, `└──`, `│   ` connectors.\n'
+            '   - Output bounded by BOTH depth and entry count - tree truncates with `[truncated at N]` if either limit fires.'
+        ),
+    },
+    "fs_symbols": {
+        "purpose": "AST outline of a source file (functions / classes / methods + line ranges)",
+        "when_to_use": "Quick orientation in a code file (e.g. a JS reconnaissance script, a Python payload) without reading the whole thing. Supports 15 languages.",
+        "args_format": '"file_path": "relative path to source file"',
+        "description": (
+            '**fs_symbols** (tree-sitter AST outline)\n'
+            '   - Languages: py, js, ts, tsx, jsx, java, go, rs, rb, php, c, cpp, cs, kt, swift, scala.\n'
+            '   - Returns one line per definition: `<kind> <scope> <name>  [start_line-end_line]`.\n'
+            '   - Errors cleanly on unsupported extensions - falls back to `fs_read` for unknown languages.'
+        ),
+    },
+    "fs_symlink_read": {
+        "purpose": "Resolve a symlink to its raw target",
+        "when_to_use": "Inspect what a symlink points at WITHOUT following it (fs_read/fs_stat would resolve through it). Useful to spot symlink-escape attempts in scan output.",
+        "args_format": '"path": "relative path to a symlink"',
+        "description": (
+            '**fs_symlink_read** (readlink)\n'
+            '   - Returns `<path> -> <target>` where target is the raw link contents (may be absolute or relative).\n'
+            '   - Errors if `path` is not a symlink.'
+        ),
+    },
+
+    # --- Integrity & Archive (4) -------------------------------------------
+
+    "fs_hash": {
+        "purpose": "Compute sha256 or md5 of a workspace file",
+        "when_to_use": "Evidence integrity (record before/after hashes), IoC matching, dedupe across multiple scan runs.",
+        "args_format": '"path": "relative path", "algo": "sha256|md5" (optional, default sha256)',
+        "description": (
+            '**fs_hash** (workspace hash)\n'
+            '   - Streams the file in 64KB chunks - safe for large offloaded outputs.\n'
+            '   - Returns `<algo>(<path>) = <hex digest>`.'
+        ),
+    },
+    "fs_diff": {
+        "purpose": "Unified diff between two workspace files OR a file and its last fs_read snapshot",
+        "when_to_use": "Compare two files; OR with `vs_last_read=True`, detect whether a file changed since your most recent fs_read (closes the stale-read race when multiple fireteam agents share the workspace).",
+        "args_format": '"path_a": "relative path", "path_b": "relative path" (optional), "vs_last_read": bool (optional)',
+        "description": (
+            '**fs_diff** (workspace unified diff)\n'
+            '   - Two-file mode: `fs_diff("a.txt", "b.txt")` returns standard unified diff.\n'
+            '   - Snapshot mode: `fs_diff("watched.txt", vs_last_read=True)` compares vs the bytes recorded on your last fs_read of that file.\n'
+            '   - Snapshot mode errors if you have not fs_read the file in this session.\n'
+            '   - Returns "(files identical)" / "(no changes since last fs_read)" when there is nothing to show.'
+        ),
+    },
+    "fs_extract": {
+        "purpose": "Extract a tar / zip / gz archive into the workspace, with zip-slip / tar-slip protection",
+        "when_to_use": "Unpack nuclei templates, wordlists, evidence archives a user dropped into uploads/.",
+        "args_format": '"archive_path": "relative path to archive", "dest": "relative destination dir", "format": "auto|tar|zip|gz" (optional, default auto-detect from extension)',
+        "description": (
+            '**fs_extract** (safe archive extraction)\n'
+            '   - Auto-detects format from filename: `.tar*`, `.zip`, `.gz`.\n'
+            '   - Validates EVERY entry path against the destination BEFORE writing any byte - zip-slip and tar-slip attempts are rejected outright.\n'
+            '   - `format=gz` extracts the single inner file (strips the `.gz`).'
+        ),
+    },
+    "fs_archive": {
+        "purpose": "Bundle workspace paths into a tar.gz or zip",
+        "when_to_use": "Package evidence for one-click download from the FS drawer, or assemble a multi-file payload before exfil.",
+        "args_format": '"paths": ["relative path", ...], "dest": "output archive path", "format": "tar.gz|zip" (optional, default tar.gz)',
+        "description": (
+            '**fs_archive** (workspace bundle)\n'
+            '   - Each input path is validated to be inside the workspace.\n'
+            '   - tar.gz uses gzip compression; zip uses ZIP_DEFLATED.\n'
+            '   - Directory inputs are walked recursively (zip) or added as tar members (tar.gz).'
+        ),
+    },
+
+    # =========================================================================
+    # BACKGROUND JOBS (job_*) - 5 in-process tools for long-running work.
+    # job_spawn detaches a tool call as an asyncio task; output is tee'd to
+    # /workspace/<projectId>/jobs/<job_id>.log so fs_grep can read partial
+    # results MID-FLIGHT. Job state survives the agent's turn but not a
+    # container restart (in-flight jobs flip to 'interrupted' on recovery).
+    # =========================================================================
+
+    "job_spawn": {
+        "purpose": "Detach a tool call to run as a background asyncio task",
+        "when_to_use": "When a tool will take longer than a single agent turn (deep nuclei scans, hydra brute force, slow exploitation). Returns immediately with a job_id; the agent's turn is free to keep working or yield to the user.",
+        "args_format": '"tool_name": "name of any registered tool (e.g. execute_nuclei)", "args": {tool-specific args}, "label": "optional human label"',
+        "description": (
+            '**job_spawn** (background tool launch)\n'
+            '   - Returns synchronously with `{job_id, output_path, status: running}`.\n'
+            '   - Phase restriction on the TARGET tool is enforced AT SPAWN TIME (so spawning execute_hydra during informational is rejected, same as a direct call).\n'
+            '   - Tool output is tee\'d to `jobs/<job_id>.log` as it produces - readable mid-flight via fs_read on jobs/<job_id>.log or fs_grep with path=jobs.\n'
+            '   - Inner call runs with output_mode=inline so the log captures full content (no nested offload stubs).'
+        ),
+    },
+    "job_status": {
+        "purpose": "Query a job's current status, size, and tail",
+        "when_to_use": "Poll without blocking. Returns the current status (`running|done|failed|cancelled|interrupted`), size of log file, last 40 lines of output.",
+        "args_format": '"job_id": "hex id returned by job_spawn"',
+        "description": (
+            '**job_status** (non-blocking job query)\n'
+            '   - Includes `tail` (last 40 lines of the log) so you can summarise progress without an extra fs_read.\n'
+            '   - Survives agent restart: reads from `jobs/<id>.meta.json` if the in-memory handle is gone.'
+        ),
+    },
+    "job_wait": {
+        "purpose": "Block up to N seconds waiting for a job to complete",
+        "when_to_use": "Chunk a long wait. Call repeatedly with `timeout_sec=30` so you yield control between waits and the user can interrupt.",
+        "args_format": '"job_id": "hex id", "timeout_sec": float (optional, default 30)',
+        "description": (
+            '**job_wait** (bounded blocking wait)\n'
+            '   - Returns the same shape as `job_status` regardless of whether the timeout fired or the job finished.\n'
+            '   - Status still `running` after wait? Either keep waiting or move on - the job continues either way.'
+        ),
+    },
+    "job_cancel": {
+        "purpose": "Cancel a running job and flip its status to `cancelled`",
+        "when_to_use": "User says stop / scan is taking too long / you realise the args were wrong.",
+        "args_format": '"job_id": "hex id"',
+        "description": (
+            '**job_cancel** (cancel running job)\n'
+            '   - Cancels the underlying asyncio task and waits for it to unwind.\n'
+            '   - No-op if the job has already terminated.'
+        ),
+    },
+    "job_list": {
+        "purpose": "List background jobs in the current project",
+        "when_to_use": "See what is running / has run. Filter by `active=True` (running only) or `active=False` (terminal only).",
+        "args_format": '"active": bool or null (optional - null = all jobs)',
+        "description": (
+            '**job_list** (project job inventory)\n'
+            '   - Returns rows sorted by `started_at` descending.\n'
+            '   - Augments with on-disk meta files so jobs that survived agent restart still appear (with `interrupted` status).'
+        ),
+    },
+
     "cve_intel": {
         "purpose": "ProjectDiscovery vulnx CVE intelligence (NVD + KEV + EPSS + PoC + Nuclei templates)",
         "when_to_use": "Get structured CVE data: severity, EPSS score, KEV status, PoC links, Nuclei template availability. Prefer this over web_search(nvd) when you need exploitability scoring or KEV/PoC/template flags.",

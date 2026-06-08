@@ -128,6 +128,9 @@ Bug bounty hunters triaging a new target. You want to know if there are quick wi
     hakrawlerEnabled: false,
     hakrawlerParallelism: 5,
 
+    // --- DISABLE ZAP Ajax Spider (browser crawl too slow for <15min budget) ---
+    zapAjaxSpiderEnabled: false,
+
     // --- DISABLE GAU & ParamSpider (archive lookups too slow) ---
     gauEnabled: false,
     gauWorkers: 10,
@@ -144,6 +147,7 @@ Bug bounty hunters triaging a new target. You want to know if there are quick wi
     // --- DISABLE JS Recon (too slow for quick scan) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory fuzzing ---
     ffufEnabled: false,
     ffufParallelism: 4,

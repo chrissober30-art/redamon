@@ -3,26 +3,21 @@ import prisma from '@/lib/prisma'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 
-// GET /api/models?userId=xxx - Fetch available AI models from all configured providers
-export async function GET(request: NextRequest) {
+// POST /api/models { userId? } - Fetch available AI models from all configured providers.
+// Body-based (not query-string) so plaintext apiKey values never appear in access logs.
+export async function POST(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get('userId')
+    const { userId } = await request.json().catch(() => ({ userId: null }))
 
-    let providersParam = ''
-
-    // If userId provided, fetch their LLM providers from DB and pass to agent
+    let providers: unknown[] = []
     if (userId) {
-      const providers = await prisma.userLlmProvider.findMany({
-        where: { userId },
-      })
-      if (providers.length > 0) {
-        providersParam = `?providers=${encodeURIComponent(JSON.stringify(providers))}`
-      }
+      providers = await prisma.userLlmProvider.findMany({ where: { userId } })
     }
 
-    const res = await fetch(`${AGENT_API_URL}/models${providersParam}`, {
-      method: 'GET',
+    const res = await fetch(`${AGENT_API_URL}/models`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providers: providers.length > 0 ? providers : null }),
       cache: 'no-store',
     })
 

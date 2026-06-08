@@ -18,6 +18,7 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
 - httpx with every probe enabled (tech detect, TLS, JARM, favicon, ASN, CDN, response body)
 - Wappalyzer technology fingerprinting
 - Katana depth 4 with JS crawl + 2000 max URLs
+- ZAP Ajax Spider with bounded browser crawling seeded from base URLs and endpoints
 - Hakrawler depth 4 with subdomain inclusion
 - ffuf directory fuzzing with recursion depth 2 and auto-calibration
 - Kiterunner API endpoint discovery with routes-large wordlist
@@ -41,7 +42,7 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
 2. Naabu SYN scans top 1000 ports, Masscan adds speed, Nmap enriches with service versions and NSE scripts
 3. httpx probes all discovered host:port combos with full fingerprinting
 4. Banner grabbing identifies non-HTTP services
-5. Katana + Hakrawler aggressively crawl all live web apps
+5. Katana + ZAP Ajax Spider + Hakrawler aggressively crawl all live web apps
 6. ffuf fuzzes directories with recursion, Kiterunner discovers API routes
 7. Arjun discovers hidden parameters on found endpoints
 8. Nuclei runs all templates in DAST mode using crawled URLs, with headless browser for JS-rendered pages
@@ -144,6 +145,16 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
     katanaRateLimit: 100,
     katanaTimeout: 5400,
     katanaJsCrawl: true,
+
+    // --- ZAP Ajax Spider: bounded browser crawl for active coverage ---
+    zapAjaxSpiderEnabled: true,
+    zapAjaxSpiderSeedMode: 'base_urls_and_endpoints',
+    zapAjaxSpiderMaxDuration: 10,
+    zapAjaxSpiderMaxCrawlDepth: 5,
+    zapAjaxSpiderMaxCrawlStates: 100,
+    zapAjaxSpiderNumberOfBrowsers: 1,
+    zapAjaxSpiderMaxUrls: 1000,
+    zapAjaxSpiderParallelism: 3,
 
     // --- Hakrawler: deep aggressive crawl ---
     hakrawlerEnabled: true,

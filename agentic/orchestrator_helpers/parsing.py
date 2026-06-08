@@ -236,7 +236,7 @@ def parse_analysis_response(response_text: str) -> OutputAnalysis:
 
             return OutputAnalysis.model_validate(data)
     except Exception as e:
-        logger.warning(f"Failed to parse analysis response: {e}")
+        logger.warning(f"Failed to parse analysis response: {type(e).__name__}: {e}")
 
     # Fallback - extract fields from JSON if possible, even when validation fails
     fallback_interpretation = response_text

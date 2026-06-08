@@ -156,6 +156,16 @@ export function MasscanSection({ data, updateField, onRun }: MasscanSectionProps
                   onChange={(checked) => updateField('masscanBanners', checked)}
                 />
               </div>
+              <div className={styles.toggleRow}>
+                <div>
+                  <span className={styles.toggleLabel}>AI Port Catalog</span>
+                  <p className={styles.toggleDescription}>Annotate AI-bearing ports on masscan output (same catalogue used by Naabu). Emits Technology nodes with category=ai-* linked to the Service.</p>
+                </div>
+                <Toggle
+                  checked={data.masscanAiPortCatalogEnabled ?? true}
+                  onChange={(checked) => updateField('masscanAiPortCatalogEnabled', checked)}
+                />
+              </div>
             </>
           )}
         </div>

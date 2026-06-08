@@ -1,0 +1,62 @@
+# Vendored from github.com/praetorian-inc/julius (probes/openai-compatible.yaml), Apache-2.0.
+# Generic detector for any OpenAI API-compatible endpoint.
+# Specificity 1 = lowest priority, fallback detection only.
+name: openai-compatible
+description: Generic OpenAI-compatible API endpoint (fallback detection)
+category: ai-runtime
+specificity: 1
+api_docs: https://platform.openai.com/docs/api-reference
+
+requests:
+  - type: http
+    path: /v1/models
+    method: GET
+    match:
+      - type: status
+        value: 200
+      - type: content-type
+        value: application/json
+      - type: body.contains
+        value: '"object"'
+      - type: body.contains
+        value: '"data"'
+
+  - type: http
+    path: /v1/models
+    method: GET
+    match:
+      - type: status
+        value: 401
+      - type: content-type
+        value: application/json
+      - type: body.contains
+        value: '"error"'
+
+  - type: http
+    path: /v1/chat/completions
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: '{"model":"test","messages":[{"role":"user","content":"test"}]}'
+    match:
+      - type: status
+        value: 401
+      - type: content-type
+        value: application/json
+      - type: body.contains
+        value: '"error"'
+
+  - type: http
+    path: /v1/chat/completions
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: '{"model":"test","messages":[{"role":"user","content":"test"}]}'
+    match:
+      - type: status
+        value: 422
+
+models:
+  path: /v1/models
+  method: GET
+  extract: ".data[].id"

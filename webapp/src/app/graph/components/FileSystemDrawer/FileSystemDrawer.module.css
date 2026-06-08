@@ -1,0 +1,634 @@
+/* Drawer container handled by shared Drawer component */
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-secondary);
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tab:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.tabActive {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+.breadcrumb {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.crumb {
+  color: var(--accent-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  text-decoration: underline;
+}
+
+.crumbSep {
+  color: var(--text-tertiary);
+}
+
+.entryList,
+.jobList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.entry,
+.job {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-subtle, transparent);
+}
+
+.entry:hover,
+.job:hover {
+  background: var(--surface-hover);
+}
+
+.entryName,
+.jobName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.entryMeta,
+.jobMeta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.entryActions,
+.jobActions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.entry:hover .entryActions,
+.job:hover .jobActions {
+  opacity: 1;
+}
+
+.actionBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.actionBtn:hover {
+  background: var(--surface-active);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+.actionBtnDanger:hover {
+  color: var(--accent-danger, #e57373);
+  border-color: var(--accent-danger, #e57373);
+}
+
+.renameInput {
+  font-size: 13px;
+  padding: 2px 6px;
+  border: 1px solid var(--accent-primary);
+  border-radius: 3px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+  width: 100%;
+}
+
+.empty,
+.error,
+.loading {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.error {
+  color: var(--accent-danger, #e57373);
+}
+
+.statusBadge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.statusRunning {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.statusDone {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.statusFailed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.statusCancelled,
+.statusInterrupted {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Stage B additions */
+
+.toolbarSpacer {
+  flex: 1;
+}
+
+.mkdirRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.uploadingHint {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-subtle, transparent);
+}
+
+.protectedBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+
+/* Drag-and-drop overlay - covers the drawer body when dragging files over.
+   Uses pointer-events: none normally so it doesn't intercept clicks. */
+.dropZone {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.dropZoneActive {
+  pointer-events: auto;
+  background: rgba(59, 130, 246, 0.08);
+  border: 2px dashed var(--accent-primary);
+}
+
+.dropHint {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-primary);
+  font-weight: 500;
+  text-align: center;
+  padding: 16px 24px;
+  background: var(--drawer-bg);
+  border-radius: 8px;
+  border: 1px solid var(--accent-primary);
+  pointer-events: none;
+}
+
+/* Modal (delete confirm + overwrite confirm) */
+
+.modalBackdrop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--drawer-bg);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  min-width: 280px;
+  max-width: 100%;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.modalBody {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.modalBody code {
+  background: var(--surface-secondary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-default);
+  background: var(--surface-secondary);
+}
+
+.modalBtn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.modalBtn:hover {
+  background: var(--surface-hover);
+}
+
+.modalBtnDanger {
+  background: var(--accent-danger, #e57373);
+  color: white;
+  border-color: var(--accent-danger, #e57373);
+}
+
+.modalBtnDanger:hover {
+  filter: brightness(0.95);
+  background: var(--accent-danger, #e57373);
+}
+
+/* Stage C: preview pane (replaces file list when active) */
+
+.previewView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.previewPath {
+  flex: 1;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewMeta {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-subtle, transparent);
+}
+
+.previewTruncated {
+  color: var(--accent-warning, #d97706);
+  font-weight: 500;
+}
+
+.previewText {
+  flex: 1;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-primary);
+  white-space: pre;
+  background: var(--surface-primary);
+}
+
+.previewBinary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* Stage C: properties popover table */
+
+.propertiesTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.propertiesTable th {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  color: var(--text-secondary);
+  font-weight: 500;
+  vertical-align: top;
+  width: 90px;
+  white-space: nowrap;
+}
+
+.propertiesTable td {
+  padding: 4px 0;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.propertiesTable code {
+  background: var(--surface-secondary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.hashCode {
+  font-size: 10px !important;
+  word-break: break-all;
+}
+
+/* Stage D: filter input */
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-subtle, transparent);
+}
+
+.filterInput {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+}
+
+.filterInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Stage D: sort header */
+
+.sortHeader {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 11px;
+}
+
+.sortBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sortBtn:hover {
+  color: var(--text-primary);
+}
+
+.sortBtnActive {
+  color: var(--accent-primary);
+}
+
+/* Stage D: bulk action bar */
+
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border-bottom: 1px solid var(--accent-primary);
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.bulkCount {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bulkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.bulkBtn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.bulkBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bulkBtnDanger {
+  color: var(--accent-danger, #e57373);
+}
+
+.bulkBtnDanger:hover:not(:disabled) {
+  background: var(--accent-danger, #e57373);
+  color: white;
+  border-color: var(--accent-danger, #e57373);
+}
+
+/* Stage D: entry checkbox + selected row highlight */
+
+.entry {
+  grid-template-columns: 18px 16px 1fr auto;  /* checkbox + icon + name + actions */
+}
+
+.entryCheckbox {
+  /* Custom-rendered checkbox (mirrors .checkbox in styles/components/inputs.css).
+     Native checkboxes render unreliably at small sizes inside flex/grid cells —
+     in some browsers they collapse to a tiny filled dot. `appearance: none` plus
+     an SVG check on `:checked` guarantees a visible square in every browser. */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 3px);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-all);
+}
+
+.entryCheckbox:hover {
+  border-color: var(--accent-primary);
+}
+
+.entryCheckbox:checked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.entryCheckbox:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.entrySelected {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.entrySelected:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+/* Stage D: bulk-delete modal list */
+
+.bulkList {
+  margin: 8px 0;
+  padding-left: 18px;
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.bulkList code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.bulkHint {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  margin-top: 8px;
+}

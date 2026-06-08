@@ -76,7 +76,7 @@ def list_skills() -> list[dict]:
             content = md_file.read_text(encoding="utf-8")
             meta, _ = _parse_frontmatter(content)
         except Exception as exc:
-            logger.warning(f"Failed to parse skill file {md_file}: {exc}")
+            logger.warning(f"Failed to parse skill file {md_file}: {type(exc).__name__}: {exc}")
             continue
 
         category = rel.parts[0] if len(rel.parts) > 1 else "general"
@@ -113,6 +113,6 @@ def load_skill_content(skill_id: str) -> Optional[str]:
     try:
         return skill_path.read_text(encoding="utf-8")
     except Exception as exc:
-        logger.error(f"Failed to read skill {skill_id}: {exc}")
+        logger.error(f"Failed to read skill {skill_id}: {type(exc).__name__}: {exc}")
         return None
 

@@ -660,12 +660,13 @@ class TestSubprocessCmdConstruction(unittest.TestCase):
             'GRAPHQL_COP_ENABLED': True, 'GRAPHQL_COP_DEBUG': True})
         self.assertIn('-d', cmd)
 
-    def test_tor_mode_uses_network_host_plus_T(self):
+    def test_tor_mode_uses_net_host_plus_T(self):
+        # Host networking is now unconditional (single `--net=host` flag) so
+        # the spawned container can reach loopback / local-lab GraphQL
+        # endpoints. Tor still drives the in-process `-T` flag.
         cmd = self._capture_cmd({
             'GRAPHQL_COP_ENABLED': True, 'USE_TOR_FOR_RECON': True})
-        self.assertIn('--network', cmd)
-        host_idx = cmd.index('--network') + 1
-        self.assertEqual(cmd[host_idx], 'host')
+        self.assertIn('--net=host', cmd)
         self.assertIn('-T', cmd)
 
     def test_http_proxy_flag(self):

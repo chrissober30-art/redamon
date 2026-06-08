@@ -3,10 +3,12 @@
 import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
+import { useVersionCheck } from '@/hooks/useVersionCheck'
 import styles from './page.module.css'
 
 export default function LoginPage() {
   const router = useRouter()
+  const { currentVersion } = useVersionCheck()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -53,7 +55,7 @@ export default function LoginPage() {
       <div className={styles.card}>
         <div className={styles.header}>
           <div className={styles.logoRow}>
-            <Image src="/logo.png" alt="RedAmon" width={40} height={40} priority />
+            <Image src="/logo.png" alt="RedAmon" width={63} height={40} priority />
             <span className={styles.logoText}>
               <span className={styles.logoAccent}>Red</span>Amon
             </span>
@@ -105,11 +107,7 @@ export default function LoginPage() {
         </div>
 
         <div className={styles.footer}>
-          <span className={styles.version}>
-            {process.env.NEXT_PUBLIC_REDAMON_VERSION
-              ? `v${process.env.NEXT_PUBLIC_REDAMON_VERSION}`
-              : 'RedAmon'}
-          </span>
+          <span className={styles.version}>v{currentVersion}</span>
         </div>
       </div>
     </div>

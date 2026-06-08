@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/app/api/graph/neo4j'
+import { isBlankModelField } from '@/components/projects/ProjectForm/projectLlmGate.logic'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8080'
 
@@ -199,6 +200,13 @@ export async function POST(request: NextRequest) {
     const sanitizedParams: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(optionalParams)) {
       if (!VALID_FIELDS.has(key as Prisma.ProjectScalarFieldEnum) || NON_SETTABLE.has(key) || value === null || value === undefined) {
+        continue
+      }
+      // LLM model fields must never be persisted blank: an empty string would
+      // override the schema @default("claude-opus-4-6") with "", leaving the
+      // project permanently model-unconfigured. Drop blanks so Prisma applies
+      // the default. Server-side backstop for the client model-gate.
+      if (isBlankModelField(key, value)) {
         continue
       }
       const fieldType = fieldTypeMap.get(key)

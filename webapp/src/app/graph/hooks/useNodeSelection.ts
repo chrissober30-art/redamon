@@ -4,6 +4,7 @@ import { GraphNode } from '../types'
 interface UseNodeSelectionReturn {
   selectedNode: GraphNode | null
   drawerOpen: boolean
+  expandedPath: GraphNode[]
   expandedChild: GraphNode | null
   selectNode: (node: GraphNode) => void
   clearSelection: () => void
@@ -14,39 +15,40 @@ interface UseNodeSelectionReturn {
 /**
  * Custom hook for managing node selection state.
  *
- * When a cluster node is selected, `expandedChild` tracks which child the user
- * drilled into from the cluster list. Selecting a new primary node always resets
- * `expandedChild` to null.
+ * `expandedPath` is a stack of children the user drilled into from the root cluster.
+ * Nested clusters push another entry; the Back button pops one. `expandedChild`
+ * (top of stack) is kept for back-compat with the existing drawer signature.
  */
 export function useNodeSelection(): UseNodeSelectionReturn {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [expandedChild, setExpandedChild] = useState<GraphNode | null>(null)
+  const [expandedPath, setExpandedPath] = useState<GraphNode[]>([])
 
   const selectNode = useCallback((node: GraphNode) => {
     setSelectedNode(node)
-    setExpandedChild(null)
+    setExpandedPath([])
     setDrawerOpen(true)
   }, [])
 
   const clearSelection = useCallback(() => {
     setDrawerOpen(false)
     setSelectedNode(null)
-    setExpandedChild(null)
+    setExpandedPath([])
   }, [])
 
   const expandChild = useCallback((node: GraphNode) => {
-    setExpandedChild(node)
+    setExpandedPath(prev => [...prev, node])
   }, [])
 
   const collapseChild = useCallback(() => {
-    setExpandedChild(null)
+    setExpandedPath(prev => prev.slice(0, -1))
   }, [])
 
   return {
     selectedNode,
     drawerOpen,
-    expandedChild,
+    expandedPath,
+    expandedChild: expandedPath[expandedPath.length - 1] ?? null,
     selectNode,
     clearSelection,
     expandChild,

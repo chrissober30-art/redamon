@@ -1,6 +1,18 @@
-"""HTTP probe graph updates (BaseURL, Technology, Header, Certificate).
+"""HTTP probe graph updates (BaseURL, Endpoint, Technology, Header, Certificate).
 
-Part of the recon_mixin.py split. Methods pasted unchanged.
+Lap-1 Patch D refactor: each httpx output URL is split into
+
+  - BaseURL  (one per scheme+host+port — the HTTP service identity)
+  - Endpoint (one per probed path — carries status/headers/title/AI annotations)
+
+linked by ``(BaseURL)-[:HAS_ENDPOINT]->(Endpoint)``.
+
+Previously the mixin MERGEd ``BaseURL {url: <full URL with path>}`` which
+conflated "service" and "path" — when httpxPaths probed multiple paths per
+port the result was N BaseURL nodes per HTTP service, all sharing the same
+scheme+host+port. The viewer label collapsed them to identical strings;
+the schema semantics were violated. Patch D restores the intended shape:
+ONE BaseURL per service, MANY Endpoints per BaseURL.
 """
 import json
 import hashlib
@@ -9,17 +21,37 @@ from urllib.parse import urlparse, parse_qs
 
 from graph_db.cpe_resolver import _is_ip_address
 
+
+def _split_url(url: str) -> tuple[str, str]:
+    """Return ``(base_url, path)`` where ``base_url = scheme://host:port``
+    and ``path`` is the URL path (defaults to ``'/'``). Query string and
+    fragment are dropped — Endpoint identity is ``(path, method, baseurl)``
+    per the existing Redamon convention (matches js_recon + vuln_scan mixins)."""
+    parsed = urlparse(url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    path = parsed.path or "/"
+    return base_url, path
+
+
 class HttpMixin:
     def update_graph_from_http_probe(self, recon_data: dict, user_id: str, project_id: str) -> dict:
         """
         Update the Neo4j graph database with HTTP probe data.
 
-        This function creates/updates:
-        - BaseURL nodes with HTTP response data (root/base URLs discovered by httpx)
-        - Technology nodes for detected technologies
-        - Header nodes for HTTP response headers
+        Lap-1 model:
+        - BaseURL nodes  — one per scheme+host+port (the HTTP service identity)
+        - Endpoint nodes — one per probed path (carries response data + AI annotations)
+        - Technology nodes for detected technologies (attached to Endpoint)
+        - Header nodes for response headers (attached to Endpoint)
+        - Certificate nodes (attached to Endpoint when TLS data is present)
         - Service nodes (if not existing) for the HTTP/HTTPS service
-        - Relationships: Service -[:SERVES_URL]-> BaseURL, BaseURL -[:USES_TECHNOLOGY]-> Technology, BaseURL -[:HAS_HEADER]-> Header
+
+        Relationships:
+        - Service  -[:SERVES_URL]->        BaseURL
+        - BaseURL  -[:HAS_ENDPOINT]->      Endpoint
+        - Endpoint -[:HAS_HEADER]->        Header
+        - Endpoint -[:HAS_CERTIFICATE]->   Certificate
+        - Endpoint -[:USES_TECHNOLOGY]->   Technology
 
         Args:
             recon_data: The recon JSON data containing http_probe results
@@ -60,13 +92,39 @@ class HttpMixin:
                     host = url_info.get("host", "")
                     scheme = "https" if url.startswith("https://") else "http"
 
-                    # Create BaseURL node (root/base URL discovered by http_probe)
+                    # Lap-1 Patch D: split URL into base_url (one per service) and
+                    # path (one per Endpoint). MERGE BaseURL as a thin node keyed
+                    # by base_url; MERGE Endpoint with all the response data.
+                    base_url, path = _split_url(url)
+
+                    # ---- BaseURL: thin "HTTP service" identity node ----------
                     baseurl_props = {
-                        "url": url,
+                        "url": base_url,
                         "user_id": user_id,
                         "project_id": project_id,
                         "scheme": scheme,
                         "host": host,
+                        "source": "http_probe",
+                    }
+                    baseurl_props = {k: v for k, v in baseurl_props.items() if v is not None}
+                    session.run(
+                        """
+                        MERGE (u:BaseURL {url: $base_url, user_id: $user_id, project_id: $project_id})
+                        SET u += $props,
+                            u.updated_at = datetime()
+                        """,
+                        base_url=base_url, user_id=user_id, project_id=project_id, props=baseurl_props
+                    )
+                    stats["baseurls_created"] += 1
+
+                    # ---- Endpoint: path-level data + AI annotations ----------
+                    endpoint_props = {
+                        "path": path,
+                        "method": "GET",  # httpx default; the URL identity uses (path, method, baseurl)
+                        "baseurl": base_url,
+                        "url": url,                                       # convenience: full URL
+                        "user_id": user_id,
+                        "project_id": project_id,
                         "status_code": url_info.get("status_code"),
                         "content_length": url_info.get("content_length"),
                         "content_type": url_info.get("content_type"),
@@ -82,33 +140,44 @@ class HttpMixin:
                         "asn": url_info.get("asn"),
                         "favicon_hash": url_info.get("favicon_hash"),
                         "is_live": url_info.get("status_code") is not None,
-                        "source": "http_probe"
+                        "source": "http_probe",
+                        # AI surface recon (lap-1 Patch D — moved from BaseURL to Endpoint)
+                        "is_ai_framework_detected": url_info.get("is_ai_framework_detected"),
+                        "ai_framework_name": url_info.get("ai_framework_name"),
+                        "ai_frontend_product_guess": url_info.get("ai_frontend_product_guess"),
                     }
-
-                    # Add body hash info if available
                     body_hash = url_info.get("body_hash", {})
                     if body_hash:
-                        baseurl_props["body_sha256"] = body_hash.get("body_sha256")
-                        baseurl_props["header_sha256"] = body_hash.get("header_sha256")
-
-                    # Add TLS cipher if available (store on BaseURL for quick reference)
+                        endpoint_props["body_sha256"] = body_hash.get("body_sha256")
+                        endpoint_props["header_sha256"] = body_hash.get("header_sha256")
                     tls_data = url_info.get("tls", {})
                     if tls_data:
-                        baseurl_props["tls_cipher"] = tls_data.get("cipher")
-                        baseurl_props["tls_version"] = tls_data.get("version")
-
-                    # Remove None values
-                    baseurl_props = {k: v for k, v in baseurl_props.items() if v is not None}
+                        endpoint_props["tls_cipher"] = tls_data.get("cipher")
+                        endpoint_props["tls_version"] = tls_data.get("version")
+                    endpoint_props = {k: v for k, v in endpoint_props.items() if v is not None}
 
                     session.run(
                         """
-                        MERGE (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
-                        SET u += $props,
-                            u.updated_at = datetime()
+                        MERGE (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
+                        SET e += $props,
+                            e.updated_at = datetime()
                         """,
-                        url=url, user_id=user_id, project_id=project_id, props=baseurl_props
+                        path=path, base_url=base_url, user_id=user_id, project_id=project_id, props=endpoint_props
                     )
-                    stats["baseurls_created"] += 1
+                    stats.setdefault("endpoints_created", 0)
+                    stats["endpoints_created"] += 1
+
+                    # ---- BaseURL -[:HAS_ENDPOINT]-> Endpoint ------------------
+                    session.run(
+                        """
+                        MATCH (u:BaseURL {url: $base_url, user_id: $user_id, project_id: $project_id})
+                        MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
+                        MERGE (u)-[:HAS_ENDPOINT]->(e)
+                        """,
+                        base_url=base_url, path=path,
+                        user_id=user_id, project_id=project_id,
+                    )
+                    stats["relationships_created"] += 1
 
                     # Create Certificate node from TLS data if available
                     if tls_data and tls_data.get("certificate"):
@@ -144,14 +213,16 @@ class HttpMixin:
                             )
                             stats["certificates_created"] += 1
                             
-                            # Create relationship: BaseURL -[:HAS_CERTIFICATE]-> Certificate
+                            # Create relationship: Endpoint -[:HAS_CERTIFICATE]-> Certificate
+                            # (Patch D: certificates are observed per-path-response, attach to Endpoint)
                             session.run(
                                 """
-                                MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
                                 MATCH (c:Certificate {subject_cn: $subject_cn, user_id: $user_id, project_id: $project_id})
-                                MERGE (u)-[:HAS_CERTIFICATE]->(c)
+                                MERGE (e)-[:HAS_CERTIFICATE]->(c)
                                 """,
-                                url=url, subject_cn=subject_cn, project_id=project_id, user_id=user_id
+                                path=path, base_url=base_url, subject_cn=subject_cn,
+                                project_id=project_id, user_id=user_id
                             )
                             stats["relationships_created"] += 1
 
@@ -194,13 +265,14 @@ class HttpMixin:
                                 stats["services_created"] += 1
 
                             # Create relationship: Service -[:SERVES_URL]-> BaseURL
+                            # (Patch D: BaseURL is now host-level — one per Service)
                             session.run(
                                 """
                                 MATCH (svc:Service {name: $service_name, port_number: $port_number, ip_address: $ip_addr, user_id: $user_id, project_id: $project_id})
-                                MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                MATCH (u:BaseURL {url: $base_url, user_id: $user_id, project_id: $project_id})
                                 MERGE (svc)-[:SERVES_URL]->(u)
                                 """,
-                                service_name=service_name, port_number=port_number, ip_addr=resolved_ip, url=url,
+                                service_name=service_name, port_number=port_number, ip_addr=resolved_ip, base_url=base_url,
                                 user_id=user_id, project_id=project_id
                             )
                             stats["relationships_created"] += 1
@@ -289,31 +361,84 @@ class HttpMixin:
                                 processed_techs.add((tech_name, None))
                             stats["technologies_created"] += 1
 
-                            # Create relationship: BaseURL -[:USES_TECHNOLOGY]-> Technology
+                            # Create relationship: Endpoint -[:USES_TECHNOLOGY]-> Technology
+                            # (Patch D: technologies are detected per-path-response → Endpoint)
                             if tech_version:
                                 session.run(
                                     """
-                                    MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                    MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
                                     MATCH (t:Technology {name: $tech_name, version: $tech_version, user_id: $user_id, project_id: $project_id})
-                                    MERGE (u)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'httpx'}]->(t)
+                                    MERGE (e)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'httpx'}]->(t)
                                     """,
-                                    url=url, tech_name=tech_name, tech_version=tech_version, confidence=confidence,
+                                    path=path, base_url=base_url, tech_name=tech_name, tech_version=tech_version, confidence=confidence,
                                     user_id=user_id, project_id=project_id
                                 )
                             else:
                                 session.run(
                                     """
-                                    MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                    MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
                                     MATCH (t:Technology {name: $tech_name, version: '', user_id: $user_id, project_id: $project_id})
-                                    MERGE (u)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'httpx'}]->(t)
+                                    MERGE (e)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'httpx'}]->(t)
                                     """,
-                                    url=url, tech_name=tech_name, confidence=confidence,
+                                    path=path, base_url=base_url, tech_name=tech_name, confidence=confidence,
                                     user_id=user_id, project_id=project_id
                                 )
                             stats["relationships_created"] += 1
 
                         except Exception as e:
                             stats["errors"].append(f"Technology {tech_str} failed: {e}")
+
+                    # AI surface recon: MERGE Technology(category=ai-*) when the
+                    # url_entry carries an AI framework / frontend annotation.
+                    # (Patch D: edge now hangs off Endpoint, not BaseURL —
+                    #  AI signals are observed at the response/path level.)
+                    ai_name = url_info.get("ai_framework_name")
+                    ai_category = url_info.get("ai_framework_category")
+                    if ai_name and ai_category:
+                        # Pick a precise detected_by based on which signal fired
+                        if url_info.get("is_ai_framework_detected") and ai_name != url_info.get("ai_frontend_product_guess"):
+                            ai_detected_by = "httpx-ai-header"
+                        elif url_info.get("ai_frontend_product_guess") == ai_name:
+                            # Favicon vs title — favicon wins when both fire. The
+                            # parse_httpx_output annotator already prefers favicon,
+                            # so distinguishing here requires inspecting the entry
+                            # for an explicit favicon hit. We default to header
+                            # for safety; favicon/title operators can refine in
+                            # later phases when the favicon catalogue is filled.
+                            ai_detected_by = "httpx-ai-favicon" if url_info.get("favicon_hash") else "httpx-ai-title"
+                        else:
+                            ai_detected_by = "httpx-ai-header"
+
+                        try:
+                            session.run(
+                                """
+                                MERGE (t:Technology {name: $name, user_id: $user_id, project_id: $project_id})
+                                SET t.category = $category,
+                                    t.source = 'ai-surface-recon',
+                                    t.updated_at = datetime()
+                                """,
+                                name=ai_name, category=ai_category,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats.setdefault("ai_technologies_created", 0)
+                            stats["ai_technologies_created"] += 1
+
+                            session.run(
+                                """
+                                MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
+                                MATCH (t:Technology {name: $name, user_id: $user_id, project_id: $project_id})
+                                MERGE (e)-[r:USES_TECHNOLOGY]->(t)
+                                SET r.detected_by = $detected_by,
+                                    r.confidence = coalesce(r.confidence, 100)
+                                """,
+                                path=path, base_url=base_url, name=ai_name, detected_by=ai_detected_by,
+                                user_id=user_id, project_id=project_id,
+                            )
+                            stats["relationships_created"] += 1
+                        except Exception as e:
+                            stats["errors"].append(
+                                f"AI Technology {ai_name!r} on {url} failed: {e}"
+                            )
 
                     # 2. Process wappalyzer technologies not found by httpx
                     # wappalyzer.by_url contains complete tech list per URL
@@ -372,25 +497,26 @@ class HttpMixin:
                                 )
                             stats["technologies_created"] += 1
 
-                            # Create relationship: BaseURL -[:USES_TECHNOLOGY]-> Technology
+                            # Create relationship: Endpoint -[:USES_TECHNOLOGY]-> Technology
+                            # (Patch D: wappalyzer detects technologies from per-path responses → Endpoint)
                             if tech_version:
                                 session.run(
                                     """
-                                    MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                    MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
                                     MATCH (t:Technology {name: $tech_name, version: $tech_version, user_id: $user_id, project_id: $project_id})
-                                    MERGE (u)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'wappalyzer'}]->(t)
+                                    MERGE (e)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'wappalyzer'}]->(t)
                                     """,
-                                    url=url, tech_name=tech_name, tech_version=tech_version, confidence=confidence,
+                                    path=path, base_url=base_url, tech_name=tech_name, tech_version=tech_version, confidence=confidence,
                                     user_id=user_id, project_id=project_id
                                 )
                             else:
                                 session.run(
                                     """
-                                    MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                    MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
                                     MATCH (t:Technology {name: $tech_name, version: '', user_id: $user_id, project_id: $project_id})
-                                    MERGE (u)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'wappalyzer'}]->(t)
+                                    MERGE (e)-[:USES_TECHNOLOGY {confidence: $confidence, detected_by: 'wappalyzer'}]->(t)
                                     """,
-                                    url=url, tech_name=tech_name, confidence=confidence,
+                                    path=path, base_url=base_url, tech_name=tech_name, confidence=confidence,
                                     user_id=user_id, project_id=project_id
                                 )
                             stats["relationships_created"] += 1
@@ -409,6 +535,9 @@ class HttpMixin:
                             is_security = header_name.lower() in security_headers
                             reveals_tech = header_name.lower() in tech_revealing_headers
 
+                            # (Patch D: Header keyed by full URL is fine — headers are
+                            # response-specific. We MERGE per (name, value, full url)
+                            # then link to the Endpoint that produced the response.)
                             session.run(
                                 """
                                 MERGE (h:Header {name: $name, value: $value, baseurl: $url, user_id: $user_id, project_id: $project_id})
@@ -424,14 +553,16 @@ class HttpMixin:
                             )
                             stats["headers_created"] += 1
 
-                            # Create relationship: BaseURL -[:HAS_HEADER]-> Header
+                            # Create relationship: Endpoint -[:HAS_HEADER]-> Header
+                            # (Patch D: headers come from a specific path response → Endpoint)
                             session.run(
                                 """
-                                MATCH (u:BaseURL {url: $url, user_id: $user_id, project_id: $project_id})
+                                MATCH (e:Endpoint {path: $path, method: 'GET', baseurl: $base_url, user_id: $user_id, project_id: $project_id})
                                 MATCH (h:Header {name: $name, value: $value, baseurl: $url, user_id: $user_id, project_id: $project_id})
-                                MERGE (u)-[:HAS_HEADER]->(h)
+                                MERGE (e)-[:HAS_HEADER]->(h)
                                 """,
-                                url=url, name=header_name, value=str(header_value),
+                                path=path, base_url=base_url, url=url,
+                                name=header_name, value=str(header_value),
                                 user_id=user_id, project_id=project_id
                             )
                             stats["relationships_created"] += 1

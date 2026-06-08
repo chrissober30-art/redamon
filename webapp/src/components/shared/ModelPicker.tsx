@@ -33,8 +33,12 @@ export function ModelPicker({ userId, value, onChange, placeholder }: ModelPicke
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const params = userId ? `?userId=${userId}` : ''
-    fetch(`/api/models${params}`)
+    fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userId ? { userId } : {}),
+      cache: 'no-store',
+    })
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch')
         return r.json()

@@ -24,6 +24,11 @@ from orchestrator_helpers.parsing import try_parse_llm_decision
 from orchestrator_helpers.json_utils import normalize_content, json_dumps_safe
 from orchestrator_helpers.llm_retry import retry_llm_call
 import orchestrator_helpers.chain_graph_writer as chain_graph
+from orchestrator_helpers.productivity import (
+    audit_productivity_claim,
+    build_productivity_audit_section,
+    downgrade_verdict_to_no_progress,
+)
 from project_settings import get_setting, get_allowed_tools_for_phase, DANGEROUS_TOOLS
 from tools import set_tenant_context, set_phase_context, set_graph_view_context
 
@@ -60,6 +65,8 @@ async def fireteam_await_confirmation_node(
     from orchestrator_helpers.fireteam_confirmation_registry import (
         register as _register,
         drop as _drop,
+        begin_confirmation_wait as _begin_wait,
+        end_confirmation_wait as _end_wait,
     )
 
     pending = state.get("_pending_confirmation") or {}
@@ -110,6 +117,11 @@ async def fireteam_await_confirmation_node(
         [t.get("tool_name") for t in (pending.get("tools") or [])],
     )
 
+    # Pause the wave wall-clock for the duration of this operator-wait. The
+    # deploy node's deadline loop reads get_credit_s and extends its deadline
+    # by the accumulated paused time. try/finally is load-bearing: an
+    # unbalanced count leaves the wave clock stuck-paused on cancel/timeout.
+    _begin_wait(session_id, wave_id)
     try:
         await asyncio.wait_for(entry.event.wait(), timeout=timeout_s)
         decision = entry.decision or "reject"
@@ -121,9 +133,11 @@ async def fireteam_await_confirmation_node(
         decision = "reject"
     except asyncio.CancelledError:
         # Wave cancelled mid-wait: propagate so the member task cleans up.
+        # _end_wait still fires via finally.
         _drop(session_id, wave_id, member_id)
         raise
     finally:
+        _end_wait(session_id, wave_id)
         _drop(session_id, wave_id, member_id)
 
     if decision == "approve":
@@ -454,7 +468,14 @@ Include `output_analysis`:
             "related_ips": [],
             "confidence": 80
         }}
-    ]
+    ],
+    "productivity": {{
+        "verdict": "new_info | confirmation | no_progress | blocked | duplicate",
+        "new_information_gained": true,
+        "what_was_new": "One sentence citing the specific new fact, or empty if none.",
+        "should_repeat_similar_call": false,
+        "rationale": "One sentence citing specific evidence from the output."
+    }}
 }}
 ```
 
@@ -466,7 +487,19 @@ output shows nothing security-relevant.
 Set `exploit_succeeded = true` ONLY when output shows a Meterpreter session
 opened, cracked credentials returned, or a command proved RCE (uid=0, file
 read, etc.). When true, populate `exploit_details` with target_ip, cve_ids,
-and evidence."""
+and evidence.
+
+### Productivity Verdict (REQUIRED, used for loop detection)
+
+Classify the output honestly:
+  - `new_info`     — revealed something not already in your findings. Cite it in what_was_new.
+  - `confirmation` — confirms an existing hypothesis without new facts (rare; never for repeats).
+  - `no_progress`  — call succeeded but yielded no usable information.
+  - `blocked`      — WAF / 401/403 / captcha / rate limit / auth wall.
+  - `duplicate`    — output essentially identical to a recent call with similar args.
+
+Marking 3+ repeated same-pattern calls as `confirmation` is dishonest and
+auto-downgraded to `no_progress` by the orchestrator."""
 
 
 _MEMBER_PENDING_PLAN_OUTPUTS_SECTION = """
@@ -497,12 +530,31 @@ real time with YOUR attribution, anchored to each ChainStep in the wave.
           "severity": "info|low|medium|high|critical",
           "title": "one-line", "evidence": "from output above",
           "related_cves": [], "related_ips": [], "confidence": 80}}
-    ]
+    ],
+    "productivity": {{
+        "verdict": "new_info | confirmation | no_progress | blocked | duplicate",
+        "new_information_gained": true,
+        "what_was_new": "One sentence citing the specific new fact across the wave, or empty if none.",
+        "should_repeat_similar_call": false,
+        "rationale": "One sentence citing specific evidence from at least one tool output."
+    }}
 }}
 ```
 
 One finding per distinct fact across ALL tools. Do NOT hallucinate — ground
-every finding in the raw output above."""
+every finding in the raw output above.
+
+### Productivity Verdict (REQUIRED across the wave)
+
+Classify the WAVE as a whole:
+  - `new_info`     — at least one tool revealed something not already known.
+  - `confirmation` — wave confirmed existing hypothesis without new facts.
+  - `no_progress`  — all tools succeeded but no usable information produced.
+  - `blocked`      — wave hit WAF / 403 / captcha / rate limit / auth wall.
+  - `duplicate`    — outputs essentially identical to a recent wave with similar args.
+
+`confirmation` is dishonest after 3+ repeated same-pattern waves — the
+orchestrator will auto-downgrade to `no_progress`."""
 
 
 def _build_pending_output_section(state: FireteamMemberState) -> str:
@@ -678,6 +730,25 @@ def _build_member_prompt(state: FireteamMemberState) -> str:
 
     pending_output_section = _build_pending_output_section(state)
 
+    # Productivity audit: show the member its own recent same-pattern fingerprints
+    # so claiming "confirmation" 10x in a row becomes visibly dishonest. Also
+    # surface the prior-iteration downgrade reason if any. Empty strings until
+    # there are 3+ same-pattern recent calls — zero cost for productive members.
+    _audit_section = build_productivity_audit_section(
+        state.get("execution_trace") or [],
+        window=int(get_setting('PRODUCTIVITY_AUDIT_WINDOW', 6)),
+    )
+    if _audit_section:
+        pending_output_section = (pending_output_section or "") + "\n" + _audit_section
+    _last_discrepancy = state.get("_last_productivity_discrepancy")
+    if _last_discrepancy:
+        pending_output_section = (pending_output_section or "") + (
+            "\n\n## Prior Productivity Claim Was Downgraded\n\n"
+            f"Reason: {_last_discrepancy}\n"
+            "Be more critical about your verdict this turn — empty/duplicate outputs "
+            "are not 'confirmation'.\n"
+        )
+
     # Soft tool-expansion budget (Change C). Surfaces a graduated warning when
     # the member has reached into the fallback toolbox without producing new
     # findings, nudging the LLM toward `action=complete` so the root planner
@@ -838,18 +909,12 @@ async def fireteam_member_think_node(
     if graph_view_cyphers:
         set_graph_view_context(graph_view_cyphers.get(session_id))
 
-    # ---- Budget enforcement (before any LLM call) ----
+    # Iteration budget is enforced by _route_after_member_think (strict-greater
+    # so the LLM gets one analysis pass after the cap is hit, persisting the
+    # final wave's chain_findings). tokens_used is accumulated below for
+    # passive observability only (metrics, report, UI).
     current_iter = state.get("current_iteration", 0)
     max_iter = state.get("max_iterations", 15)
-    if current_iter >= max_iter:
-        logger.info("[%s] member %s iteration budget exhausted (%d/%d)", session_id, member_id, current_iter, max_iter)
-        return {
-            "task_complete": True,
-            "completion_reason": "iteration_budget_exceeded",
-        }
-
-    # Iteration budget is the sole runtime cap; tokens_used is accumulated
-    # below for passive observability only (metrics, report, UI).
     tokens_used = state.get("tokens_used", 0)
 
     # ---- LLM call with parse-retry loop (mirrors root think_node) ----
@@ -949,6 +1014,15 @@ async def fireteam_member_think_node(
         _usage = getattr(response, "usage_metadata", None) or {}
         input_tokens_this_turn += int(_usage.get("input_tokens", 0) or 0)
         output_tokens_this_turn += int(_usage.get("output_tokens", 0) or 0)
+
+        logger.info(f"\n{'='*60}")
+        logger.info(
+            f"MEMBER LLM RAW RESPONSE - [{session_id}] member {member_id} "
+            f"iter {current_iter} (attempt {attempt+1}/{max_retries})"
+        )
+        logger.info(f"{'='*60}")
+        logger.info(f"{raw_content}")
+        logger.info(f"{'='*60}\n")
 
         decision, parse_error = try_parse_llm_decision(raw_content)
         if decision is None:
@@ -1100,54 +1174,6 @@ async def fireteam_member_think_node(
     # defining it here, the is_dangerous branch crashed with NameError.
     analysis = decision.output_analysis
 
-    if is_dangerous:
-        pending = _build_pending_confirmation(decision, state)
-        update["_pending_confirmation"] = pending
-        # FIX: Populate _current_plan / _current_step now so they survive
-        # the await round-trip. Without this, the await node returns to
-        # the router with these fields unset and the router falls back to
-        # fireteam_think -> infinite plan/approve loop, no tool execution.
-        if decision.action == "plan_tools" and decision.tool_plan:
-            update["_current_plan"] = decision.tool_plan.model_dump()
-        elif decision.action == "use_tool":
-            update["_current_step"] = {
-                "step_id": uuid4().hex,
-                "iteration": current_iter + 1,
-                "phase": state.get("current_phase"),
-                "tool_name": decision.tool_name,
-                "tool_args": decision.tool_args or {},
-                "thought": decision.thought,
-                "reasoning": decision.reasoning,
-            }
-        # Even though we're escalating the NEW decision, the PREVIOUS
-        # single-tool step (if any) is now completed — its output was the
-        # input to this think call. Signal it to the streaming layer so the
-        # UI flips the prior tool card from `running` to `success/error`.
-        # Without this, the frontend sees: tool_start → (never completes) →
-        # pending-approval card, and the prior tool stays stuck visually.
-        if has_pending_single_output and prev_step:
-            completed_prev = dict(prev_step)
-            if analysis is not None:
-                completed_prev["output_analysis"] = (
-                    analysis.interpretation
-                    or (prev_step.get("tool_output") or "")
-                )[:20000]
-                completed_prev["actionable_findings"] = list(analysis.actionable_findings or [])
-                completed_prev["recommended_next_steps"] = list(analysis.recommended_next_steps or [])
-            else:
-                completed_prev["output_analysis"] = (prev_step.get("tool_output") or "")[:20000]
-                completed_prev["actionable_findings"] = []
-                completed_prev["recommended_next_steps"] = []
-            update["_completed_step"] = completed_prev
-        logger.info(
-            "[%s] member %s escalating dangerous tool for parent approval: %s",
-            session_id, member_id,
-            decision.tool_name or [s.tool_name for s in (decision.tool_plan.steps if decision.tool_plan else [])],
-        )
-        # Router will send us to fireteam_await_confirmation because
-        # _pending_confirmation is set.
-        return update
-
     # If action is complete, ensure task_complete is True so the router exits.
     if decision.action == "complete":
         update["task_complete"] = True
@@ -1275,6 +1301,38 @@ async def fireteam_member_think_node(
         )
         completed_step["actionable_findings"] = list(analysis.actionable_findings or [])
         completed_step["recommended_next_steps"] = list(analysis.recommended_next_steps or [])
+
+        # Persist productivity verdict on the step + audit it against state delta.
+        _productivity_dict = (
+            analysis.productivity.model_dump()
+            if getattr(analysis, "productivity", None) else {}
+        )
+        _findings_will_grow = bool(
+            (analysis.chain_findings or [])
+            or (analysis.exploit_succeeded and analysis.exploit_details)
+            or (analysis.actionable_findings and not analysis.chain_findings)
+        )
+        _discrepancy = audit_productivity_claim(
+            productivity=_productivity_dict,
+            extracted_info=(
+                analysis.extracted_info.model_dump()
+                if analysis.extracted_info else {}
+            ),
+            actionable_findings=analysis.actionable_findings or [],
+            findings_grew=_findings_will_grow,
+        )
+        if _discrepancy:
+            _productivity_dict = downgrade_verdict_to_no_progress(
+                _productivity_dict, _discrepancy,
+            )
+            logger.info(
+                f"[{member_id}] productivity verdict downgraded to no_progress: {_discrepancy}"
+            )
+            update["_last_productivity_discrepancy"] = _discrepancy
+        else:
+            update["_last_productivity_discrepancy"] = None
+        completed_step["productivity"] = _productivity_dict
+
         update["execution_trace"] = list(state.get("execution_trace") or []) + [completed_step]
 
         # Signal the streaming layer to emit `fireteam_tool_complete` for this
@@ -1319,6 +1377,39 @@ async def fireteam_member_think_node(
         merged_target = TargetInfo(**(state.get("target_info") or {}))
         member_findings_memory = list(state.get("chain_findings_memory") or [])
         new_trace_entries = []
+
+        # Wave-level productivity verdict (one verdict shared by all wave steps).
+        _wave_productivity: dict = {}
+        if analysis is not None:
+            _wave_productivity = (
+                analysis.productivity.model_dump()
+                if getattr(analysis, "productivity", None) else {}
+            )
+            _wave_findings_will_grow = bool(
+                (analysis.chain_findings or [])
+                or (analysis.exploit_succeeded and analysis.exploit_details)
+                or (analysis.actionable_findings and not analysis.chain_findings)
+            )
+            _wave_discrepancy = audit_productivity_claim(
+                productivity=_wave_productivity,
+                extracted_info=(
+                    analysis.extracted_info.model_dump()
+                    if analysis.extracted_info else {}
+                ),
+                actionable_findings=analysis.actionable_findings or [],
+                findings_grew=_wave_findings_will_grow,
+            )
+            if _wave_discrepancy:
+                _wave_productivity = downgrade_verdict_to_no_progress(
+                    _wave_productivity, _wave_discrepancy,
+                )
+                logger.info(
+                    f"[{member_id}] wave productivity verdict downgraded to "
+                    f"no_progress: {_wave_discrepancy}"
+                )
+                update["_last_productivity_discrepancy"] = _wave_discrepancy
+            else:
+                update["_last_productivity_discrepancy"] = None
 
         combined_extracted: dict = {}
         if analysis and analysis.extracted_info:
@@ -1365,6 +1456,7 @@ async def fireteam_member_think_node(
                 "output_analysis": step_output_analysis,
                 "actionable_findings": list(analysis.actionable_findings or []) if analysis else [],
                 "recommended_next_steps": list(analysis.recommended_next_steps or []) if analysis else [],
+                "productivity": dict(_wave_productivity) if _wave_productivity else {},
             }
             new_trace_entries.append(exec_step)
 
@@ -1499,5 +1591,73 @@ async def fireteam_member_think_node(
             pass  # update["_current_plan"] already set to the new plan above
         else:
             update["_current_plan"] = None
+
+    # Iteration budget signal: if we entered this call with current_iter
+    # already at max, the LLM has just run the post-budget analysis pass on
+    # the last wave's output. Set task_complete + completion_reason so the
+    # streaming layer and FireteamMemberResult see the right terminate reason.
+    # The router-side cap in _route_after_member_think (strict-greater) is
+    # the actual routing signal; this is for observability and to suppress
+    # the dangerous-tool escalation below (no point pausing for operator
+    # approval when the member is about to exit).
+    if current_iter >= max_iter:
+        update["task_complete"] = True
+        update["completion_reason"] = "iteration_budget_exceeded"
+        logger.info(
+            "[%s] member %s analysis pass after budget exhaustion (%d/%d) — terminating",
+            session_id, member_id, current_iter, max_iter,
+        )
+
+    # Dangerous-tool escalation runs AFTER analysis-write so the prior wave's
+    # chain_findings, target_info merge, and Neo4j writes commit before we
+    # pause for operator approval. `_pending_confirmation` is the router's
+    # signal to fireteam_await_confirmation — its placement in this function
+    # does not affect routing, only whether analysis-write fires first.
+    # Skipped when budget is exhausted (above): the member is terminating,
+    # so a new dangerous wave should not be queued for operator approval.
+    if is_dangerous and not update.get("task_complete"):
+        pending = _build_pending_confirmation(decision, state)
+        update["_pending_confirmation"] = pending
+        # Populate _current_plan / _current_step so they survive the await
+        # round-trip. Without this, the await node returns to the router
+        # with these fields unset and the router falls back to fireteam_think
+        # -> infinite plan/approve loop, no tool execution.
+        if decision.action == "plan_tools" and decision.tool_plan:
+            update["_current_plan"] = decision.tool_plan.model_dump()
+        elif decision.action == "use_tool":
+            update["_current_step"] = {
+                "step_id": uuid4().hex,
+                "iteration": current_iter + 1,
+                "phase": state.get("current_phase"),
+                "tool_name": decision.tool_name,
+                "tool_args": decision.tool_args or {},
+                "thought": decision.thought,
+                "reasoning": decision.reasoning,
+            }
+        # Even though we're escalating the NEW decision, the PREVIOUS
+        # single-tool step (if any) is now completed — its output was the
+        # input to this think call. Signal it to the streaming layer so the
+        # UI flips the prior tool card from `running` to `success/error`.
+        # Without this, the frontend sees: tool_start → (never completes) →
+        # pending-approval card, and the prior tool stays stuck visually.
+        if has_pending_single_output and prev_step:
+            completed_prev = dict(prev_step)
+            if analysis is not None:
+                completed_prev["output_analysis"] = (
+                    analysis.interpretation
+                    or (prev_step.get("tool_output") or "")
+                )[:20000]
+                completed_prev["actionable_findings"] = list(analysis.actionable_findings or [])
+                completed_prev["recommended_next_steps"] = list(analysis.recommended_next_steps or [])
+            else:
+                completed_prev["output_analysis"] = (prev_step.get("tool_output") or "")[:20000]
+                completed_prev["actionable_findings"] = []
+                completed_prev["recommended_next_steps"] = []
+            update["_completed_step"] = completed_prev
+        logger.info(
+            "[%s] member %s escalating dangerous tool for parent approval: %s",
+            session_id, member_id,
+            decision.tool_name or [s.tool_name for s in (decision.tool_plan.steps if decision.tool_plan else [])],
+        )
 
     return update

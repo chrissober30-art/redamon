@@ -13,10 +13,18 @@ This registry is process-local (no cross-process sharing) and is cleared on
 member resume or wave cancellation. Not durable across backend restarts; if
 the backend dies mid-await, the whole wave is cancelled and the member is
 marked ``cancelled`` by normal fireteam cancellation semantics.
+
+The single-process invariant is enforced at startup by
+``agentic/startup_guard.py:check_single_worker()`` (called from
+``api.py``'s FastAPI lifespan). With multiple workers, registrations in
+worker A would be invisible to worker B and confirmations would silently
+hang. To scale horizontally, replace ``_PENDING`` with a shared backing
+store (Redis pub/sub, Postgres LISTEN/NOTIFY, etc.) and remove the guard.
 """
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -33,6 +41,68 @@ class PendingMemberConfirmation:
 
 
 _PENDING: dict[tuple[str, str, str], PendingMemberConfirmation] = {}
+
+
+# Wave-clock credit accounting. Operator confirmation waits must not consume
+# the wave wall-clock budget. The deploy node's deadline loop polls
+# get_credit_s and extends its deadline by the accumulated paused time.
+# Interval-union semantics: N members waiting in parallel for 60s credit the
+# wave 60s of pause (not 60s * N).
+_WAVE_ACTIVE_WAITS: dict[tuple[str, str], int] = {}    # currently-waiting member count
+_WAVE_PAUSE_START: dict[tuple[str, str], float] = {}   # monotonic when count went 0->1
+_WAVE_CREDIT_S: dict[tuple[str, str], float] = {}      # accumulated paused time
+
+
+def _wkey(session_id: str, wave_id: str) -> tuple[str, str]:
+    return (session_id, wave_id)
+
+
+def begin_confirmation_wait(session_id: str, wave_id: str) -> None:
+    """Mark the start of one member's confirmation wait. Starts the pause
+    clock on the 0->1 transition. Safe under nested/parallel waits within
+    the same wave (interval-union)."""
+    k = _wkey(session_id, wave_id)
+    count = _WAVE_ACTIVE_WAITS.get(k, 0)
+    if count == 0:
+        _WAVE_PAUSE_START[k] = time.monotonic()
+    _WAVE_ACTIVE_WAITS[k] = count + 1
+
+
+def end_confirmation_wait(session_id: str, wave_id: str) -> None:
+    """Mark the end of one member's confirmation wait. On 1->0 transition,
+    commits the elapsed interval into the wave's credit total. Caller MUST
+    invoke this via try/finally; an unbalanced count leaves the wave clock
+    stuck-paused for the rest of the wave."""
+    k = _wkey(session_id, wave_id)
+    count = _WAVE_ACTIVE_WAITS.get(k, 0) - 1
+    if count <= 0:
+        start = _WAVE_PAUSE_START.pop(k, None)
+        if start is not None:
+            _WAVE_CREDIT_S[k] = _WAVE_CREDIT_S.get(k, 0.0) + (time.monotonic() - start)
+        _WAVE_ACTIVE_WAITS.pop(k, None)
+    else:
+        _WAVE_ACTIVE_WAITS[k] = count
+
+
+def get_credit_s(session_id: str, wave_id: str) -> float:
+    """Return the wave's accumulated confirmation-wait credit in seconds,
+    including any in-progress pause. Monotonically non-decreasing until
+    drop_wave_credit clears the entry."""
+    k = _wkey(session_id, wave_id)
+    base = _WAVE_CREDIT_S.get(k, 0.0)
+    start = _WAVE_PAUSE_START.get(k)
+    if start is not None:
+        return base + (time.monotonic() - start)
+    return base
+
+
+def drop_wave_credit(session_id: str, wave_id: str) -> None:
+    """Clear credit-tracking state for a wave. Called on wave teardown
+    (timeout / cancel / normal completion) alongside drop_wave."""
+    k = _wkey(session_id, wave_id)
+    _WAVE_ACTIVE_WAITS.pop(k, None)
+    _WAVE_PAUSE_START.pop(k, None)
+    _WAVE_CREDIT_S.pop(k, None)
 
 
 def _key(session_id: str, wave_id: str, member_id: str) -> tuple[str, str, str]:

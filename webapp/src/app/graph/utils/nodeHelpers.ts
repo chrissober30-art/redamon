@@ -35,9 +35,37 @@ export const getUrlForTypeName = (type: string, name: string | null | undefined)
 }
 
 /**
+ * Build a browser-openable URL for an Endpoint node by combining its `baseurl`
+ * with its `path` (or using `full_url` directly), or null if it isn't openable.
+ *
+ * Only GET endpoints are linkable — clicking a link issues a GET, so POST/PUT/etc.
+ * endpoints aren't meaningfully reachable from a browser. The method is read from
+ * the `method` property, falling back to the leading token of the name ("GET /x").
+ */
+const getEndpointUrl = (props: Record<string, unknown>, name: string): string | null => {
+  const nameMethod = (name || '').trim().split(/\s+/)[0]?.toUpperCase()
+  const method = (typeof props.method === 'string' ? props.method : nameMethod || '').toUpperCase()
+  if (method && method !== 'GET') return null
+
+  if (isHttpUrl(props.full_url)) return props.full_url
+
+  const base = typeof props.baseurl === 'string' ? props.baseurl.trim().replace(/\/$/, '') : ''
+  if (!isHttpUrl(base)) return null
+
+  let path = typeof props.path === 'string' ? props.path : ''
+  if (!path) {
+    // Derive the path from the name: "GET /transactions/123" -> "/transactions/123"
+    const parts = (name || '').trim().split(/\s+/)
+    path = parts.length > 1 ? parts.slice(1).join(' ') : ''
+  }
+  if (path && !path.startsWith('/')) path = `/${path}`
+  return `${base}${path}`
+}
+
+/**
  * Build a browser-openable URL for a node, or null if it's not web-addressable.
- * Prefers an explicit `url`/`endpoint`/`href` property, then derives one from
- * the node type + name.
+ * Prefers an explicit `url`/`endpoint`/`href` property, then handles Endpoint
+ * nodes (baseurl + path), then derives one from the node type + name.
  */
 export const getNodeUrl = (node: GraphNode): string | null => {
   const props = node.properties || {}
@@ -45,6 +73,7 @@ export const getNodeUrl = (node: GraphNode): string | null => {
   for (const c of candidates) {
     if (isHttpUrl(c)) return c
   }
+  if (node.type === 'Endpoint') return getEndpointUrl(props, node.name)
   return getUrlForTypeName(node.type, node.name)
 }
 

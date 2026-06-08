@@ -348,6 +348,7 @@ async def initialize_node(state: AgentState, config, *, llm, neo4j_creds) -> dic
                 "chain_findings_memory": state.get("chain_findings_memory", []),
                 "chain_failures_memory": state.get("chain_failures_memory", []),
                 "chain_decisions_memory": state.get("chain_decisions_memory", []),
+                "chain_waves_memory": state.get("chain_waves_memory", []),
                 "_last_chain_step_id": state.get("_last_chain_step_id"),
                 "_prior_chain_context": state.get("_prior_chain_context"),
             }
@@ -395,6 +396,7 @@ async def initialize_node(state: AgentState, config, *, llm, neo4j_creds) -> dic
         "chain_findings_memory": state.get("chain_findings_memory", []),
         "chain_failures_memory": state.get("chain_failures_memory", []),
         "chain_decisions_memory": state.get("chain_decisions_memory", []),
+        "chain_waves_memory": state.get("chain_waves_memory", []),
         "_last_chain_step_id": state.get("_last_chain_step_id"),
         "_prior_chain_context": state.get("_prior_chain_context"),
     }

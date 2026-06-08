@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from logging_config import get_logger
+from orchestrator_helpers.json_utils import normalize_content
 
 logger = get_logger(__name__)
 
@@ -158,7 +159,7 @@ async def _playwright_fetch(url: str, mcp_manager) -> str:
     try:
         tools = await mcp_manager.get_tools()
     except Exception as e:
-        logger.warning(f"[tradecraft] crawl mcp tools error: {e}")
+        logger.warning(f"[tradecraft] crawl mcp tools error: {type(e).__name__}: {e}")
         return ""
     playwright = next((t for t in tools if getattr(t, "name", "") == "execute_playwright"), None)
     if playwright is None:
@@ -166,7 +167,7 @@ async def _playwright_fetch(url: str, mcp_manager) -> str:
     try:
         out = await playwright.ainvoke({"url": url, "format": "html"})
     except Exception as e:
-        logger.warning(f"[tradecraft] crawl playwright error url={url} err={e}")
+        logger.warning(f"[tradecraft] crawl playwright error url={url} err={type(e).__name__}: {e}")
         return ""
     if isinstance(out, str):
         return out
@@ -301,14 +302,14 @@ async def _llm_decide(
     try:
         state.llm_calls += 1
         resp = await llm.ainvoke(prompt)
-        content = (getattr(resp, "content", "") or "").strip()
+        content = normalize_content(getattr(resp, "content", "") or "").strip()
         # Strip code fences
         m = re.search(r"\{.*\}", content, re.DOTALL)
         if not m:
             raise ValueError(f"no JSON object in LLM response: {content[:120]}")
         data = json.loads(m.group(0))
     except Exception as e:
-        logger.warning(f"[tradecraft] crawl llm parse error: {e}")
+        logger.warning(f"[tradecraft] crawl llm parse error: {type(e).__name__}: {e}")
         if not retry_strict:
             return await _llm_decide(
                 llm=llm, base_url=base_url, current_url=current_url, depth=depth,

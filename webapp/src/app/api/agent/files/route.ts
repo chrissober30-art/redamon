@@ -4,13 +4,20 @@ const AGENT_API_URL = process.env.AGENT_API_URL || process.env.NEXT_PUBLIC_AGENT
 
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path')
+  const projectId = request.nextUrl.searchParams.get('projectId')
 
   if (!path) {
     return NextResponse.json({ error: 'Missing path parameter' }, { status: 400 })
   }
 
   try {
-    const agentUrl = `${AGENT_API_URL}/files?path=${encodeURIComponent(path)}`
+    // When projectId is provided, use the project-scoped workspace download
+    // (direct bind-mount read, no kali_shell base64 round-trip). Falls back
+    // to the legacy /files endpoint for the existing /tmp/-only flow so we
+    // don't break in-chat downloads from older messages.
+    const agentUrl = projectId
+      ? `${AGENT_API_URL}/workspace/download?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`
+      : `${AGENT_API_URL}/files?path=${encodeURIComponent(path)}`
     const resp = await fetch(agentUrl)
 
     if (!resp.ok) {

@@ -46,6 +46,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           user_id: id,
           github_token: tokenForFetch,
           force,
+          model: (existing as unknown as { llmModel?: string }).llmModel || '',
         }),
         signal: controller.signal,
       })

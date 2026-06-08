@@ -7,6 +7,232 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.15.1] - 2026-06-06
+
+### Fixed
+
+- **Productivity loop wrongly pushed agents off correct-but-failing approaches** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py), [agentic/prompts/base.py](agentic/prompts/base.py), [agentic/state.py](agentic/state.py)) — the unproductive-streak detector treated *debugging* (a fix attempt that adds no new target fact, or whose output merely contains "error") as no-progress, prematurely forcing the agent to pivot. Added a `diagnostic_progress` verdict and stall-counter handling: a same-approach re-attempt with a genuinely different result (or a cited ruled-out cause) now resets the stall counter instead of fuelling the streak, capped (`DIAGNOSTIC_PROGRESS_MAX_STREAK`, default 6) so a dead approach still surfaces. Repeat-detection now keys on output fingerprint, so structurally-similar payloads with different responses count as real attempts. The diagnose-or-pivot prompts now demand one validation step (reproduce / fingerprint / cite a tested assumption) before abandoning a technique. Coverage: [agentic/tests/test_productivity.py](agentic/tests/test_productivity.py).
+
+---
+
+## [4.15.0] - 2026-06-05
+
+### Added
+
+- **AI Surface Recon — active AI/LLM/MCP/vector-DB fingerprinting** ([recon/main_recon_modules/ai_surface_recon.py](recon/main_recon_modules/ai_surface_recon.py), [recon/helpers/probe_pack_engine.py](recon/helpers/probe_pack_engine.py), [graph_db/mixins/recon/ai_surface_recon_mixin.py](graph_db/mixins/recon/ai_surface_recon_mixin.py)) — new recon module (display **Phase 4.5**, after resource enumeration) that sends benign, protocol-aware probes to confirm and characterize the AI surfaces earlier passive phases only flagged. Seven independently-toggled workloads run per host (hosts in parallel, workloads sequential): (1) chat-shape probe — confirms an LLM endpoint + dialect + streaming + p50 latency without a key (a `401`/`422` OpenAI-style error body is a positive); (2) MCP handshake + `tools/list` + Cisco YARA static scan — enumerates the tool surface unauthenticated and flags tool-poisoning / prompt-injection; (3) OpenAPI / `ai-plugin.json` / model-listing discovery; (4) Julius YAML probe-pack engine (Praetorian matcher reimplemented in Python) for runtime fingerprints; (5) vector-DB confirmation reads (qdrant / chroma / weaviate / milvus) that double as an unauthenticated-exposure signal. It is black-box and benign — no jailbreaking, injection, or credentials, and **zero LLM calls**. Writes `ai_*` property annotations onto existing `Endpoint` / `Parameter` / `Technology` nodes (COALESCE-merged, zero new labels) plus MCP tool-poisoning `Vulnerability` nodes. 15 new project settings + Prisma columns, stealth-aware. Has an on-demand partial-recon twin. Heavy deps (`mcp`, `yara`, `prance`, `jq`, `PyYAML`) are lazy-imported so a missing library degrades one workload, not the run. Docs: [readmes/AI_SURFACE_RECON_MODULE.md](readmes/AI_SURFACE_RECON_MODULE.md) + wiki [Adversarial AI Recon](https://github.com/samugit83/redamon/wiki/Adversarial-AI-Recon#ai-surface-recon-active-probing). Coverage: [recon/tests/test_ai_surface_recon_module.py](recon/tests/test_ai_surface_recon_module.py), [test_ai_surface_recon_mixin.py](recon/tests/test_ai_surface_recon_mixin.py), [test_ai_surface_catalog.py](recon/tests/test_ai_surface_catalog.py), [test_probe_pack_engine.py](recon/tests/test_probe_pack_engine.py).
+
+- **AI Surface & AI Risk graph tables** ([webapp/src/app/graph/components/RedZoneTables/AiTables.tsx](webapp/src/app/graph/components/RedZoneTables/AiTables.tsx), [aiSurface/route.ts](webapp/src/app/api/analytics/redzone/aiSurface/route.ts), [aiRisk/route.ts](webapp/src/app/api/analytics/redzone/aiRisk/route.ts)) — two new Data Table presets in the Red Zone dropdown that turn the new `ai_*` enrichment into operator views. **AI Surface** (inventory) aggregates every AI / LLM / MCP / vector-DB surface across all modules into 5 sub-sheets (LLM Endpoints, MCP Servers, AI Technologies, Vector DBs, Model Inventory); **AI Risk** (offensive, OWASP-LLM / MITRE ATLAS) surfaces the attackable findings in 5 sub-sheets (MCP Tool Poisoning, Injectable Params, RAG Ingestion, Exposed Runtimes, Unauthenticated MCP). Both reuse the shared red-zone shell (per-sheet search, refresh, XLSX / JSON / MD export). Coverage: [aiTablesRoutes.test.ts](webapp/src/app/api/analytics/redzone/aiTablesRoutes.test.ts), [AiTables.test.tsx](webapp/src/app/graph/components/RedZoneTables/AiTables.test.tsx).
+
+### Fixed
+
+- **Agent crash-loop** — the new graph mixin imported `recon` at module load; the agent image has no `recon` package. Made the import lazy.
+- **Anthropic provider test 404** — the test hardcoded a retired model snapshot; now uses `claude-opus-4-6`.
+- **No-provider project create** — the LLM-provider gate now shows immediately on Create (and on Save), instead of the form flashing first then a broken model picker.
+
+---
+
+## [4.14.1] - 2026-06-04
+
+### Fixed
+
+- **Custom Ports ignored, phantom 443/9000 nodes** ([recon/main_recon_modules/http_probe.py](recon/main_recon_modules/http_probe.py)) — when Naabu found no open ports, http_probe's DNS fallback probed a hardcoded port list (80, 443, 8080, 9000, ...) regardless of `NAABU_CUSTOM_PORTS`, so a custom-port scan invented out-of-scope nodes and never probed the requested port. The fallback now probes only the configured custom ports, plus a hard port-scope guard drops any out-of-scope URL before probing. Partial recon opts out (it scopes ports via its own modal injection). The form now shows a red warning that Top Ports is ignored when Custom Ports is set. Fixes [#136](https://github.com/samugit83/redamon/issues/136). Coverage: [recon/tests/test_custom_port_scope.py](recon/tests/test_custom_port_scope.py).
+
+---
+
+## [4.14.0] - 2026-05-29
+
+### Added
+
+- **ZAP Ajax Spider — browser-driven resource enumeration** ([recon/helpers/resource_enum/zap_ajax_spider_helpers.py](recon/helpers/resource_enum/zap_ajax_spider_helpers.py), [recon/main_recon_modules/resource_enum.py](recon/main_recon_modules/resource_enum.py), [recon/partial_recon_modules/web_crawling.py](recon/partial_recon_modules/web_crawling.py)) — new active crawler in GROUP 5 that runs OWASP ZAP with headless Firefox to capture endpoints static crawlers miss: JS-only XHRs, runtime-templated URLs, `history.pushState` SPA routes, click-cascade reveals, GraphQL POSTs, form submissions, and authenticated post-login surface via Replacer-injected headers. Off by default, auto-disabled in stealth mode, enabled in 4 presets (api-security, bug-bounty-deep, full-active-scan, web-app-pentester). 19 new project settings + Prisma columns. Validated end-to-end against guinea pig — all 13 expected discovery branches confirmed.
+
+- **`Endpoint.sources[]` array** ([graph_db/mixins/recon/resource_mixin.py](graph_db/mixins/recon/resource_mixin.py)) — every Endpoint now carries a fine-grained crawler-attribution list (`katana`, `hakrawler`, `zap_ajax_spider`, etc.) in addition to the existing singular `source` phase tag. Union-not-clobber merge on overlap preserves history when multiple crawlers find the same endpoint. Enables queries like `MATCH (e:Endpoint) WHERE 'zap_ajax_spider' IN e.sources`.
+
+### Fixed
+
+- **Partial-recon scope filter broken for IP-mode projects** ([recon/partial_recon_modules/helpers.py](recon/partial_recon_modules/helpers.py), [recon/partial_recon_modules/web_crawling.py](recon/partial_recon_modules/web_crawling.py)) — `_host_in_requested_domain_scope` blindly applied a domain-match filter against the synthetic `ip-targets.<project_id>` pseudo-domain, pruning every legitimate localhost / RFC1918 / IPv6-loopback BaseURL as "out of scope". The ZAP partial recon then fell back to bare `localhost` (no port) and wrote 4 garbage endpoints per run. Introduced a shared `_is_host_in_scope` helper that honors `IP_MODE` + `TARGET_IPS`, accepts CIDR membership and IPv6 (bracketed `[::1]:port` and bare `2001:db8::1`), and falls back to "any private/loopback IP" when no targets are configured. 34 new unit tests cover every branch.
+
+---
+
+## [4.13.1] - 2026-05-28
+
+### Fixed
+
+- **JS Recon analysis hung indefinitely on large targets** ([recon/main_recon_modules/js_recon.py](recon/main_recon_modules/js_recon.py)): `_run_analysis()` wrapped the analyzer pool in `with ThreadPoolExecutor(...)`, so `future.result(timeout=...)` raised on time but the `with` exit then blocked on `shutdown(wait=True)` until every worker finished naturally. A 5894-file (303 MB) scan sat in `running` for 35+ minutes. Switched to manual executor with a shared wall-clock deadline and `shutdown(wait=False, cancel_futures=True)` in `finally`, so `JS_RECON_TIMEOUT` is now a real cap. Regression coverage: [recon/tests/test_js_recon_timeout.py](recon/tests/test_js_recon_timeout.py).
+
+- **Generate Recon Preset with AI: 404 on non-Anthropic providers** ([webapp/src/app/api/presets/generate/route.ts](webapp/src/app/api/presets/generate/route.ts)) — the route was treating the suffix in `custom/<id>` as the upstream API model name, when it's actually a `UserLlmProvider` id. Now resolves the provider by id and uses `provider.modelIdentifier`, honoring `temperature` / `maxTokens` / `defaultHeaders` / `sslVerify` like the chat path. Fixes [#133](https://github.com/samugit83/redamon/issues/133).
+
+- **Root-domain-only recon silently produced no targets** ([recon/main.py](recon/main.py)) — with Subdomain Discovery disabled and no prefixes set, the pipeline entered FULL DISCOVERY mode, skipped discovery, and never resolved the root domain, leaving downstream tools with zero targets. Now auto-promotes to FILTERED mode in that scenario so the root domain gets DNS-resolved and scanned. Fixes [#134](https://github.com/samugit83/redamon/issues/134).
+
+### Changed
+
+- **Target Configuration UX guardrails** ([webapp/src/components/projects/ProjectForm/sections/TargetSection.tsx](webapp/src/components/projects/ProjectForm/sections/TargetSection.tsx), [SubdomainDiscoverySection.tsx](webapp/src/components/projects/ProjectForm/sections/SubdomainDiscoverySection.tsx), [WorkflowView/WorkflowView.tsx](webapp/src/components/projects/ProjectForm/WorkflowView/WorkflowView.tsx), [WorkflowView/ToolNode.tsx](webapp/src/components/projects/ProjectForm/WorkflowView/ToolNode.tsx)) — UI now mirrors backend semantics so "no targets" states are unreachable:
+  - When **Subdomain Discovery is OFF and prefixes are empty**, "Include Root Domain" is auto-enabled and locked ON (works in edit mode too).
+  - When **explicit prefixes are set**, the Subdomain Discovery master toggle is auto-disabled and locked OFF in both the section view and the workflow diagram, with a hover tooltip explaining why; a new blue "Filtered mode" banner replaces the empty-prefixes warning.
+  - Turning Subdomain Discovery OFF with empty prefixes now shows a confirm modal warning that Include Root Domain will be auto-enabled.
+
+---
+
+## [4.13.0] - 2026-05-27
+
+### Added
+
+- **Productivity v2: continuous score + tiered actions** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py), [state.py](agentic/state.py), [project_settings.py](agentic/project_settings.py)) — replaces the legacy binary `3 unproductive of last 6 → fire Deep Think` trigger with a continuous score that fuses five observed signals every think turn: unproductive verdicts, iterations since engagement state last grew, max axis-repeat count, same-pattern recent calls, minus rewards for recent `new_info` and actionable findings. Score maps to five tiers (green → yellow → orange → red → critical) with escalating prompt-level actions: soft hint → fire Deep Think → demand a hypothesis pivot → block the next expensive call on the dominant axis. Weights scale dynamically with session age and phase. Backward-compatible: `PRODUCTIVITY_SCORE_ENABLED=false` falls back to the legacy 3/6 counter.
+
+- **Axis lock-in detector** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py)) — per-tool-family extractor (`extract_axis`) reduces every expensive call to the semantic dimensions the agent is *holding constant* (e.g. `(family=credential_brute_force, target=/login, fixed_user=admin)`), keyed into a session-long `tested_axes` ledger. Three brute-force attempts against the same username collapse onto a single axis key even when the wordlists differ — slow loops spread across 20+ iterations now register as repetition. Records on both the single-tool and wave analysis paths.
+
+- **State-growth signal** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py), [think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — orchestrator-owned `_iterations_since_state_grew` counter resets to 0 whenever `target_info` / `chain_findings_memory` / `actionable_findings` grew, otherwise increments. Independent of LLM self-report; LLM cannot game it. Becomes the dominant input to the score once stall exceeds `STATE_GROWTH_SOFT_HINT_THRESHOLD` (default 5).
+
+- **Deep Think cooldown** ([think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — after Deep Think fires, suppresses re-fires for `DEEP_THINK_COOLDOWN_ITERATIONS` (default 5). Bypassed by critical-tier score, state-growth-stall override, or LLM `_need_deep_think=true` self-request. Stops the "32 Deep Thinks in 60 minutes" failure mode where every same-window streak re-fired a fresh strategic analysis before the previous one had been acted on.
+
+- **Deep Think novelty check** ([productivity.py](agentic/orchestrator_helpers/productivity.py), [think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — token-Jaccard similarity between the new `priority_order` and the previous one (stored in `_previous_priority_order`); if it exceeds `DEEP_THINK_NOVELTY_JACCARD_MAX` (default 0.6), a "plan novelty low" warning is prepended to the rendered Deep Think block, forcing the agent to articulate what specific parameter has changed or pivot to a strategy class not present in the previous plan.
+
+### Changed
+
+- **Deep Think trigger condition #3** is now score-tier-driven (`Productivity tier 'orange|red|critical' (score N.N) — components: {...}`) instead of the legacy "Unproductive streak detected (N/6 ...)". Tier-specific prompt hints (yellow / red / critical) are injected into the system prompt before the main think LLM call.
+
+### Measured impact
+
+- Single-target re-run, same model, same vulnerability chain: **−37% total tokens** (3.22M → 2.01M), **−35% wall time** (60m → 38m), **−63% Deep Thinks** (32 → 12, all genuinely needed), same flag recovered.
+
+### Docs
+
+- **README.AGENTIC_SYSTEM.md** ([readmes/README.AGENTIC_SYSTEM.md](readmes/README.AGENTIC_SYSTEM.md)) — Executive Summary rewritten with cognitive-scaffolding framing; *Deep Think* chapter gains new Cooldown and Novelty Check subsections; *Productivity Verdict & Loop Detector* chapter gains four new subsections (State-Growth Signal, Axis Lock-in Ledger, Continuous Productivity Score, Dynamic Weights); both flow diagrams rewritten to show the score → tier → action → cooldown → novelty pipeline.
+
+### Tests
+
+- 221 productivity tests total (133 in [test_productivity.py](agentic/tests/test_productivity.py), 88 in the new [test_productivity_v2_review.py](agentic/tests/test_productivity_v2_review.py)): axis extractor per tool family, ledger immutability, Jaccard edge cases, score boundary math, dynamic-weight scaling, tier mapping, cooldown arithmetic, full XBEN-007 timeline smoke, AST-grade wiring tests that lock the new statements in place across both the single-tool and wave analysis paths.
+
+
+---
+
+
+## [4.12.0] - 2026-05-24
+
+### Added
+
+- **Per-step diagnostic classification** ([agentic/orchestrator_helpers/error_class.py](agentic/orchestrator_helpers/error_class.py), [execute_plan_node.py](agentic/orchestrator_helpers/nodes/execute_plan_node.py), [execute_tool_node.py](agentic/orchestrator_helpers/nodes/execute_tool_node.py)) — every tool step is tagged with one of seven `error_class` values: `success`, `shell_parser_error`, `transport_error`, `tool_internal_error`, `application_4xx`, `application_5xx_fast` (<50ms — parse-time crash, input never reached business logic), `application_5xx_normal` (≥50ms — real app/DB error). The fast-vs-normal 5xx split is the key diagnostic that prevents the LLM from treating "all SQL payloads return 500" as "vector exhausted" when the input was actually rejected at the parser.
+
+- **Inline `[duration_ms, error_class]` annotations in chain context** ([agentic/state.py](agentic/state.py)) — `_format_step_diagnostics()` surfaces both fields next to every tool entry the LLM reads, e.g. `execute_curl [3ms, application_5xx_fast]: ...`. Renders cleanly across the three chain-context paths (single-tool, wave, older-iteration digest); legacy steps without the fields render empty (backward-compatible).
+
+- **Response-uniformity anomaly detector** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — complementary to the existing same-pattern fingerprint audit. When 5+ of the last 8 steps share the same `(error_class, body_size_bucket)` AND all complete in under 50ms, a warning block is injected into the next prompt: *"the test result is INCONCLUSIVE, not NEGATIVE — do not mark this vector class tested."* Each `error_class` carries its own remediation hint (shell-quoting streaks recommend `execute_code` over `execute_curl`; fast-5xx streaks recommend re-examining payload validity before pivoting). Tunable via `UNIFORM_RESPONSE_WINDOW` / `UNIFORM_RESPONSE_MIN_COUNT` / `UNIFORM_RESPONSE_DURATION_MS`.
+
+- **Competing-hypotheses requirement in Deep Think** ([agentic/state.py](agentic/state.py), [agentic/prompts/base.py](agentic/prompts/base.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — `DeepThinkResult` gains a `competing_hypotheses: List[CompetingHypothesis]` field where each hypothesis carries `hypothesis`, `supporting_evidence` (cite specific iters/steps), and `disambiguating_probe` (ONE concrete test that distinguishes from the alternatives). The prompt requires ≥2 hypotheses when the trigger is "Unproductive streak detected" or when any chain finding has confidence ≥60. The rendered block leads the next iteration's prompt with the imperative *"do not just confirm your favorite"* — pushing the agent toward disambiguating probes instead of confirming its first plausible inference. Anti-confirmation-bias mechanism for the strategic re-evaluation loop.
+
+- **Adversarial AI Phase 6 — JS Recon AI SDK detection** ([recon/helpers/ai_signal_catalog.py](recon/helpers/ai_signal_catalog.py), [recon/main_recon_modules/js_recon.py](recon/main_recon_modules/js_recon.py), [graph_db/mixins/recon/js_recon_mixin.py](graph_db/mixins/recon/js_recon_mixin.py)) — new 7th js_recon analysis pass scans every JS bundle for AI/LLM signals using a 164-pattern catalogue (65 SDK imports, 33+18 key literals, 3 browser flags, 23 frontend markers, 22 provider URLs). Writes `JsReconFinding` with 5 new `finding_type` values: `ai-sdk-client`, `ai-sdk-key-literal`, `ai-sdk-browser-allowed`, `ai-frontend-detected`, `ai-provider-url`. Constructor-context patterns suppress overlapping prefix matches (single finding per leaked key). Gemini disambiguation rule: `AIzaSy*` keys escalate to critical when paired with `@google/genai` / Gemini SDK / endpoint within ±2KB, otherwise downgrade to medium with "Maps/Firebase" label. Mixin enriches matching `Secret` nodes with `ai_provider` + `ai_finding_id`, gated on an AI-key-prefix whitelist so Stripe/Slack/AWS literals are never wrongly enriched. Gated by `jsReconAiSdkDetectionEnabled` (default on). 64 new unit/integration/smoke tests + 23 fixture JS files in [guinea_pigs/ai_surface_target/](guinea_pigs/ai_surface_target/) on port 9104 covering every detection branch including negative regression cases (jQuery, Stripe-only). Wiki: [Adversarial AI Recon § JS Recon AI SDK Detection](redamon.wiki/Adversarial-AI-Recon.md#js-recon-ai-sdk-detection).
+
+- **Per-resource LLM model picker for Tradecraft Resources** ([webapp/prisma/schema.prisma](webapp/prisma/schema.prisma), [TradecraftResourceForm.tsx](webapp/src/components/settings/TradecraftResourceForm.tsx), [agentic/api.py](agentic/api.py)) — required `llmModel` on `UserTradecraftResource` picks which model crawls + summarizes each knowledge site, decoupling tradecraft from `Project.agentOpenaiModel`. Agent `/tradecraft/verify` honors an optional `model` field via the same provider-agnostic path the recon AI classifiers use.
+
+### Fixed
+
+- **Plan-wave path dropped diagnostic fields** ([agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — when `execute_plan_node` populated `duration_ms` and `error_class` on each wave step, `think_node` then rebuilt each step into a fresh `exec_step` dict that copied only a hand-picked field subset, silently dropping the two diagnostic fields before they reached the execution trace. P1/P2/P3 annotations never appeared for plan-wave iterations (~90% of the agent's traffic). Now propagated explicitly; wiring guard test (`test_think_node_plan_wave_propagates_diagnostics`) catches future regression.
+
+- **`'list' object has no attribute 'strip'` crash on Bedrock Converse** ([tradecraft_crawl.py](agentic/orchestrator_helpers/tradecraft_crawl.py), [tradecraft_lookup.py](agentic/orchestrator_helpers/tradecraft_lookup.py), [agentic/api.py](agentic/api.py)) — eight LLM call sites called `.strip()` on `response.content`, which `ChatBedrockConverse` returns as a list of content blocks. Killed the tradecraft crawl loop and 502'd the five recon AI classifiers under Bedrock. All eight sites now route through `normalize_content()`.
+
+### Docs
+
+- **AI-Agent-Guide.md** ([redamon.wiki/AI-Agent-Guide.md](redamon.wiki/AI-Agent-Guide.md)) — "Deep Think Cards" section updated: trigger #3 rewritten from "3 consecutive failures" to the actual productivity-verdict-based sliding-window detection; output table grew from 5 to 6 sections with the new Competing Hypotheses row; new subsections on diagnostic annotations and the response-uniformity anomaly detector.
+
+- **README.AGENTIC_SYSTEM.md** ([readmes/README.AGENTIC_SYSTEM.md](readmes/README.AGENTIC_SYSTEM.md)) — `DeepThinkResult` schema documentation refreshed with the new `competing_hypotheses` field and rendered-markdown example; "Diagnostic Annotations" and "Response-Uniformity Anomaly Detector" subsections added to the Productivity chapter; executive-summary entries #13 and #21 updated.
+
+
+---
+
+
+## [4.11.0] - 2026-05-23
+
+### Added
+
+- **Adversarial AI Surface Recon — distributed hooks across the recon pipeline** ([recon/helpers/ai_signal_catalog.py](recon/helpers/ai_signal_catalog.py), [domain_recon.py](recon/main_recon_modules/domain_recon.py), [port_scan.py](recon/main_recon_modules/port_scan.py), [masscan_scan.py](recon/main_recon_modules/masscan_scan.py), [nmap_scan.py](recon/main_recon_modules/nmap_scan.py), [http_probe.py](recon/main_recon_modules/http_probe.py)) — every standard recon module recognises AI-shaped signals (LLM runtimes, vector DBs, AI frontends, proxies, SDK clients, MLOps stacks) and attaches them to existing graph nodes. Black-box detection only; no extra HTTP traffic. Single source-of-truth catalogue covers 28 ports, 22 header families, 29 title regexes, 21 body fingerprints, 25 favicon hashes, 6 Nmap version patterns.
+
+- **AI annotations on the graph** ([graph_db/mixins/recon/domain_mixin.py](graph_db/mixins/recon/domain_mixin.py), [port_mixin.py](graph_db/mixins/recon/port_mixin.py), [http_mixin.py](graph_db/mixins/recon/http_mixin.py)) — `Subdomain.ai_service_hint` from TXT/NS, `Service.ai_runtime_version` from Nmap, `Endpoint.is_ai_framework_detected` / `ai_framework_name` / `ai_frontend_product_guess` from httpx, `Technology.category` ∈ {`ai-runtime`, `ai-vector-db`, `ai-framework`, `ai-proxy`, `ai-frontend`, `ai-sdk-client`, `ai-mlops`}, `USES_TECHNOLOGY.detected_by` carries the signal channel (`naabu-ai-port`, `masscan-ai-port`, `httpx-ai-header`, `httpx-ai-favicon`, `httpx-ai-title`). Zero new node labels.
+
+- **BaseURL → Endpoint model split** ([graph_db/mixins/recon/http_mixin.py](graph_db/mixins/recon/http_mixin.py)) — `BaseURL` is now one node per scheme+host+port; each probed path becomes an `Endpoint` keyed by `(path, method, baseurl)` linked via `(BaseURL)-[:HAS_ENDPOINT]->(Endpoint)`. Per-path response data and the `USES_TECHNOLOGY` edge from http_probe live on `Endpoint`, so a host serving a chat UI on `/` and a runtime API on `/v1/chat/completions` keeps two distinct AI-tagged endpoints under one BaseURL.
+
+- **Two-tier port-catalog promotion** ([recon/main_recon_modules/port_scan.py](recon/main_recon_modules/port_scan.py), [masscan_scan.py](recon/main_recon_modules/masscan_scan.py)) — vendor-specific AI ports (Ollama 11434, Qdrant 6333/6334, Milvus 19530, ComfyUI 8188, Streamlit 8501, Gradio 7860, Argilla 6900, Kokoro-TTS 8880, SGLang 30000, LangGraph 2024) auto-promote to `Technology(ai-*)` from port output alone. Generic-but-AI-capable ports (1234, 3000, 3001, 4000, 5000, 5001, 6006, 7865, 8000, 8001, 8002, 8080, 8081, 8123, 8265, 9091, 50051) carry a `disambiguate=True` flag — port-scan skips them; promotion happens only if http_probe corroborates via header/title/favicon. Prevents false-positive AI tags on Tomcat/Phoenix/Node-dev/Prometheus-pushgateway boxes.
+
+- **AI Wappalyzer body fingerprints** ([recon/main_recon_modules/http_probe.py](recon/main_recon_modules/http_probe.py)) — Wappalyzer-style regex catalogue scans the captured response body (≤ 512 KB) for AI-product signatures: `<gradio-app>` + `window.gradio_config`, `txt2img_textarea` (A1111), `fooocus_v2`, `invoke-favicon.svg`, `aria-label="Loading ComfyUI"`, `mlflow-ui-container`, Weaviate `/v1/meta` shape, Chroma `nanosecond heartbeat`, SGLang `/get_model_info`, KoboldCpp `"result":"KoboldCpp"`, LocalAI `/models/apply`, `@anthropic-ai/sdk` import, `dangerouslyAllowBrowser: true`. Fires only if no higher-priority channel (header / favicon / title) already won.
+
+- **AWS Bedrock long-term API key authentication** ([webapp/prisma/schema.prisma](webapp/prisma/schema.prisma), [LlmProviderForm.tsx](webapp/src/components/settings/LlmProviderForm.tsx), [llm_setup.py](agentic/orchestrator_helpers/llm_setup.py), [model_providers.py](agentic/orchestrator_helpers/model_providers.py)) — Bedrock provider now supports a second auth mode alongside IAM keys: a long-term Bedrock API key (bearer token, generated in the Bedrock console under API keys -> Long-term API keys). New `awsBearerToken` column on `UserLlmProvider`, segmented control in the provider form, mutually exclusive at save time. Backend prefers `bedrock_api_key=` on `ChatBedrockConverse` when set, otherwise falls back to SigV4 with the IAM key + secret. Propagated through all 8 `setup_llm` call sites (main agent, fireteam orchestrator, all five `/llm/*` recon endpoints, RoE parse, report summarizer, tradecraft verify, text-to-cypher, both CypherFix orchestrators) plus `fetch_bedrock_models` (boto3 reads `AWS_BEARER_TOKEN_BEDROCK` env, set transiently under a lock). Short-term API keys intentionally not supported — they expire with the AWS console session and would break unattended scans.
+
+- **Endpoint AI Classifier in the recon pipeline** ([recon/helpers/ai_signal_catalog.py](recon/helpers/ai_signal_catalog.py), [recon/main_recon_modules/resource_enum.py](recon/main_recon_modules/resource_enum.py), [graph_db/mixins/recon/resource_mixin.py](graph_db/mixins/recon/resource_mixin.py)) — cross-cutting classifier that runs after the URL discovery tools (Katana, Hakrawler, GAU, FFuf, ParamSpider, Arjun, Kiterunner, jsluice) and tags every Endpoint with `ai_interface_type` (8-value enum: `llm-chat`, `llm-completion`, `llm-embedding`, `llm-tool-call`, `sse-stream`, `mcp`, `llm-graphql`, `non-llm`), `is_ai_rag_ingest`, and every Parameter with `is_ai_prompt_injectable`. Path catalogue covers 38 vendor-specific routes (OpenAI, Anthropic, Gemini, Cohere, Mistral, Groq, Fireworks, Together, DeepSeek, Perplexity, Ollama, TGI, LangServe, MCP); RAG catalogue covers OpenAI Vector Stores / Assistants, Pinecone, Weaviate, Qdrant plus 7 ambiguous paths gated on parent-host being AI-tagged; param catalogue covers 23 prompt-injection field names cited from vendor request-body schemas. Pure regex, no extra traffic.
+
+- **Dedicated workflow-view node** ([webapp/src/components/projects/ProjectForm/WorkflowView/workflowDefinition.ts](webapp/src/components/projects/ProjectForm/WorkflowView/workflowDefinition.ts), [nodeMapping.ts](webapp/src/components/projects/ProjectForm/nodeMapping.ts), [WorkflowNodeModal.tsx](webapp/src/components/projects/ProjectForm/WorkflowView/WorkflowNodeModal.tsx), [inputLogicTooltips.tsx](webapp/src/components/projects/ProjectForm/WorkflowView/inputLogicTooltips.tsx)) — new "Endpoint AI Classifier" node in group 5 (resource_enum stage), positioned downstream of the 8 URL-discovery tools and upstream of the Endpoint + Parameter data pills. Dotted "enriches" edges into both data nodes; consumes Endpoint + Parameter + BaseURL.
+
+- **Project Settings "Resource Enum — AI Classifier" section** ([webapp/src/components/projects/ProjectForm/sections/ResourceEnumAiSection.tsx](webapp/src/components/projects/ProjectForm/sections/ResourceEnumAiSection.tsx)) — master toggle + 4 sub-toggles (AI Path Classifier, AI RAG Path Flag, AI Prompt-Injectable Param Flag, AI Tool-Arg Path Resolver), all default on. Sub-toggles visually disable when master is off. 9-layer settings flow plumbed end-to-end ([Prisma](webapp/prisma/schema.prisma), [project_settings.py](recon/project_settings.py), `/defaults`, Zod schema in [recon-preset-schema.ts](webapp/src/lib/recon-preset-schema.ts), RECON_PARAMETER_CATALOG, frontend section).
+
+- **Partial recon for the Endpoint AI Classifier** ([recon/partial_recon_modules/endpoint_ai_classification.py](recon/partial_recon_modules/endpoint_ai_classification.py), [recon/partial_recon.py](recon/partial_recon.py), [webapp/src/lib/recon-types.ts](webapp/src/lib/recon-types.ts), [PartialReconModal.tsx](webapp/src/components/projects/ProjectForm/WorkflowView/PartialReconModal.tsx)) — operators can re-classify every existing Endpoint in the graph without re-crawling. Useful when the catalogue is extended, when toggles were off during the original scan, or when a new lap of AI annotations ships. No traffic to the target — reads the graph, runs the same classifier as the full pipeline, writes the AI annotations back via the mixin.
+
+- **AI Surface section in pentest reports** ([webapp/src/lib/report/reportData.ts](webapp/src/lib/report/reportData.ts), [reportTemplate.ts](webapp/src/lib/report/reportTemplate.ts), [route.ts](webapp/src/app/api/projects/[id]/reports/route.ts)) — new `queryAiSurface` Cypher rollup, `renderAiSurface` HTML section with KPI cards (AI endpoints, RAG ingest endpoints, prompt-injectable params) and a per-endpoint detail table (top 50), and a `condenseForAgent` payload that ships the top 15 endpoints to the LLM for narrative generation. Risk-score contribution: 5 pts per AI endpoint, 15 pts per RAG ingest, 25 pts per prompt-injectable param.
+
+
+---
+
+
+## [4.10.1] - 2026-05-17
+
+### Added
+
+- **Productivity-based loop detection** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py), [agentic/state.py](agentic/state.py), [agentic/prompts/base.py](agentic/prompts/base.py)) — every tool output is classified by the LLM into one of five verdicts (`new_info` / `confirmation` / `no_progress` / `blocked` / `duplicate`) with mandatory `what_was_new` citation. The orchestrator audits the claim against actual state delta (chain_findings growth, extracted_info population) and auto-downgrades dishonest verdicts to `no_progress`, surfacing the reason in the next prompt. A same-pattern fingerprint audit (sha256 over normalized response body) is appended when 3+ recent calls share the same tool-and-args shape, making repeated "confirmation" claims visibly dishonest.
+
+- **Unproductive-streak Deep Think trigger** ([agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py), [agentic/orchestrator_helpers/nodes/fireteam_member_think_node.py](agentic/orchestrator_helpers/nodes/fireteam_member_think_node.py), [agentic/project_settings.py](agentic/project_settings.py)) — replaces the legacy "3 consecutive failures" rule. When `UNPRODUCTIVE_STREAK_THRESHOLD` (default 3) of the last `PRODUCTIVITY_AUDIT_WINDOW` (default 6) steps are unproductive (LLM verdict OR keyword-failure), Deep Think fires and a pivot warning is injected. Catches "successful but useless" loops (HTTP 200 with empty body, identical fuzzing fingerprints, stable 404s, polite WAF HTML) that the keyword-only detector missed. Mirrored in fireteam member subgraphs.
+
+- **Workspace-path guidance for persistent state files** ([agentic/prompts/base.py](agentic/prompts/base.py)) — prompt now instructs the agent to write curl cookie jars, sqlmap output dirs, hydra restore files under `__WORKSPACE_ROOT__/notes/` instead of `/tmp`, so `fs_read` / `fs_grep` / `fs_edit` can reach them and they persist across kali-sandbox restarts.
+
+### Fixed
+
+- **Loop detector missed successful-but-useless calls** ([agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — the old check only counted steps whose output contained `"failed"` / `"error"` / `"exploit completed, but no session"` AND required them to be consecutive, so empty-body 200s, repeated WAF-blocked HTML, and identical fuzzing iterations would never trip the pivot. Sliding-window N-of-K count over LLM-classified unproductive steps removes both gaps.
+
+
+---
+
+
+## [4.10.0] - 2026-05-15
+
+### Added
+
+- **Per-project workspace filesystem** ([docker-compose.yml](docker-compose.yml), [agentic/workspace_fs.py](agentic/workspace_fs.py)) — every project gets a persistent `/workspace/<projectId>/` bind-mount visible from the agent, the kali-sandbox, and the host. Auto-creates `notes/`, `tool-outputs/`, `jobs/`, `uploads/` on first access. All paths are validated against the project root (`..` traversal, absolute escape, symlink escape all rejected).
+
+- **24 in-process workspace tools for the agent** ([agentic/workspace_fs.py](agentic/workspace_fs.py), [agentic/prompts/tool_registry.py](agentic/prompts/tool_registry.py)) — `fs_read`, `fs_read_many`, `fs_stat`, `fs_write`, `fs_edit`, `fs_multi_edit`, `fs_undo_edit`, `fs_delete`, `fs_move`, `fs_copy`, `fs_mkdir`, `fs_chmod`, `fs_symlink_create`, `fs_grep` (ripgrep wrapper), `fs_glob`, `fs_find`, `fs_list`, `fs_tree`, `fs_symbols` (tree-sitter AST for 15 languages), `fs_symlink_read`, `fs_hash`, `fs_diff` (incl. `vs_last_read` snapshot mode for stale-read detection), `fs_extract` (zip-slip + tar-slip safe), `fs_archive`. Atomic writes via tmp+rename; per-file undo stack capped at 20.
+
+- **5 background-job tools** ([agentic/job_runner.py](agentic/job_runner.py)) — `job_spawn`, `job_status`, `job_wait`, `job_cancel`, `job_list`. Long-running scans (nuclei, hydra) detach as asyncio tasks and stream output to `jobs/<id>.log` so `fs_grep` works mid-flight. State survives agent restart: orphan `running` jobs flip to `interrupted` via `recover_on_boot` at lifespan startup.
+
+- **Tool-output auto-offload** ([agentic/output_offload.py](agentic/output_offload.py), [agentic/tool_offload_policy.py](agentic/tool_offload_policy.py)) — outputs over 20KB get written to `tool-outputs/<utc-iso>-<tool>.txt` automatically and the LLM receives a head/tail stub with the file path. Per-tool policy map (`never`/`always`/`auto`) + per-call `output_mode` override (`inline`/`file`/`auto`). Char-capped head/tail (4KB/2KB) so single-line blobs (base64, minified JSON) don't defeat the offload.
+
+- **Workspace HTTP API** ([agentic/api.py](agentic/api.py), [webapp/src/app/api/agent/workspace/](webapp/src/app/api/agent/workspace/)) — 13 endpoints powering the drawer: `list`, `tree`, `download`, `upload` (multipart with 409-on-collision), `mkdir`, `rename`, `delete`, `archive-download` (folder → tar.gz), `bulk-archive` (N selected → one tar.gz), `preview`, `properties`, `jobs`, `jobs/<id>/cancel`. All proxied through the existing cookie-auth webapp middleware.
+
+- **FileSystemDrawer in the graph view** ([webapp/src/app/graph/components/FileSystemDrawer/](webapp/src/app/graph/components/FileSystemDrawer/), [webapp/src/app/graph/page.tsx](webapp/src/app/graph/page.tsx), [webapp/src/app/graph/components/GraphToolbar/GraphToolbar.tsx](webapp/src/app/graph/components/GraphToolbar/GraphToolbar.tsx), [webapp/src/app/graph/components/AIAssistantDrawer/DrawerHeader.tsx](webapp/src/app/graph/components/AIAssistantDrawer/DrawerHeader.tsx)) — left-side drawer with **Files** tab (breadcrumb navigation, sort by name/size/modified, filter box, multi-select with bulk download/delete, drag-and-drop upload with overwrite confirmation, inline file preview with text + binary-safe fallback, properties popover showing SHA-256 + mode + mtime + symlink target, per-folder download as `.tar.gz`) and **Jobs** tab (live status badges, log view, cancel). Auto-refreshes every 5s while open (paused during preview). Two entry points: folder icon in the graph toolbar and folder icon in the AI drawer header — opening either closes the NodeDrawer first.
+
+- **Protected default subdirs** ([agentic/workspace_fs.py](agentic/workspace_fs.py)) — `notes/`, `tool-outputs/`, `jobs/`, `uploads/` cannot be renamed or deleted from the drawer (frontend Lock badge + backend enforcement at `delete_for_project` / `rename_for_project`). Files INSIDE them remain fully editable. Bulk delete with mixed selection silently skips protected entries and explains in the confirm modal.
+
+- **`WORKSPACE_LAYOUT_BLOCK` prepended to every think-step prompt** ([agentic/prompts/base.py](agentic/prompts/base.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — teaches the agent which folder is for what (`notes/` = scratch, `tool-outputs/` + `jobs/` = auto-managed read-only, `uploads/` = user inbox). The `uploads/` section only renders when files are present, with a `CHECK THESE NOW` directive listing each staged filename (newest first, capped at 20) so the agent reflexively reads what the user dropped.
+
+- **WebSocket `job_update` events** ([agentic/ws_job_emitter.py](agentic/ws_job_emitter.py), [agentic/websocket_api.py](agentic/websocket_api.py)) — JobRegistry pushes lifecycle transitions through the existing chat WS so the drawer's Jobs tab updates instantly instead of waiting for the 5s poll fallback. Per-project fan-out, send-failure tolerant.
+
+### Fixed
+
+- **Workspace tools were invisible to the LLM** ([agentic/project_settings.py](agentic/project_settings.py)) — `get_allowed_tools_for_phase()` only returned `TOOL_PHASE_MAP` keys and MCP-manifest tools, so the 24 `fs_*` and 5 `job_*` tools never made it into the agent's available-tools enum. Agent fell back to `kali_shell "mkdir -p /workspace/foo"` (project-unscoped, polluted the bind-mount root). Added foundational-tool bypass mirroring the existing `is_tool_allowed_in_phase` pattern + 3 regression tests.
+
+- **Webapp test suite project-wide non-functional** ([webapp/vitest.config.ts](webapp/vitest.config.ts), [webapp/vitest.setup.ts](webapp/vitest.setup.ts)) — webapp container had `NODE_ENV=production` baked in, so React 19's `act` (test-only API) was stripped from the prod bundle. Every `render()`-based test failed at module load with `TypeError: React.act is not a function`. Set `NODE_ENV=test` in vitest config + registered `@testing-library/jest-dom` matchers via setup file — unblocks ~1700 component tests project-wide.
+
+- **Stale preview / properties on drawer reopen and project switch** ([webapp/src/app/graph/components/FileSystemDrawer/FileSystemDrawer.tsx](webapp/src/app/graph/components/FileSystemDrawer/FileSystemDrawer.tsx)) — the reset `useEffect` only reset `currentPath` and `tab`, leaving `previewing` and `propertiesFor` set. Closing + reopening the drawer (or switching projects) showed the previous file's preview or a SHA-256 from a different project. Added preview/properties/selection/filter clears + `projectId` to the deps array.
+
+### Security
+
+- **Project-id injection via HTTP query string** ([agentic/workspace_fs.py](agentic/workspace_fs.py)) — `projectId="../etc"` made `WORKSPACE_ROOT / projectId` resolve to the workspace's parent directory; every subsequent path check then treated that escaped location as the project root, letting an authenticated caller read/write arbitrary host paths the agent had access to. New `_validate_project_id()` rejects `/`, `\`, null byte, leading `.`, or `..`. Verified live: traversal probes return clean 400s; UUID project-ids still work.
+
+- **Protected-subdir bypass via path normalization** ([agentic/workspace_fs.py](agentic/workspace_fs.py)) — `./notes`, `notes/`, `notes//`, `./` all bypassed `is_protected_path()` because the naive `.split("/")` check ran without normalization. A caller sending `path=./notes` to DELETE could wipe a protected default subdir. Normalizes with `os.path.normpath` first; 11 variants regression-pinned.
+
+- **ZIP archive leaked symlink-target content** ([agentic/workspace_fs.py](agentic/workspace_fs.py)) — `zipfile.write(symlink)` follows the symlink at OS level and stores the target's content under the symlink's name. A workspace symlink to `/etc/passwd` would have been served inline in the downloaded `.zip` via `archive-download` or `bulk-archive`. Skip symlinks in both `archive_dir_for_project` and `bulk_archive_for_project` (tar.gz and zip paths).
+
+- **Workspace files were unwritable from the host** ([agentic/api.py](agentic/api.py)) — agent container runs as root, so files it created in the bind-mount ended up `root:root` mode 644/755; host user (UID 1000) couldn't `rm` or edit workspace files. `os.umask(0)` at agent lifespan startup so new files get 0o666 / dirs 0o777. Verified via `/proc/1/status` on the live container.
+
+- **`fs_copy` preserved restrictive source modes** ([agentic/workspace_fs.py](agentic/workspace_fs.py)) — `shutil.copy2` copies file metadata including permissions; a source at 0o600 produced a 0o600 copy, defeating the umask intent and locking the host user out of the copy. Explicit `os.chmod` after `copy2` + recursive normalization helper for `copytree` (dirs → 0o777, files → 0o666).
+
+- **Download anchor navigated the page on server error** ([webapp/src/app/graph/components/FileSystemDrawer/FileSystemDrawer.tsx](webapp/src/app/graph/components/FileSystemDrawer/FileSystemDrawer.tsx)) — `window.location.href = url` would navigate away from the graph view (losing session state) if the backend returned a JSON error response. Replaced with an anchor element using the `download` attribute — happy path triggers the browser download dialog, errors save the JSON as a file but never navigate.
+
+
+---
+
 
 ## [4.9.3] - 2026-05-12
 

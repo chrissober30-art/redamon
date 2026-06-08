@@ -29,6 +29,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         name: true,
         email: true,
         role: true,
+        defaultAgentModel: true,
+        defaultAiPipelineModel: true,
         createdAt: true,
         updatedAt: true,
         projects: {
@@ -66,7 +68,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, email, role } = body
+    const { name, email, role, defaultAgentModel, defaultAiPipelineModel } = body
 
     // Check permissions
     if (!isInternalRequest(request)) {
@@ -90,6 +92,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (name) data.name = name
     if (email) data.email = email
     if (role === 'admin' || role === 'standard') data.role = role
+    // Remembered model choices, used to pre-fill the next new project.
+    if (typeof defaultAgentModel === 'string') data.defaultAgentModel = defaultAgentModel
+    if (typeof defaultAiPipelineModel === 'string') data.defaultAiPipelineModel = defaultAiPipelineModel
 
     const user = await prisma.user.update({
       where: { id },
@@ -99,6 +104,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         name: true,
         email: true,
         role: true,
+        defaultAgentModel: true,
+        defaultAiPipelineModel: true,
         createdAt: true,
         updatedAt: true,
       }

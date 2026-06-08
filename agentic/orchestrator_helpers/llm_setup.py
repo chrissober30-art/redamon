@@ -90,6 +90,7 @@ def setup_llm(
     openai_compat_base_url: str | None = None,
     aws_access_key_id: str | None = None,
     aws_secret_access_key: str | None = None,
+    aws_bearer_token: str | None = None,
     aws_region: str = "us-east-1",
     custom_llm_config: dict | None = None,
 ) -> BaseChatModel:
@@ -133,14 +134,20 @@ def setup_llm(
             llm = ChatAnthropic(**anth_kwargs)
         elif ptype == "bedrock":
             from langchain_aws import ChatBedrockConverse
-            llm = ChatBedrockConverse(
+            bedrock_kwargs = dict(
                 model=custom_llm_config.get("modelIdentifier", api_model),
                 region_name=custom_llm_config.get("awsRegion", "us-east-1"),
-                aws_access_key_id=custom_llm_config.get("awsAccessKeyId") or None,
-                aws_secret_access_key=custom_llm_config.get("awsSecretKey") or None,
                 temperature=custom_llm_config.get("temperature", 0),
                 max_tokens=custom_llm_config.get("maxTokens", 16384),
             )
+            bearer = custom_llm_config.get("awsBearerToken") or None
+            if bearer:
+                # Bedrock long-term API key (bearer auth, boto3 >= 1.39).
+                bedrock_kwargs["bedrock_api_key"] = bearer
+            else:
+                bedrock_kwargs["aws_access_key_id"] = custom_llm_config.get("awsAccessKeyId") or None
+                bedrock_kwargs["aws_secret_access_key"] = custom_llm_config.get("awsSecretKey") or None
+            llm = ChatBedrockConverse(**bedrock_kwargs)
         else:
             # openai_compatible (default) — also handles openai/openrouter custom entries
             kwargs = dict(
@@ -280,18 +287,29 @@ def setup_llm(
         )
 
     elif provider == "bedrock":
-        if not aws_access_key_id or not aws_secret_access_key:
-            raise ValueError(
-                f"AWS credentials are required for model '{model_name}'"
-            )
         from langchain_aws import ChatBedrockConverse
-        llm = ChatBedrockConverse(
-            model=api_model,
-            region_name=aws_region,
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            temperature=0,
-        )
+        if aws_bearer_token:
+            # Long-term Bedrock API key (bearer auth). Takes precedence over
+            # IAM keys if both are supplied — the UI surfaces one or the other.
+            llm = ChatBedrockConverse(
+                model=api_model,
+                region_name=aws_region,
+                bedrock_api_key=aws_bearer_token,
+                temperature=0,
+            )
+        else:
+            if not aws_access_key_id or not aws_secret_access_key:
+                raise ValueError(
+                    f"AWS credentials are required for model '{model_name}' "
+                    "(set IAM access key + secret, or a Bedrock long-term API key)"
+                )
+            llm = ChatBedrockConverse(
+                model=api_model,
+                region_name=aws_region,
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+                temperature=0,
+            )
 
     elif provider == "anthropic":
         if not anthropic_api_key:
@@ -385,11 +403,12 @@ def apply_project_settings(orchestrator, project_id: str) -> None:
                 mistral_api_key=(mistral_p or {}).get("apiKey"),
                 aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
                 aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+                aws_bearer_token=(bedrock_p or {}).get("awsBearerToken"),
                 aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
                 custom_llm_config=custom_config,
             )
         except (ValueError, Exception) as e:
-            logger.error(f"LLM setup failed for {new_model}: {e}")
+            logger.error(f"LLM setup failed for {new_model}: {type(e).__name__}: {e}")
             orchestrator.llm = None
             return
 

@@ -280,7 +280,7 @@ describe('reconPresetSchema stripping', () => {
     const result = reconPresetSchema.safeParse({
       httpxEnabled: true,
       agentMaxIterations: 50,
-      agentDeepThinkEnabled: true,
+      agentRequireToolConfirmation: true,
     })
     expect(result.success).toBe(true)
     expect(result.data).toEqual({ httpxEnabled: true })
@@ -466,6 +466,7 @@ describe('RECON_PARAMETER_CATALOG', () => {
       'Banner Grab',
       'Katana',
       'Hakrawler',
+      'ZAP Ajax Spider',
       'jsluice',
       'JS Recon',
       'GraphQL',
@@ -515,76 +516,125 @@ describe('RECON_PARAMETER_CATALOG', () => {
 })
 
 // ============================================================
-// resolveProviderType (extracted for testing)
+// resolveModel (extracted for testing)
 // We re-implement the same logic here since it's not exported
 // from the route file. This tests the specification.
+//
+// "custom/<id>" is a *provider id* (CUID) — the actual api model name
+// lives on UserLlmProvider.modelIdentifier and is fetched at request time.
 // ============================================================
 
-function resolveProviderType(model: string): { providerType: string; modelId: string } {
+type Resolved =
+  | { kind: 'custom'; providerId: string }
+  | { kind: 'builtin'; providerType: string; modelId: string }
+
+function resolveModel(model: string): Resolved {
   if (model.startsWith('custom/')) {
-    return { providerType: 'openai_compatible', modelId: model.slice('custom/'.length) }
+    return { kind: 'custom', providerId: model.slice('custom/'.length) }
   }
-  if (model.startsWith('openrouter/')) {
-    return { providerType: 'openrouter', modelId: model.slice('openrouter/'.length) }
+  const prefixMap: Record<string, string> = {
+    'openrouter/': 'openrouter',
+    'bedrock/': 'bedrock',
+    'deepseek/': 'deepseek',
+    'gemini/': 'gemini',
+    'glm/': 'glm',
+    'kimi/': 'kimi',
+    'qwen/': 'qwen',
+    'xai/': 'xai',
+    'mistral/': 'mistral',
   }
-  if (model.startsWith('bedrock/')) {
-    return { providerType: 'bedrock', modelId: model.slice('bedrock/'.length) }
+  for (const [prefix, type] of Object.entries(prefixMap)) {
+    if (model.startsWith(prefix)) {
+      return { kind: 'builtin', providerType: type, modelId: model.slice(prefix.length) }
+    }
   }
   if (model.startsWith('claude-')) {
-    return { providerType: 'anthropic', modelId: model }
+    return { kind: 'builtin', providerType: 'anthropic', modelId: model }
   }
-  return { providerType: 'openai', modelId: model }
+  return { kind: 'builtin', providerType: 'openai', modelId: model }
 }
 
-describe('resolveProviderType', () => {
+describe('resolveModel', () => {
   test('resolves Anthropic models', () => {
-    expect(resolveProviderType('claude-opus-4-6')).toEqual({
+    expect(resolveModel('claude-opus-4-6')).toEqual({
+      kind: 'builtin',
       providerType: 'anthropic',
       modelId: 'claude-opus-4-6',
     })
-    expect(resolveProviderType('claude-sonnet-4-6')).toEqual({
+    expect(resolveModel('claude-sonnet-4-6')).toEqual({
+      kind: 'builtin',
       providerType: 'anthropic',
       modelId: 'claude-sonnet-4-6',
     })
-    expect(resolveProviderType('claude-haiku-4-5-20251001')).toEqual({
+    expect(resolveModel('claude-haiku-4-5-20251001')).toEqual({
+      kind: 'builtin',
       providerType: 'anthropic',
       modelId: 'claude-haiku-4-5-20251001',
     })
   })
 
   test('resolves OpenAI models (default)', () => {
-    expect(resolveProviderType('gpt-4o')).toEqual({
+    expect(resolveModel('gpt-4o')).toEqual({
+      kind: 'builtin',
       providerType: 'openai',
       modelId: 'gpt-4o',
     })
-    expect(resolveProviderType('gpt-5.2')).toEqual({
+    expect(resolveModel('gpt-5.2')).toEqual({
+      kind: 'builtin',
       providerType: 'openai',
       modelId: 'gpt-5.2',
     })
   })
 
   test('resolves OpenRouter models', () => {
-    expect(resolveProviderType('openrouter/anthropic/claude-3.5-sonnet')).toEqual({
+    expect(resolveModel('openrouter/anthropic/claude-3.5-sonnet')).toEqual({
+      kind: 'builtin',
       providerType: 'openrouter',
       modelId: 'anthropic/claude-3.5-sonnet',
     })
-    expect(resolveProviderType('openrouter/meta-llama/llama-4-maverick')).toEqual({
+    expect(resolveModel('openrouter/meta-llama/llama-4-maverick')).toEqual({
+      kind: 'builtin',
       providerType: 'openrouter',
       modelId: 'meta-llama/llama-4-maverick',
     })
   })
 
-  test('resolves custom/openai_compatible models', () => {
-    expect(resolveProviderType('custom/llama3.1')).toEqual({
-      providerType: 'openai_compatible',
-      modelId: 'llama3.1',
+  test('resolves custom/<id> as a provider lookup (id is a CUID, not a model name)', () => {
+    // Matches what the ModelPicker actually emits — see
+    // agentic/orchestrator_helpers/model_providers.py:567 (id=f"custom/{pid}")
+    expect(resolveModel('custom/cmpmslfy80003t601d38s8slx')).toEqual({
+      kind: 'custom',
+      providerId: 'cmpmslfy80003t601d38s8slx',
+    })
+    expect(resolveModel('custom/llama3.1')).toEqual({
+      kind: 'custom',
+      providerId: 'llama3.1',
     })
   })
 
   test('resolves Bedrock models', () => {
-    expect(resolveProviderType('bedrock/anthropic.claude-v2')).toEqual({
+    expect(resolveModel('bedrock/anthropic.claude-v2')).toEqual({
+      kind: 'builtin',
       providerType: 'bedrock',
       modelId: 'anthropic.claude-v2',
+    })
+  })
+
+  test('resolves other builtin OpenAI-compatible providers', () => {
+    expect(resolveModel('deepseek/deepseek-chat')).toEqual({
+      kind: 'builtin',
+      providerType: 'deepseek',
+      modelId: 'deepseek-chat',
+    })
+    expect(resolveModel('xai/grok-2-mini')).toEqual({
+      kind: 'builtin',
+      providerType: 'xai',
+      modelId: 'grok-2-mini',
+    })
+    expect(resolveModel('mistral/mistral-small')).toEqual({
+      kind: 'builtin',
+      providerType: 'mistral',
+      modelId: 'mistral-small',
     })
   })
 })

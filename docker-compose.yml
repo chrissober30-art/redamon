@@ -155,6 +155,12 @@ services:
     depends_on:
       gvm-postgres-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h /var/run/postgresql"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
 
   gvmd:
     image: registry.community.greenbone.net/community/gvmd:stable
@@ -172,7 +178,7 @@ services:
       - gvm_psql_socket:/var/run/postgresql
     depends_on:
       gvm-postgres:
-        condition: service_started
+        condition: service_healthy
       gvm-scap-data:
         condition: service_completed_successfully
       gvm-cert-bund-data:
@@ -351,6 +357,8 @@ services:
       - ./mcp/nuclei-templates:/opt/nuclei-templates:ro
       # Shared tenant_filter.py used by the redagraph CLI
       - ./graph_db:/opt/graph_db:ro
+      # Shared agent workspace — agent writes tool-outputs / jobs here; kali tools can read
+      - ./agentic/agent-workspace:/workspace
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /opt:/opt/mcp_servers
@@ -434,6 +442,8 @@ services:
       - ./knowledge_base/kb_config.yaml:/app/knowledge_base/kb_config.yaml:ro
       - ./knowledge_base/data:/app/knowledge_base/data
       - tradecraft_cache:/app/tradecraft_cache
+      # Per-project workspace — fs_* tools, output offloading, background jobs
+      - ./agentic/agent-workspace:/workspace
     depends_on:
       neo4j:
         condition: service_healthy

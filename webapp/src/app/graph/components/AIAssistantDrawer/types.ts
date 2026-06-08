@@ -70,12 +70,11 @@ export interface AIAssistantDrawerProps {
   toolPhaseMap?: Record<string, string[]>
   stealthMode?: boolean
   onToggleStealth?: (newValue: boolean) => void
-  deepThinkEnabled?: boolean
-  onToggleDeepThink?: (newValue: boolean) => void
   onRefetchGraph?: () => void
   isOtherChainsHidden?: boolean
   onToggleOtherChains?: () => void
   hasOtherChains?: boolean
   requireToolConfirmation?: boolean
   graphViewCypher?: string
+  onOpenFileSystem?: () => void
 }

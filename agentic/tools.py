@@ -24,46 +24,35 @@ from graph_db.tenant_filter import (
     inject_tenant_filter as _shared_inject_tenant_filter,
 )
 
+# Workspace / offload / job-runner integration.
+# These three modules are foundational - they're flat siblings under agentic/
+# (NOT a `tools` package, which would shadow this file).
+import workspace_fs
+import job_runner
+import output_offload
+
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CONTEXT VARIABLES
+# CONTEXT VARIABLES (re-exported from agent_context)
 # =============================================================================
-
-# Context variables to pass user_id and project_id to tools
-current_user_id: ContextVar[str] = ContextVar('current_user_id', default='')
-current_project_id: ContextVar[str] = ContextVar('current_project_id', default='')
-current_phase: ContextVar[str] = ContextVar('current_phase', default='informational')
-current_graph_view_cypher: ContextVar[Optional[str]] = ContextVar('current_graph_view_cypher', default=None)
-
-
-def set_tenant_context(user_id: str, project_id: str) -> None:
-    """Set the current user and project context for tool execution."""
-    current_user_id.set(user_id)
-    current_project_id.set(project_id)
-
-
-def set_phase_context(phase: str) -> None:
-    """Set the current phase context for tool restrictions."""
-    current_phase.set(phase)
-
-
-def set_graph_view_context(cypher: Optional[str]) -> None:
-    """Set the active graph view Cypher for scoped queries."""
-    current_graph_view_cypher.set(cypher)
-
-
-def get_graph_view_context() -> Optional[str]:
-    """Get the active graph view Cypher template."""
-    return current_graph_view_cypher.get()
-
-
-def get_phase_context() -> str:
-    """Get the current phase context."""
-    return current_phase.get()
+# Defined in agent_context.py so lightweight modules (workspace_fs, job_runner,
+# output_offload) can import them without dragging langchain / MCP / neo4j in.
+# Re-exported here as-is for back-compat with existing `from tools import ...`.
+from agent_context import (  # noqa: E402
+    current_user_id,
+    current_project_id,
+    current_phase,
+    current_graph_view_cypher,
+    set_tenant_context,
+    set_phase_context,
+    set_graph_view_context,
+    get_graph_view_context,
+    get_phase_context,
+)
 
 
 # =============================================================================
@@ -1755,6 +1744,89 @@ class PhaseAwareToolExecutor:
         # Fallback: convert to string
         return str(output)
 
+    async def _dispatch_fs_tool(self, tool_name: str, tool_args: dict) -> dict:
+        """In-process workspace filesystem tool dispatch."""
+        coro = workspace_fs.DISPATCH.get(tool_name)
+        if coro is None:
+            return {"success": False, "output": None, "error": f"unknown fs tool: {tool_name}"}
+        args = tool_args if isinstance(tool_args, dict) else {}
+        try:
+            output = await coro(**args)
+        except TypeError as e:
+            return {"success": False, "output": None,
+                    "error": f"bad arguments to {tool_name}: {e}"}
+        except Exception as e:
+            logger.exception(f"fs tool {tool_name} raised")
+            return {"success": False, "output": None, "error": str(e)}
+        # fs_* outputs are already structured strings - skip maybe_offload
+        # (they're either small status lines or content the agent explicitly
+        # requested, sized via its own offset/limit params).
+        return {"success": True, "output": output, "error": None}
+
+    async def _dispatch_job_tool(self, tool_name: str, tool_args: dict) -> dict:
+        """Background job lifecycle dispatch (job_spawn / status / wait / cancel / list)."""
+        reg = job_runner.get_registry()
+        project_id = current_project_id.get()
+        if not project_id:
+            return {"success": False, "output": None,
+                    "error": "no project_id in context for job tool"}
+        args = tool_args if isinstance(tool_args, dict) else {}
+
+        if tool_name == "job_spawn":
+            target_tool = args.get("tool_name")
+            target_args = args.get("args") or {}
+            label = args.get("label")
+            if not target_tool:
+                return {"success": False, "output": None,
+                        "error": "job_spawn requires `tool_name`"}
+            # Enforce phase restriction on the TARGET tool at spawn time -
+            # otherwise the agent could escalate by job_spawn-ing a tool that
+            # would be rejected if called directly.
+            phase = current_phase.get()
+            if not is_tool_allowed_in_phase(target_tool, phase):
+                return {"success": False, "output": None,
+                        "error": f"target tool '{target_tool}' not allowed in '{phase}' phase"}
+
+            executor = self  # capture for closure
+
+            async def runner(name, a, append_log):
+                # Inner execution: skip phase check (already enforced above)
+                # and request inline output so the tee captures full content,
+                # not a stub pointing at another file.
+                inner_args = dict(a)
+                inner_args["output_mode"] = "inline"
+                result = await executor.execute(name, inner_args, phase, skip_phase_check=True)
+                # Tee any final output to the log via append_log so it lands
+                # in jobs/<id>.log alongside any progress streaming.
+                if result.get("output"):
+                    await append_log(str(result["output"]))
+                return result
+
+            spawn_result = await reg.spawn(project_id, target_tool, target_args, runner, label=label)
+            return {"success": True, "output": str(spawn_result), "error": None}
+
+        if tool_name == "job_status":
+            jid = args.get("job_id", "")
+            return {"success": True, "output": str(reg.status(project_id, jid)), "error": None}
+
+        if tool_name == "job_wait":
+            jid = args.get("job_id", "")
+            timeout = float(args.get("timeout_sec", 30))
+            result = await reg.wait(project_id, jid, timeout_sec=timeout)
+            return {"success": True, "output": str(result), "error": None}
+
+        if tool_name == "job_cancel":
+            jid = args.get("job_id", "")
+            result = await reg.cancel(project_id, jid)
+            return {"success": True, "output": str(result), "error": None}
+
+        if tool_name == "job_list":
+            active = args.get("active", None)
+            rows = reg.list(project_id, active=active)
+            return {"success": True, "output": str(rows), "error": None}
+
+        return {"success": False, "output": None, "error": f"unknown job tool: {tool_name}"}
+
     async def execute(
         self,
         tool_name: str,
@@ -1774,6 +1846,11 @@ class PhaseAwareToolExecutor:
         Returns:
             dict with 'success', 'output', and optionally 'error'
         """
+        # Strip the per-call `output_mode` override BEFORE phase check / dispatch
+        # so MCP servers never see a param they don't understand. The captured
+        # override is applied after the tool returns, via maybe_offload().
+        tool_args, output_override = output_offload.strip_output_mode(tool_args)
+
         # Check phase restriction
         if not skip_phase_check and not is_tool_allowed_in_phase(tool_name, phase):
             return {
@@ -1782,6 +1859,14 @@ class PhaseAwareToolExecutor:
                 "error": f"Tool '{tool_name}' is not allowed in '{phase}' phase. "
                          f"This tool requires: {get_phase_for_tool(tool_name)}"
             }
+
+        # Short-circuit dispatch for in-process workspace tools (fs_*) and
+        # background job tools (job_*). They never go through MCP / langchain
+        # so the lookup, retry, and reconnect logic below doesn't apply.
+        if tool_name in workspace_fs.FS_TOOL_NAMES:
+            return await self._dispatch_fs_tool(tool_name, tool_args)
+        if tool_name in job_runner.JOB_TOOL_NAMES:
+            return await self._dispatch_job_tool(tool_name, tool_args)
 
         # Get the tool
         tool = self._all_tools.get(tool_name)
@@ -1844,6 +1929,12 @@ class PhaseAwareToolExecutor:
 
         try:
             clean_output = await _invoke(tool)
+            clean_output = output_offload.maybe_offload(
+                current_project_id.get(),
+                tool_name,
+                clean_output,
+                override=output_override,
+            )
             return {"success": True, "output": clean_output, "error": None}
 
         except Exception as exc:
@@ -1888,6 +1979,12 @@ class PhaseAwareToolExecutor:
 
             try:
                 clean_output = await _invoke(retry_tool)
+                clean_output = output_offload.maybe_offload(
+                    current_project_id.get(),
+                    tool_name,
+                    clean_output,
+                    override=output_override,
+                )
                 logger.info(
                     f"Retry after MCP reconnect succeeded: {tool_name} (gen {new_gen})"
                 )

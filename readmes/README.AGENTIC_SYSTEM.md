@@ -1,12 +1,16 @@
+**Version 4.13.0** - 2026-05-27
+
 # RedAmon Agentic System - Technical Whitepaper
 
 ## Executive Summary
 
 RedAmon is an AI-driven penetration testing platform built on **Scatter-Gather ReAct (SG-ReAct)**, a hybrid architecture that combines the iterative ReAct reasoning loop with bounded parallel multi-agent decomposition. A root agent runs the engagement; when an objective decomposes into independent investigation angles, it deploys a *fireteam* of specialist sub-agents that work concurrently inside the same event loop and merge their findings back. The pattern delivers wall-clock parallelism without coordination chaos, predictable termination, auditable safety, and real-time operator control at every node of the graph.
 
-In an impartial, code-verified comparison against four other open-source AI pentesting agents, **PentAGI**, **PentestGPT**, **Strix**, and **Shannon**, across 82 architectural feature primitives, **RedAmon scores 72.0% feature coverage versus a nearest-competitor 41.5%**. Its lead is widest in the dimensions that decide enterprise readiness: a four-layer guardrail stack (**8.0/8.0** vs. nearest 2.0), queryable domain-knowledge integration including CVE / CWE / MITRE mapping (**5.0/5.0** vs. nearest 2.0), and multi-tenant data separation enforced at the database-query level (**4.0/4.0** vs. nearest 3.0). RedAmon does not lead every dimension, PentAGI leads on observability, Strix on LLM provider flexibility, Shannon on durable-workflow persistence and PoC-mandatory finding rigor, and the body of this document acknowledges those gaps explicitly.
+What makes RedAmon distinctive is not that it runs an LLM in a loop, every agentic pentester does that, but the *cognitive scaffolding* that surrounds the loop. A **Deep Think strategic pre-step** runs at moments of architectural significance (first iteration, phase transition, a tiered productivity-score threshold crossing, or the agent's own request for help), producing a structured situation / competing-hypotheses / vectors / approach / priority / risks analysis that anchors the next decisions; the schema *forces* the strategist to enumerate ≥2 candidate explanations with a concrete disambiguating probe for each, which is the anti-confirmation-bias mechanism that turns "a list of guesses" into "a science experiment". Deep Think carries a **cooldown** (suppresses re-fires until the agent has executed the previous plan, with critical-tier and state-growth-stall overrides) and a **Jaccard novelty check** (rejects a new plan that paraphrases a failing one, forcing the agent to articulate what specific parameter is changing or pivot to a strategy class not present in the previous plan).
 
-The combination of SG-ReAct, layered guardrails, persistent attack-chain memory, and multi-tenant isolation is what makes RedAmon usable for **real customer engagements** rather than for demonstrations: multi-hour autonomous runs that resume cleanly after a backend restart, defensible audit trails, encoded Rules of Engagement, and a single set of approval gates that govern both the root agent and every specialist sub-agent it spawns.
+Looping is detected by a **continuous productivity score** that aggregates five observed signals into a single dimensionless number mapped to five tiers (green → yellow → orange → red → critical) with escalating prompt-level actions. The cleverest input is an **axis lock-in detector**: a per-tool-family extractor that reduces every expensive call to the semantic dimensions the agent is *holding constant* - `(target=/login, fixed_user=admin)` for a credential brute force, `(target=/FUZZ, fixed_filter=200,301)` for a directory fuzz - and records it in a session-long ledger. Three successive brute-force attempts against the same username collapse onto the same axis key even when the wordlists are different, so slow loops spread across many iterations still register as repetition. By the third unproductive attempt on the same axis the score crosses red and the orchestrator names the locked dial explicitly, demanding the agent change a different parameter rather than scale up the same losing attempt. Combined with an **orchestrator-owned state-growth signal** (resets to 0 when the engagement state actually grows, increments otherwise, completely independent of LLM self-report), the productivity layer cannot be fooled by an over-optimistic agent.
+
+The engagement itself runs on a **14-node LangGraph state machine** with durable PostgreSQL checkpoints after every step, so multi-hour autonomous runs resume cleanly after a backend restart. Every action the agent takes is captured in **EvoGraph**, a persistent attack-chain memory in Neo4j whose nodes (AttackChain, ChainStep, ChainFinding, ChainDecision, ChainFailure) are bridged back to the recon graph, so the next session on the same project starts already knowing what was tried, what worked, and what failed - RedAmon is a knowledge-accumulating system, not a stateless tool runner. A **four-layer guardrail stack** (deterministic domain blocklist, LLM-based scope check, phase-gated tool whitelist, encoded Rules-of-Engagement contract) governs both the root agent and every fireteam sub-agent it spawns, with a single set of approval gates the operator controls in real time over a WebSocket. Multi-tenant isolation is enforced at the database-query level, not just at the API layer. The result is a platform that is intelligent enough to find real bugs unprompted, disciplined enough to stay inside contractual scope, and observable enough to defend in front of a customer.
 
 ---
 
@@ -26,7 +30,10 @@ The substance is in what surrounds the loop:
 - A **14-node LangGraph state machine** governs every transition the agent can make, with explicit human-in-the-loop pause nodes, durable PostgreSQL checkpoints after every step, and a strict TypedDict schema that prevents silent state corruption.
 - A **four-layer guardrail stack** (deterministic domain blocklist, LLM-based scope check, phase-gated tool whitelist, Rules-of-Engagement contract) enforces both hard safety rules and customer-specific engagement constraints, the same rails apply to the root agent and to every fireteam sub-agent it spawns.
 - A **bounded fireteam fan-out** lets the root agent delegate independent investigation angles to N specialist sub-agents that run concurrently in the same event loop, each with its own ReAct mini-graph, its own pause-for-approval channel, and attributed writes back to the persistent attack chain.
-- A **strategic Deep Think pre-step** runs at moments of architectural significance (first iteration, phase transitions, three consecutive failures, agent self-request), producing a structured situation/vectors/approach/priority/risks analysis that anchors the next decisions.
+- A **strategic Deep Think pre-step** runs at moments of architectural significance (first iteration, phase transitions, a tiered productivity-score threshold crossing, agent self-request), producing a structured situation/vectors/approach/priority/risks analysis that anchors the next decisions. Deep Think now carries a **cooldown** (suppresses re-fires for N iterations unless the score reaches critical or the agent self-requests) and a **novelty check** (rejects a new plan whose token-Jaccard similarity to the previous plan exceeds the configured threshold, forcing the strategist to articulate what is genuinely different rather than rephrase a failing plan).
+- A **continuous productivity score** with tiered actions replaces the legacy binary 3-of-6 streak counter. Five observed signals - unproductive verdicts, iterations since the engagement state last grew, max axis-repeat count from a session-long ledger, same-pattern recent-call count, plus rewards for `new_info` events and actionable findings - combine into a single dimensionless score whose value maps to one of five tiers (green / yellow / orange / red / critical). Yellow injects a soft prompt hint, orange triggers Deep Think, red demands the agent articulate a hypothesis pivot, critical signals that the next expensive call on the dominant axis will be rejected. Weights scale dynamically with session age and phase, so the same algorithm runs cleanly across smoke tests, CTFs, and long-running stealth engagements.
+- An **axis lock-in detector** complements the score. Per tool family (credential brute force, directory brute force, automated SQLi), an axis extractor reduces a tool call to the semantic dimensions the agent is *holding constant* - e.g., `(target=/login, fixed_user=admin)` for a credential brute force. The session-long axis ledger records every attempt and its verdict; when an axis has been attempted ≥3 times unproductively, the score crosses red, and the prompt explicitly names the locked dial so the agent can change a different parameter (e.g., the username) rather than scale up the same losing attempt.
+- A **productivity verdict** still anchors the per-step LLM self-honesty signal. Every tool output is classified into one of five categories (`new_info`, `confirmation`, `no_progress`, `blocked`, `duplicate`); the orchestrator cross-checks the LLM's claim against the actual state delta and auto-downgrades dishonest `new_info`/`confirmation` claims to `no_progress`. The verdict is one of the five inputs to the score above, but the score also reads an orchestrator-owned **state-growth** signal that does not depend on LLM honesty at all. This catches the "successful but useless" loops (HTTP 200 with empty body, identical fuzzing fingerprints, stable 404s) that a keyword-only failure detector missed.
 - A **Rules of Engagement (RoE) framework** with ~35 settings encodes a complete pentest contract, client metadata, time windows, scope exclusions, technique gating, severity caps, sensitive-data handling, compliance frameworks, and enforces it both via prompt injection and via code-level gates.
 
 The combination is what makes the platform usable for **real customer engagements** rather than for demos.
@@ -118,25 +125,26 @@ Engineers wanting to extend the platform should focus on the LangGraph chapter, 
    - [Per-Tool Stop](#per-tool-stop)
 9. [Tool Confirmation Gate](#tool-confirmation-gate)
 10. [Deep Think (Strategic Reasoning Pre-Step)](#deep-think-strategic-reasoning-pre-step)
-11. [Wave Execution (Parallel Tool Plans)](#wave-execution-parallel-tool-plans)
-12. [Fireteam - Parallel Specialist Sub-Agents](#fireteam--parallel-specialist-sub-agents)
-13. [Output Analysis (Inline)](#output-analysis-inline)
-14. [Guardrails (Hard, Soft, Scope)](#guardrails-hard-soft-scope)
-15. [Rules of Engagement (RoE)](#rules-of-engagement-roe)
-16. [Stealth Mode](#stealth-mode)
-17. [Frontend Integration](#frontend-integration)
-18. [Detailed Workflows](#detailed-workflows)
-19. [Multi-Objective Support](#multi-objective-support)
-20. [EvoGraph - Evolutive Attack Chain Graph](#evograph--evolutive-attack-chain-graph)
-21. [Security & Multi-Tenancy](#security--multi-tenancy)
-22. [Token Accounting & Cost Tracking](#token-accounting--cost-tracking)
-23. [Knowledge Base Integration](#knowledge-base-integration)
-24. [Report Summarizer (Narrative Synthesis)](#report-summarizer-narrative-synthesis)
-25. [Companion Orchestrators (Cypherfix)](#companion-orchestrators-cypherfix)
-26. [Comparative Benchmark - RedAmon vs. Other AI Pentesters](#comparative-benchmark--redamon-vs-other-ai-pentesters)
-27. [Error Handling & Resilience](#error-handling--resilience)
-28. [Codebase Layout](#codebase-layout)
-29. [Configuration Reference](#configuration-reference)
+11. [Productivity Verdict & Unproductive-Streak Loop Detector](#productivity-verdict--unproductive-streak-loop-detector-1)
+12. [Wave Execution (Parallel Tool Plans)](#wave-execution-parallel-tool-plans)
+13. [Fireteam - Parallel Specialist Sub-Agents](#fireteam--parallel-specialist-sub-agents)
+14. [Output Analysis (Inline)](#output-analysis-inline)
+15. [Guardrails (Hard, Soft, Scope)](#guardrails-hard-soft-scope)
+16. [Rules of Engagement (RoE)](#rules-of-engagement-roe)
+17. [Stealth Mode](#stealth-mode)
+18. [Frontend Integration](#frontend-integration)
+19. [Detailed Workflows](#detailed-workflows)
+20. [Multi-Objective Support](#multi-objective-support)
+21. [EvoGraph - Evolutive Attack Chain Graph](#evograph--evolutive-attack-chain-graph)
+22. [Security & Multi-Tenancy](#security--multi-tenancy)
+23. [Token Accounting & Cost Tracking](#token-accounting--cost-tracking)
+24. [Knowledge Base Integration](#knowledge-base-integration)
+25. [Report Summarizer (Narrative Synthesis)](#report-summarizer-narrative-synthesis)
+26. [Companion Orchestrators (Cypherfix)](#companion-orchestrators-cypherfix)
+27. [Comparative Benchmark - RedAmon vs. Other AI Pentesters](#comparative-benchmark--redamon-vs-other-ai-pentesters)
+28. [Error Handling & Resilience](#error-handling--resilience)
+29. [Codebase Layout](#codebase-layout)
+30. [Configuration Reference](#configuration-reference)
 
 ---
 
@@ -158,7 +166,7 @@ This shape buys the project five concrete properties that would be very expensiv
 - **Resumability.** The state object is checkpointed to PostgreSQL after every node boundary. If the backend crashes, if a deploy restarts the container, if the operator closes the browser tab and comes back two hours later, the agent picks up at exactly the node it was on, with exactly the state it had. This is invisible to the user, they never lose work.
 - **Pausability for human approval.** Some nodes are designed to *halt the graph entirely* and wait for the operator to weigh in. Pausing for a phase transition, pausing for a question, pausing for a dangerous-tool confirmation, these are not bolt-on hacks. They are first-class graph nodes (`await_approval`, `await_question`, `await_tool_confirmation`) whose job is precisely to stop and wait. When the operator answers, the graph resumes from that exact node.
 - **Observability.** Because every step writes to the state and every transition is logged, the entire decision history of any session can be replayed, audited, and reasoned about after the fact. This is critical for a security tool, you must be able to answer "why did the agent run that command on that target at that time?" and the answer must be reproducible.
-- **Concurrency safety.** Each session runs on its own state with its own checkpoint thread. Two operators on two projects cannot accidentally cross wires. The fireteam fan-out (where N specialist sub-agents run in parallel) is built on top of the same primitives, so every sub-agent inherits the same predictability and resumability guarantees as the root agent.
+- **Concurrency safety.** Each session runs on its own state with its own checkpoint thread. Two operators on two projects cannot accidentally cross wires. The fireteam fan-out (where N specialist sub-agents run in parallel) is built on top of the same agent primitives. Engagement-level resumability extends to fireteam wave boundaries - each completed wave is persisted to state and survives restart - but in-flight member iterations are ephemeral and a wave that's interrupted mid-flight does not resume from where it left off.
 
 ### The Design at a Glance
 
@@ -289,6 +297,7 @@ erDiagram
         bool msf_session_reset_done "Metasploit auto-reset tracking"
         string deep_think_result "Strategic analysis from Deep Think pre-step"
         bool _need_deep_think "LLM self-requested Deep Think for next iteration"
+        string _last_productivity_discrepancy "Audit reason when last verdict was auto-downgraded to no_progress"
         bool awaiting_tool_confirmation "True when paused for tool confirmation"
         string tool_confirmation_response "approve | modify | reject"
         int input_tokens_used "Cumulative LLM input tokens"
@@ -464,16 +473,17 @@ flowchart LR
     end
 
     subgraph ThinkDesc["Think Node - Up to 2 LLM Calls"]
-        T0["Deep Think pre-step, conditional<br/>1st iter / phase transition / 3+ fails / self-request"]
+        T0["Deep Think pre-step, conditional<br/>1st iter / phase transition / unproductive streak / self-request"]
         T1[Build system prompt with dynamic tool registry]
         T2[Inject DEEP_THINK_SECTION if a result exists]
-        T3[Inject scope guardrail / RoE / stealth / failure-loop warnings]
-        T4[Get LLM decision JSON with inline output_analysis + need_deep_think]
+        T3[Inject scope guardrail / RoE / stealth / unproductive-streak warnings]
+        T4[Get LLM decision JSON with inline output_analysis + productivity verdict + need_deep_think]
         T5[Parse action: use_tool / plan_tools / deploy_fireteam / transition_phase / complete / ask_user]
         T6[Process output_analysis: merge target_info, detect exploit_succeeded]
+        T6b[Audit productivity verdict against state delta, downgrade dishonest claims to no_progress]
         T7[Update todo list]
         T8[Pre-exploitation validation: force ask_user if LHOST/LPORT missing]
-        T9[Failure loop detection: inject warning after 3+ similar failures]
+        T9[Unproductive-streak detection: inject warning + same-pattern fingerprint audit when N/K recent steps unproductive]
         T10[Track input/output tokens per turn + cumulative]
     end
 
@@ -568,17 +578,51 @@ This section gives a **plain-language walkthrough of every major capability** of
 
 ReAct is the foundational behavioural pattern of the agent. The acronym stands for **Reason + Act**, and it captures the simplest possible model of how a human expert works: read what's known, *think* about what to do next, *act* (run a tool), look at the result, *think* again. The agent repeats this loop autonomously, sometimes for dozens of iterations, until the objective is reached or the operator stops it.
 
-In RedAmon's implementation, the loop has four characteristics that distinguish it from a basic "ask-LLM-then-run-tool" script. First, the LLM does not just emit a tool call, it emits a **structured decision** (`LLMDecision`) declaring what action it wants to take (`use_tool`, `plan_tools`, `deploy_fireteam`, `transition_phase`, `ask_user`, `complete`), along with reasoning, the tool to run, and an inline analysis of the *previous* tool's output. Second, every iteration writes a `ChainStep` to the EvoGraph attack-chain memory, so the agent's history is structured and queryable rather than a flat log. Third, the loop is bounded, `MAX_ITERATIONS` (default 100) caps runaway sessions, and a `failure-loop detector` injects a warning prompt after 3+ consecutive similar failures, forcing the agent to pivot. Fourth, the loop is **interruptible at every iteration**: the operator can stop, send guidance, or change skills mid-flight without breaking state.
+In RedAmon's implementation, the loop has four characteristics that distinguish it from a basic "ask-LLM-then-run-tool" script. First, the LLM does not just emit a tool call, it emits a **structured decision** (`LLMDecision`) declaring what action it wants to take (`use_tool`, `plan_tools`, `deploy_fireteam`, `transition_phase`, `ask_user`, `complete`), along with reasoning, the tool to run, and an inline analysis of the *previous* tool's output that includes a **productivity verdict** classifying the call as `new_info`, `confirmation`, `no_progress`, `blocked`, or `duplicate`. Second, every iteration writes a `ChainStep` to the EvoGraph attack-chain memory, so the agent's history is structured and queryable rather than a flat log. Third, the loop is bounded, `MAX_ITERATIONS` (default 100) caps runaway sessions, and an **unproductive-streak detector** counts hard failures plus LLM-classified unproductive steps in a sliding window (default 3 of the last 6) and injects a pivot warning when the threshold trips. Crucially, the detector audits the LLM's verdict against actual state delta and auto-downgrades dishonest `new_info`/`confirmation` claims to `no_progress`, so identical fuzzing repeated 10 times cannot be hidden under a polite verdict. Fourth, the loop is **interruptible at every iteration**: the operator can stop, send guidance, or change skills mid-flight without breaking state.
 
 For the operator, ReAct is what makes the agent feel *intelligent rather than scripted*. There is no fixed playbook. The agent decides at every step what tool best fits what it just learned, and the chat surface shows the reasoning explicitly so the operator can follow along, correct course, or take over.
 
 ### Deep Think (Strategic Reasoning Pre-Step)
 
-Deep Think is a **second LLM call that runs *before* the normal `think` decision** when the agent reaches a moment of strategic significance. It produces a structured analysis, *Situation*, *Attack Vectors*, *Recommended Approach*, *Priority Order*, *Risks and Mitigations*, that gets injected into the very next ReAct iteration and stays attached to every subsequent prompt for the rest of the session.
+Deep Think is a **second LLM call that runs *before* the normal `think` decision** when the agent reaches a moment of strategic significance. It produces a structured analysis with six sections: *Situation*, *Competing Hypotheses*, *Attack Vectors*, *Recommended Approach*, *Priority Order*, *Risks and Mitigations*. The analysis gets injected into the very next ReAct iteration and stays attached to every subsequent prompt for the rest of the session.
 
-It fires under exactly four conditions, in priority order: (1) on the first iteration of a new session, to establish an initial strategy; (2) immediately after a phase transition, to re-evaluate now that new tools are available; (3) after three consecutive tool failures, to break a loop by re-strategizing instead of retrying; (4) on the LLM's own request, when it sets `need_deep_think=true` because it feels stuck. The call is wrapped in a try/except so a Deep Think failure can never block the agent, the worst case is a logged warning and a session that continues without the strategic frame.
+The **Competing Hypotheses** section is the anti-confirmation-bias mechanism. When the trigger reason is "unproductive streak" OR when any chain finding has confidence ≥60, the schema requires the strategist to emit ≥2 candidate explanations for the current evidence - each with `supporting_evidence` (specific iterations/steps that support it) and `disambiguating_probe` (ONE concrete test that would tell the alternatives apart). A list of guesses with no test plan is a brainstorm; a list with disambiguating probes is a science experiment. The rendered block leads the next iteration's prompt with the imperative *"do not just confirm your favorite,"* pushing the agent toward the probe that distinguishes hypotheses rather than the one that confirms its current belief.
 
-The advantage of having Deep Think as a *separate* call rather than asking the regular `think` to "think harder" is **focus**. The Deep Think prompt does not have to also pick a tool, parse a previous output, or update a TODO list, its only job is strategic reasoning. The result is rendered as markdown and surfaces in the chat as a distinct purple "Deep Think" card so the operator can see *why* the agent paused to re-strategize. Full details: [Deep Think chapter](#deep-think-strategic-reasoning-pre-step).
+It fires under four conditions, in priority order: (1) on the first iteration of a new session, to establish an initial strategy; (2) immediately after a phase transition, to re-evaluate now that new tools are available; (3) when the **productivity score** (see next section) crosses the orange / red / critical tier and the cooldown has expired (or is bypassed by a critical-tier or state-growth-stall override); (4) on the LLM's own request, when it sets `need_deep_think=true` because it feels stuck. When the score path is disabled by setting (`PRODUCTIVITY_SCORE_ENABLED=false`), the legacy 3-of-6 unproductive-streak counter takes over as the trigger for condition (3) for backward compatibility. The call is wrapped in a try/except so a Deep Think failure can never block the agent.
+
+Two newer mechanisms keep Deep Think itself from looping. The **cooldown** (`DEEP_THINK_COOLDOWN_ITERATIONS`, default 5) is armed every time Deep Think fires; subsequent same-window triggers are silently suppressed until the cooldown expires. Two overrides bypass the cooldown: a critical-tier score (score ≥ `PRODUCTIVITY_SCORE_BLOCK_THRESHOLD`) and a long state-growth stall (≥ `STATE_GROWTH_HARD_THRESHOLD` iterations since the engagement state grew). The LLM's `need_deep_think=true` self-request also always bypasses, the agent should always be able to ask for help. The **novelty check** runs after a Deep Think result parses successfully: a token-Jaccard similarity is computed between the new `priority_order` and the previous one; if it exceeds `DEEP_THINK_NOVELTY_JACCARD_MAX` (default 0.6), a strong warning is prepended to the rendered Deep Think block telling the agent that its new plan paraphrases a plan that already failed and requiring it to either name a specific parameter that has changed or pick a strategy class not present in the previous plan.
+
+The advantage of having Deep Think as a *separate* call rather than asking the regular `think` to "think harder" is **focus**. The Deep Think prompt does not have to also pick a tool, parse a previous output, or update a TODO list - its only job is strategic reasoning, specifically hypothesis-engineering. The result is rendered as markdown and surfaces in the chat as a distinct purple "Deep Think" card so the operator can see *why* the agent paused to re-strategize. Full details: [Deep Think chapter](#deep-think-strategic-reasoning-pre-step).
+
+### Productivity Verdict & Unproductive-Streak Loop Detector
+
+Every tool output is classified by the LLM into one of five **productivity verdicts** - `new_info`, `confirmation`, `no_progress`, `blocked`, `duplicate` - emitted in the same `output_analysis` JSON object as the inline analysis. The verdict is required, not optional; the schema forces the model to cite specific evidence (`what_was_new`) and a rationale before accepting a non-`no_progress` claim. The orchestrator then performs a small **honesty audit** on each verdict: it cross-checks `new_information_gained=true` against the actual state delta for the same iteration (did `chain_findings` grow? was `extracted_info` populated? was an `actionable_finding` produced?). If the LLM claims new information but nothing actually changed, the verdict is auto-downgraded to `no_progress` and the downgrade reason is surfaced in the next prompt so the model sees its own dishonest claim being corrected.
+
+The verdict feeds into a **continuous productivity score** (replacing the legacy binary "3 unproductive of last 6 → fire" trigger). Five signals are aggregated every think turn:
+
+1. **Unproductive verdicts** in the last `PRODUCTIVITY_AUDIT_WINDOW` (default 6) steps - the legacy signal, retained as one input.
+2. **Iterations since the engagement state last grew** - an orchestrator-owned counter that resets to 0 whenever `target_info`, `chain_findings_memory`, or `actionable_findings` grew, otherwise increments. This is the most reliable "stuck" signal because it does not depend on the LLM self-reporting honestly.
+3. **Max axis-repeat count** from a session-long **axis ledger** (`tested_axes`). For each expensive tool call (credential brute force, directory brute force, automated SQLi), an axis extractor reduces the call to the semantic dimensions held constant - e.g., `(target=/login, fixed_user=admin)` for a brute force script - and records the verdict on that key. A `rockyou-5k` attempt, a `10k-most-common` attempt, and a `rockyou-100k` attempt all against `username=admin` collapse onto the same axis, so even brute-force runs spread across 20+ iterations register as repetition.
+4. **Same-pattern recent-call count** - the existing `tool_name + normalized_args[:160]` fingerprint match.
+5. **Reward terms** - recent `new_info` verdicts and non-empty `actionable_findings` subtract from the score. Healthy sessions stay near zero.
+
+Each signal is multiplied by a **dynamic weight** that scales with session age (early sessions tolerate exploration, late sessions punish stuckness more) and with phase (exploitation phase punishes axis repeats more sharply than informational phase). The weighted sum is the score; the score maps to one of five tiers:
+
+| Tier | Threshold | Action |
+|------|-----------|--------|
+| green | < 3 | None |
+| yellow | 3-5 | Soft hint in next prompt: "consider whether your current hypothesis is still viable" |
+| orange | 5-7 | Fire Deep Think (subject to cooldown + novelty check) |
+| red | 7-9 | Demand the agent name a new hypothesis class in its next reasoning |
+| critical | ≥9 | Prompt warns the next expensive call on the dominant axis will be rejected |
+
+The score and component breakdown are logged on every think turn and persisted onto state (`_last_productivity_score`) for the UI and post-session analysis. A **same-pattern fingerprint audit** still injects the existing recent-fingerprint block when 3+ same-pattern calls are detected; the audit is the LLM-facing render of one of the five score signals. The same pipeline runs in the wave path (one verdict per wave, axis recorded per wave step) and in fireteam member subgraphs. Full details: [Productivity Verdict & Loop Detector chapter](#productivity-verdict--unproductive-streak-loop-detector-1).
+
+> **4.15.1 — debugging no longer reads as a stall.** Defining progress as new *target* facts only made legitimate iterative debugging of a correct technique (e.g. refining a JSFuck payload) look like spinning, so the streak fired and ejected the right approach. Changes: (1) a sixth verdict, `diagnostic_progress`, plus an orchestrator-owned `detect_diagnostic_progress` signal (a changed result/error on a same-approach retry, or a cited ruled-out cause) that resets the state-growth stall; (2) same-pattern repeat counting now keys on `(args shape, output fingerprint)`, so different payloads with different results are distinct attempts, not loops; (3) the unproductive-streak prompt now requires one validation step (reproduce / probe / cite a tested assumption) before pivoting, paired with a "validate on failure" rule and a required disambiguating probe; (4) hardening so it cannot be gamed — empty `diagnostic_progress` claims are audited down, a cap bounds how long diagnostic progress can suppress the streak, and the legacy `"error"/"failed"`-in-output heuristic is now a fallback used only when a step has no verdict.
+
+The verdict signal is complemented by **per-step diagnostic annotations** rendered inline in the chain context the LLM reads on every iteration. Every tool step carries a `duration_ms` measurement and an `error_class` label drawn from a fixed 7-way classifier: `success`, `shell_parser_error` (bash/quoting failure, request never sent), `transport_error` (DNS/network failure, request never reached the app), `tool_internal_error` (curl returncode, MCP wrapper failure), `application_4xx` (legitimate semantic rejection), `application_5xx_fast` (5xx in <50ms, parse-time crash that never reached business logic), and `application_5xx_normal` (5xx with normal latency, real application or DB-level error). The classifier reads tool output for HTTP status patterns, transport-error signatures, and generic FastAPI 5xx bodies; failure cases default to `tool_internal_error` so every step lands in a usable bucket. Surfaced as `[12ms, application_5xx_fast]` next to each tool entry in the chain context, this turns "twelve identical FAILED stamps" into "twelve uniformly fast 5xx responses" - diagnostically the difference between *vector exhausted* and *probe never reached the layer under test*.
+
+A **response-uniformity anomaly detector** runs on every iteration: when 5+ recent steps share the same `error_class`, near-identical body size, and all complete in under 50ms, a warning block is injected into the next system prompt that explicitly names the pattern and instructs the agent not to mark the current vector class "tested" on the basis of these uniform responses (*"the test result is INCONCLUSIVE, not NEGATIVE"*). Each warning carries a class-specific remediation hint - e.g., `shell_parser_error` streaks recommend switching from `execute_curl` (bash escaping) to `execute_code` (Python `requests`); `application_5xx_fast` streaks recommend re-examining whether the payload syntax is valid for the framework, before pivoting to a different vector class.
 
 ### EvoGraph (Persistent Attack Chain Memory)
 
@@ -1217,60 +1261,6 @@ The protocol has two strict design goals. **Liveness without polling**, the fron
 
 The protocol carries roughly 30 outbound event types and 10 inbound message types, all defined as enums in [`agentic/websocket_api.py`](../agentic/websocket_api.py). The sections below cover the message protocol itself, the streaming event flow with its strict ordering rules (a previous tool's `tool_complete` must fire before the next iteration's `thinking`, which must fire before the next `tool_start`, otherwise the frontend reducer mis-pairs running tools with completion events), the wave execution flow for parallel tool plans, and the three operator-control mechanisms that share this transport: guidance messages for steering a running agent, stop/resume for pausing whole sessions, and per-tool stop for killing individual long-running commands.
 
-### Message Protocol
-
-```mermaid
-flowchart LR
-    subgraph Client["Client → Server"]
-        INIT["init<br/>user_id, project_id, session_id"]
-        QUERY["query<br/>question"]
-        APPROVAL["approval<br/>decision, modification"]
-        ANSWER["answer<br/>answer"]
-        TOOL_CONF["tool_confirmation<br/>decision, modifications?"]
-        FT_MEM_CONF["fireteam_member_confirmation<br/>wave_id, member_id, decision"]
-        TOOL_STOP_IN["tool_stop<br/>tool_name, wave_id?, step_index?"]
-        GUIDANCE["guidance<br/>message"]
-        SKILL_INJECT["skill_inject<br/>skill_id, skill_name, content"]
-        STOP["stop"]
-        RESUME["resume"]
-        PING["ping"]
-    end
-
-    subgraph Server["Server → Client"]
-        CONNECTED[connected]
-        THINKING["thinking<br/>iteration, phase, thought, reasoning"]
-        THINKING_CHUNK["thinking_chunk<br/>chunk, partial reasoning stream"]
-        DEEP_THINK["deep_think<br/>trigger_reason, analysis, iteration, phase"]
-        FILE_READY["file_ready<br/>path, name, size, type, source_step"]
-        TOOL_START["tool_start<br/>tool_name, tool_args, wave_id?"]
-        TOOL_CHUNK["tool_output_chunk<br/>tool_name, chunk, is_final, wave_id?"]
-        TOOL_COMPLETE["tool_complete<br/>tool_name, success, output_summary,<br/>actionable_findings, recommended_next_steps, wave_id?"]
-        PLAN_START["plan_start<br/>wave_id, plan_rationale, tool_count, tools"]
-        PLAN_COMPLETE_EV["plan_complete<br/>wave_id, total_steps, successful, failed"]
-        PLAN_ANALYSIS["plan_analysis<br/>wave_id, interpretation,<br/>actionable_findings, recommended_next_steps"]
-        PHASE_UPDATE["phase_update<br/>current_phase, iteration_count, attack_path_type"]
-        TODO_UPDATE["todo_update<br/>todo_list"]
-        APPROVAL_REQ["approval_request<br/>from_phase, to_phase, reason, risks"]
-        QUESTION_REQ["question_request<br/>question, context, format, options"]
-        TOOL_CONF_REQ["tool_confirmation_request<br/>mode, tools, reasoning?, phase?, iteration?"]
-        FT_DEPLOYED["fireteam_deployed<br/>wave_id, members[]"]
-        FT_MEM_STARTED["fireteam_member_started<br/>wave_id, member_id"]
-        FT_THINK["fireteam_thinking<br/>wave_id, member_id, iteration, thought"]
-        FT_TOOL["fireteam_tool_start / chunk / complete<br/>wave_id, member_id, step_index?, tool_name, ..."]
-        FT_PLAN["fireteam_plan_start / complete<br/>wave_id, member_id, sub_wave_id, ..."]
-        FT_AWAIT["fireteam_member_awaiting_confirmation<br/>wave_id, member_id, pending_tools"]
-        FT_MEM_DONE["fireteam_member_completed<br/>wave_id, member_id, status, stats"]
-        FT_DONE["fireteam_completed<br/>wave_id, status_counts"]
-        RESPONSE["response<br/>answer, task_complete"]
-        EXEC_STEP["execution_step<br/>step summary"]
-        TASK_DONE["task_complete<br/>message, final_phase"]
-        GUIDANCE_ACK["guidance_ack<br/>message, queue_position"]
-        SKILL_INJECT_ACK["skill_inject_ack<br/>skill_id, skill_name, queue_position"]
-        STOPPED["stopped<br/>message, iteration, phase"]
-        ERROR["error<br/>message, recoverable"]
-    end
-```
-
 ### Streaming Event Flow
 
 The think node emits events in a specific order to maintain correct timeline rendering in the frontend. When the think node processes both a completed previous step and a new decision, events are emitted as: `tool_complete` (previous) -> `thinking` (new) -> `tool_start` (new).
@@ -1604,13 +1594,13 @@ Dangerous tools requested by a **fireteam member** do NOT use `tool_confirmation
 
 ## Deep Think (Strategic Reasoning Pre-Step)
 
-**Deep Think** is a structured strategic-reasoning LLM call that runs **before** the normal `think` decision when one of four conditions fires. It produces a markdown analysis (Situation / Attack Vectors / Approach / Priority / Risks) that is injected into the very next think prompt and into all subsequent prompts for that session via the `DEEP_THINK_SECTION` placeholder.
+**Deep Think** is a structured strategic-reasoning LLM call that runs **before** the normal `think` decision when one of four conditions fires. It produces a markdown analysis (Situation / Competing Hypotheses / Attack Vectors / Approach / Priority / Risks) that is injected into the very next think prompt and into all subsequent prompts for that session via the `DEEP_THINK_SECTION` placeholder.
 
 It is a deliberate contrast to the regular `think_node` LLM call:
 
 | | Regular think | Deep Think pre-step |
 |---|---|---|
-| Output schema | `LLMDecision` (action + tool args + inline analysis) | `DeepThinkResult` (situation, vectors, approach, priority, risks) |
+| Output schema | `LLMDecision` (action + tool args + inline analysis) | `DeepThinkResult` (situation, competing_hypotheses, vectors, approach, priority, risks) |
 | Output usage | Routes to a node (`execute_tool` / `execute_plan` / etc.) | String, prepended to next think's system prompt |
 | Frequency | Every iteration | Only when triggered (typically 2-4 times per session) |
 | Token cost | Tracked per-turn | Tracked separately, added to per-turn totals |
@@ -1618,28 +1608,75 @@ It is a deliberate contrast to the regular `think_node` LLM call:
 
 ### When Deep Think Fires
 
-Implemented in [agentic/orchestrator_helpers/nodes/think_node.py](../agentic/orchestrator_helpers/nodes/think_node.py) (lines 107-226). Conditions are checked in this order, first match wins:
+Implemented in [agentic/orchestrator_helpers/nodes/think_node.py](../agentic/orchestrator_helpers/nodes/think_node.py). Conditions are checked in this order, first match wins:
 
 1. **First iteration of session**, `iteration == 1`. Trigger reason: `"First iteration, establishing initial strategy"`. Always runs once at session start (when `DEEP_THINK_ENABLED=true`).
 2. **Phase transition just happened**, the previous step bumped `current_phase`. Trigger reason: `"Phase transition to <new_phase>, re-evaluating strategy"`.
-3. **Failure loop (3+ consecutive failures)**, looks at the last 6 execution_trace steps; counts consecutive failures from the tail. A step counts as failure if `success=false`, OR the output's first 500 chars contain `"failed"`, `"error"`, or `"exploit completed, but no session"` (the last is the Metasploit "no session" edge case where success is technically true but no session opened). Trigger reason: `"Failure loop detected (N consecutive failures), pivoting strategy"`.
-4. **LLM self-request**, the previous `LLMDecision` set `need_deep_think=true`. The base prompt's `DEEP_THINK_SELF_REQUEST_INSTRUCTION` tells the LLM it can opt in if it feels stuck. Trigger reason: `"Agent self-assessed stagnation, strategic re-evaluation requested"`.
+3. **Productivity tier reaches orange / red / critical** (the v2 path). Every think turn the orchestrator computes the continuous **productivity score** (see the Productivity chapter) and looks up its tier. When the tier is orange or higher AND the cooldown is inactive (or is bypassed by a critical-tier or stall override), Deep Think fires. Trigger reason: `"Productivity tier '<tier>' (score <N>) - components: {...}"`, so the operator can read in the log exactly which signal dominated. When `PRODUCTIVITY_SCORE_ENABLED=false`, this branch is replaced by the legacy 3-of-6 unproductive-streak counter (same threshold, same trigger reason as before the v2 rewrite).
+4. **LLM self-request**, the previous `LLMDecision` set `need_deep_think=true`. The base prompt's `DEEP_THINK_SELF_REQUEST_INSTRUCTION` tells the LLM it can opt in if it feels stuck. Trigger reason: `"Agent self-assessed stagnation, strategic re-evaluation requested"`. **Always bypasses the cooldown** - the agent should always be able to ask for help.
+
+### Cooldown
+
+Every time Deep Think fires, the orchestrator arms a per-iteration cooldown by writing `state["_deep_think_cooldown_until"] = iteration + DEEP_THINK_COOLDOWN_ITERATIONS` (default 5). On subsequent think turns the trigger logic checks `iteration < _deep_think_cooldown_until` and, if true, silently suppresses condition (3) above. The score is still computed and logged; the same-pattern audit section and tiered prompt hint are still injected; only the second LLM call for the Deep Think analysis is suppressed.
+
+Two overrides bypass the cooldown:
+
+- **Critical-tier override.** If the score is ≥ `PRODUCTIVITY_SCORE_BLOCK_THRESHOLD` (default 9.0), Deep Think fires regardless of cooldown - something is genuinely on fire and a fresh strategic re-evaluation is warranted even if the previous one just ran.
+- **State-growth stall override.** If `_iterations_since_state_grew` is ≥ `STATE_GROWTH_HARD_THRESHOLD` (default 10), Deep Think fires regardless of cooldown - the engagement state has not changed in too long, and waiting for the cooldown to expire would waste more iterations.
+
+Conditions (1), (2), and (4) above are not gated by the cooldown at all (first iteration, phase transition, and self-request are always strategically significant).
+
+The motivation is a specific failure mode observed in long sessions: dozens of Deep Thinks firing back-to-back because the streak counter was still above threshold after the previous Deep Think had executed only one or two follow-up tool calls. The agent never got a chance to actually *try* the recommendation before being interrupted to produce a new one. With a 5-iteration cooldown those dense Deep Think bursts collapse to a small handful, with no loss of strategic intervention quality - the cooldown just stops the agent being re-strategized before it has had a chance to execute the previous plan.
+
+### Novelty Check (Jaccard Similarity on `priority_order`)
+
+After a Deep Think result parses successfully, the orchestrator computes the token-level Jaccard similarity between the new `priority_order` list and the previous one (stored in `state["_previous_priority_order"]`). Tokenization is case-insensitive, strips punctuation, drops short tokens (<3 chars) and a curated stopword list (`a`, `the`, `then`, `via`, `step`, etc.). The similarity ratio is `|new ∩ old| / |new ∪ old|`.
+
+When the similarity exceeds `DEEP_THINK_NOVELTY_JACCARD_MAX` (default 0.6), the orchestrator prepends a strong warning to the rendered Deep Think block:
+
+```
+> ⚠ Plan novelty low (Jaccard 0.72 vs previous Deep Think). The previous
+> plan did not produce new information. If you intend to retry an axis,
+> you MUST state explicitly in your next `output_analysis.rationale` what
+> specific parameter has changed; otherwise pick a strategy class not
+> present in the previous priority_order.
+```
+
+The block goes into the deep_think_result string itself, so it is visible to every subsequent iteration that re-reads the strategic frame. The agent is *not* silently corrected - it is shown its own paraphrase and forced to articulate what is different, or pivot to a strategy class not in the previous plan. The previous priority_order is overwritten only when a new Deep Think fires, so the comparison is always against the most recent strategic statement, not a stale one.
+
+The motivation is the same dense-Deep-Think failure mode seen above, but with a different angle: in observed long sessions, a sequence of Deep Thinks was strategically near-identical (paraphrased variations of the same recommendation - "continue brute-forcing user X, try a larger wordlist, also try the recon scan again"). The orchestrator accepted each one as a fresh plan because it had no notion of plan similarity; the agent kept executing slight variations of the same losing approach. The novelty check turns each repeated plan into a forcing function: either name one specific parameter that has changed, or pick a strategy class not present in the previous plan.
 
 ### Output Schema
 
 ```python
+class CompetingHypothesis(BaseModel):
+    hypothesis: str             # One sentence: what could explain the evidence?
+    supporting_evidence: str    # Cite specific iters/steps that support it
+    disambiguating_probe: str   # ONE cheap test that would tell hypotheses apart
+
 class DeepThinkResult(BaseModel):
-    situation_assessment: str          # Current state summary
-    attack_vectors_identified: List[str]  # All possible attack vectors
-    recommended_approach: str          # Chosen approach and rationale
-    priority_order: List[str]          # Ordered action steps
-    risks_and_mitigations: str         # Potential risks and how to handle them
+    situation_assessment: str
+    competing_hypotheses: List[CompetingHypothesis]  # >=2 required when stuck or recovering
+    attack_vectors_identified: List[str]
+    recommended_approach: str
+    priority_order: List[str]
+    risks_and_mitigations: str
 ```
+
+The `competing_hypotheses` field is the **anti-confirmation-bias mechanism**. The prompt requires the strategist to emit ≥2 candidate explanations for the current evidence whenever (a) the trigger is "Unproductive streak detected" or (b) any chain finding in scope has confidence ≥60. Each hypothesis carries a concrete `disambiguating_probe` - one test that would tell the alternatives apart. A list of guesses with no test plan is a brainstorm; a list with disambiguating probes is a science experiment. Schema validation does not enforce min_length=2 (legitimate "no credible alternative" cases exist); the policy lives in the prompt copy.
 
 The result is rendered as a single markdown block:
 
 ```
 **Situation:** <situation_assessment>
+
+**Competing Hypotheses (run a probe that distinguishes them - do not just confirm your favorite):**
+  1. **<hypothesis 1>**
+     - Supporting: <supporting_evidence 1>
+     - Disambiguating probe: <disambiguating_probe 1>
+  2. **<hypothesis 2>**
+     - Supporting: <supporting_evidence 2>
+     - Disambiguating probe: <disambiguating_probe 2>
 
 **Attack Vectors:** vec1, vec2, vec3
 
@@ -1650,6 +1687,8 @@ The result is rendered as a single markdown block:
 **Risks:** <risks_and_mitigations>
 ```
 
+The Competing Hypotheses block leads the next iteration's prompt, with the imperative *"do not just confirm your favorite"* in the header, pushing the agent toward the disambiguating probe rather than the confirming one. When `competing_hypotheses` is empty (early-session deep-thinks without enough evidence), the block is omitted cleanly and the rest of the layout renders unchanged.
+
 This block is stored in `state["deep_think_result"]` and is **persistent**: once produced, every subsequent think prompt re-injects it via `DEEP_THINK_SECTION.format(deep_think_result=...)`. A new Deep Think trigger overwrites the previous result.
 
 ### Flow Diagram
@@ -1657,17 +1696,31 @@ This block is stored in `state["deep_think_result"]` and is **persistent**: once
 ```mermaid
 sequenceDiagram
     participant T as think_node entry
+    participant S as compute_productivity_score
     participant DT as Deep Think LLM call
+    participant J as priority_order_jaccard
     participant L as Main think LLM call
     participant CB as StreamingCallback
     participant UI as Browser
 
-    T->>T: Check 4 trigger conditions
-    alt Trigger fires
-        T->>T: Build DEEP_THINK_PROMPT (phase, target_info, chain_context,, todo_list, RoE section, session_config, trigger_reason)
+    T->>S: compute score for this turn
+    S-->>T: {score, tier, components}
+    Note over T: Check 4 trigger conditions in priority order
+    T->>T: (1) iteration==1, (2) phase_just_transitioned,<br/>(3) tier∈{orange,red,critical}+cooldown_ok,<br/>(4) _need_deep_think (self-request, bypasses cooldown)
+    alt Cooldown active AND not orange-via-override AND not self-request
+        T->>T: Suppress Deep Think - tier hint still appended
+    else Trigger fires
+        T->>T: Build DEEP_THINK_PROMPT (phase, target_info, chain_context, todo_list, RoE, trigger_reason)
         T->>DT: llm.ainvoke (SystemMessage + HumanMessage)
         DT-->>T: DeepThinkResult JSON
         T->>T: Parse + render as markdown block
+        T->>J: priority_order_jaccard(new, _previous_priority_order)
+        J-->>T: similarity ratio
+        alt similarity >= DEEP_THINK_NOVELTY_JACCARD_MAX
+            T->>T: Prepend "Plan novelty low" warning to deep_think_result
+        end
+        T->>T: Arm cooldown: _deep_think_cooldown_until = iter + COOLDOWN_ITERATIONS
+        T->>T: Store new priority_order as _previous_priority_order
         T->>T: Set state.deep_think_result + deep_think_triggered=True
         T->>CB: on_deep_think(trigger_reason, analysis, iteration, phase)
         CB-->>UI: DEEP_THINK event {trigger_reason, analysis}
@@ -1679,6 +1732,7 @@ sequenceDiagram
     alt deep_think_result exists
         T->>T: Append DEEP_THINK_SECTION to system prompt
     end
+    T->>T: Append tier-specific productivity hint (yellow/red/critical)
     T->>T: Append DEEP_THINK_SELF_REQUEST_INSTRUCTION (if enabled)
     T->>L: llm.ainvoke main think
     L-->>T: LLMDecision (action + need_deep_think flag)
@@ -1698,8 +1752,11 @@ Deep Think tokens are accumulated separately into `_dt_in` / `_dt_out` and added
 | Setting | Default | Purpose |
 |---|---|---|
 | `DEEP_THINK_ENABLED` | `true` | Master switch. When off, the four triggers and the self-request instruction are both skipped, and `need_deep_think` from the LLM is forced to `false` |
+| `DEEP_THINK_COOLDOWN_ITERATIONS` | `5` | Minimum iterations between Deep Thinks (condition 3 only). Overrides: critical-tier score, state-growth stall, LLM self-request all bypass the cooldown |
+| `DEEP_THINK_NOVELTY_JACCARD_MAX` | `0.6` | If the new Deep Think's `priority_order` has Jaccard similarity ≥ this against the previous one, a "plan novelty low" warning is prepended to the rendered block |
+| `STATE_GROWTH_HARD_THRESHOLD` | `10` | Iterations since engagement state last grew that bypass the Deep Think cooldown (one of two overrides) |
 
-When disabled, the entire pre-step block is bypassed and the system runs in pure single-call ReAct mode.
+When `DEEP_THINK_ENABLED=false`, the entire pre-step block is bypassed and the system runs in pure single-call ReAct mode.
 
 ### WebSocket Event
 
@@ -1718,6 +1775,328 @@ Deep Think runs *inside* `think_node` rather than as its own LangGraph node beca
 - Failure handling stays local, a bad Deep Think can degrade silently inside one node body.
 
 The trade-off: harder to instrument as a discrete node in LangGraph traces. Mitigation: the dedicated WebSocket event and the `Deep Think triggered: <reason>` log line provide the observability hook.
+
+---
+
+## Productivity Verdict & Unproductive-Streak Loop Detector
+
+The **productivity layer** is what keeps the agent from looping. It is a stack of signals - some declared by the LLM, some observed by the orchestrator - fused into a single continuous score that maps to escalating prompt-level actions. Every think iteration produces (a) a `ProductivityVerdict` from the LLM as part of `output_analysis`, (b) an orchestrator-owned **state-growth** tick, (c) an **axis ledger** record for tool calls whose semantic axis can be extracted, (d) a recomputed **productivity score** based on the five signals above plus rewards for actual progress, and (e) a **tier mapping** that decides whether the next prompt gets a soft hint, fires Deep Think, demands an axis pivot, or warns that the next expensive call will be rejected.
+
+The architecture has two design goals. First, **never depend on a single signal**, especially not one the LLM controls. The verdict is necessary for honest self-classification but not sufficient for loop detection because the model can lie (and is corrected by the honesty audit when it does). The state-growth signal and the axis ledger are orchestrator-observed - they do not depend on the LLM self-reporting anything. The score combines them so no single dishonest input can suppress detection. Second, **escalate gradually**. A binary "3-of-6 → fire Deep Think" trigger (the legacy v1 design) is too coarse: it cannot distinguish "we just spent 90 seconds and 600K tokens on a brute-force run against the wrong username" from "we ran three cheap recon probes that legitimately returned 404". The v2 score with tiered actions handles both.
+
+This is the second-generation design. The legacy keyword-only "failure loop" detector (output contained `"failed"` / `"error"`) is preserved as a fallback when `PRODUCTIVITY_SCORE_ENABLED=false`, but the default path is the score.
+
+### Verdict Schema
+
+The schema lives in [agentic/state.py](../agentic/state.py) as `ProductivityVerdict`, embedded in `OutputAnalysisInline.productivity`:
+
+```python
+class ProductivityVerdict(BaseModel):
+    verdict: Literal["new_info", "confirmation", "no_progress", "blocked", "duplicate"] = "new_info"
+    new_information_gained: bool = True
+    what_was_new: str = ""             # One sentence; empty if nothing new.
+    should_repeat_similar_call: bool = False
+    rationale: str = ""                # One sentence citing specific evidence.
+```
+
+The closed enum prevents free-form dodging ("partial success", "informative-but-known"). The required `what_was_new` field forces the model to cite a specific new fact, an empty string is itself a signal that there was no new information. Verdict meanings:
+
+| Verdict | Meaning |
+|---|---|
+| `new_info` | Output revealed something not already in the findings list. `what_was_new` must cite the specific fact. |
+| `confirmation` | Already suspected; this call only confirms. Acceptable once; never for repeats. |
+| `no_progress` | Call succeeded but yielded zero usable information. |
+| `blocked` | WAF / 401 / 403 / captcha / rate-limit / auth wall. |
+| `duplicate` | Output essentially identical to a recent call with similar args. |
+
+### Honesty Audit (State-Delta Cross-Check)
+
+After parsing the LLM's `output_analysis`, the orchestrator runs `audit_productivity_claim()` (in [agentic/orchestrator_helpers/productivity.py](../agentic/orchestrator_helpers/productivity.py)) against the *actual* state delta for the same iteration. The audit checks whether the engagement state grew during the iteration:
+
+- Did `chain_findings` get a new entry?
+- Did `extracted_info` populate any of `ports` / `services` / `technologies` / `vulnerabilities` / `credentials` / `sessions`?
+- Did `actionable_findings` produce anything?
+- Did an `exploit_succeeded` event with details land?
+
+If `claims_new == true` but **no** state actually grew, the audit returns a one-line discrepancy string and the orchestrator calls `downgrade_verdict_to_no_progress()`, which preserves the original verdict in `_original_verdict`, rewrites `verdict` to `no_progress`, sets `new_information_gained=false`, and records the `_downgrade_reason`. The reason is then echoed back to the LLM in the next prompt under a `## Prior Productivity Claim Was Downgraded` block so the model sees its own claim being corrected.
+
+The audit runs in three call sites: the single-tool path in [think_node.py](../agentic/orchestrator_helpers/nodes/think_node.py), the wave path (one verdict per wave, replicated onto every wave step so the loop detector can read it from any single step in isolation), and the fireteam member path in [fireteam_member_think_node.py](../agentic/orchestrator_helpers/nodes/fireteam_member_think_node.py).
+
+### Same-Pattern Fingerprint Audit
+
+When 3 or more recent calls in the audit window share the *same normalized tool-and-args pattern*, `build_productivity_audit_section()` injects a prompt block listing those calls with their truncated output fingerprints. Pattern normalization (`_normalize_args_pattern()`) collapses integer IDs to `<int>`, long hex tokens to `<hex>`, IPv4 to `<ip>`, and query-string values to `=<val>`, so `/order/300500` and `/order/300600` are the same pattern. Output fingerprinting (`_output_fingerprint()`) strips ISO timestamps, UUIDs, and long numeric tokens, then sha256-truncates to 8 hex chars, two outputs with the same fingerprint are functionally identical.
+
+The injected block looks like this:
+
+```
+## Productivity Audit (compare against your own recent calls)
+
+Recent same-pattern tool calls (fp = sha256-truncated fingerprint of normalized
+response body - same fp means functionally identical output):
+
+  [step 14] execute_curl {"url":"https://target/api/users/<int>"}  812B  fp=a7c3...
+  [step 15] execute_curl {"url":"https://target/api/users/<int>"}  812B  fp=a7c3...
+  [step 16] execute_curl {"url":"https://target/api/users/<int>"}  812B  fp=a7c3...
+
+ALL identical fingerprints - definitely looping.
+
+Decision rules:
+  - If 3+ recent same-pattern calls share the same fingerprint AND you have no
+    new fact to cite in `what_was_new` → verdict MUST be `duplicate` or
+    `no_progress`. Marking it `confirmation` is dishonest.
+  - If the call hit 401/403/captcha/WAF → verdict is `blocked`.
+  - If you can cite ONE specific new fact in `what_was_new` that is not already
+    in your findings list → verdict is `new_info`.
+```
+
+The block is the mechanism that keeps the LLM verdict honest under pressure: claiming "confirmation" four times in a row becomes visibly dishonest because the model sees its own fingerprint history.
+
+### State-Growth Signal (Orchestrator-Observed, LLM-Independent)
+
+The most reliable "are we still making progress" signal does not come from the LLM at all - it comes from watching whether the engagement state grew this iteration. The orchestrator maintains `state["_iterations_since_state_grew"]`, an integer counter that resets to 0 whenever any of the following grew during the iteration and increments otherwise:
+
+- A list inside `target_info` (`ports`, `services`, `technologies`, `vulnerabilities`, `credentials`, `sessions`, `endpoints`, `subdomains`)
+- `chain_findings_memory` (a new finding was appended)
+- `actionable_findings` (non-empty list on the step)
+- An `exploit_succeeded` event with details
+
+`detect_state_growth(before_state, after_state)` in [agentic/orchestrator_helpers/productivity.py](../agentic/orchestrator_helpers/productivity.py) is the helper. It runs in both the single-tool analysis path and the wave-analysis path in [think_node.py](../agentic/orchestrator_helpers/nodes/think_node.py), so both modes contribute to the counter.
+
+Why this matters: the LLM can label every call `confirmation` (or, with the honesty audit catching the dishonest `new_info` claim, every call `no_progress` after downgrade), but if the engagement is genuinely producing new findings, the state-growth counter resets and the score stays low. Conversely, if the agent is honestly labeling each call but the engagement has stopped accumulating intelligence, the counter rises monotonically and eventually crosses the score's thresholds. The signal is **observed**, not **declared**.
+
+The counter has two configurable thresholds beyond the score's own tier boundaries:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `STATE_GROWTH_SOFT_HINT_THRESHOLD` | `5` | Iterations since growth that triggers a soft hint in the prompt |
+| `STATE_GROWTH_HARD_THRESHOLD` | `10` | Iterations since growth that bypasses the Deep Think cooldown (override) |
+
+### Axis Lock-in Ledger
+
+The same-pattern fingerprint audit (above) catches loops that repeat *within the last 6 steps*. A different and more insidious failure mode is **slow loops**: three brute-force attempts against the same `(target, fixed_username)` axis spread across 15+ iterations of other tool calls - too dispersed in time to land inside any rolling six-step window, and textually distinct enough at the args level (different wordlist filenames, different `N`) that the normalized-args fingerprint did not collapse them either. The fix is a **session-long axis ledger** keyed by a *semantic* axis rather than a textual one - repetition is detected by what the agent is *holding constant*, not by what the args string happens to look like.
+
+For each expensive tool call, an axis extractor reduces the call to a small dict whose stringified form is the dedup key. Per-tool-family definitions (in [productivity.py](../agentic/orchestrator_helpers/productivity.py) `extract_axis`):
+
+| Tool family | Detection | Axis |
+|---|---|---|
+| `execute_code` brute force | Script body matches brute-force heuristics (`for pw in`, `for password in`, `rockyou`, `wordlist`, `passwords.txt`, `common-credentials`, `for line in f:`) AND contains a `'username': 'literal'` regex match | `(family=credential_brute_force, target, fixed_user, varied=password)` |
+| `execute_hydra` | `-l <username>` flag present (lowercase, fixed-user mode); `-L <userlist>` returns None | `(family=credential_brute_force, target=<hydra>, fixed_user, varied=password)` |
+| `execute_ffuf` | `-u <url>` flag present; URL is canonicalized by collapsing `FUZZ\d*` markers and stripping query string | `(family=directory_brute_force, target, fixed_filter=<status codes>, varied=wordlist)` |
+| `execute_sqlmap` / `kali_shell` wrapping sqlmap | `-u 'http://...'` flag present | `(family=automated_sqli, target, varied=tamper_or_technique)` |
+| `job_spawn` | Unwrapped: extracts inner `tool_name` + `args`, then applies the above rules | Whatever the inner tool produces |
+| Anything else | Returns `None` - recon probes, one-shot curls, etc. are *not* tracked (repeating a curl against a different path is normal exploration) | - |
+
+Each completed step is recorded onto `state["tested_axes"]` via `record_axis_attempt()` with `{iteration, verdict, tool}`. The verdict is the productivity verdict for the step (downgraded if the honesty audit caught a dishonest claim), or `hard_failure` if the tool returned `success=false`. `axis_unproductive_count()` counts entries on a given axis key where the verdict is in `{no_progress, duplicate, blocked, hard_failure}`.
+
+The score reads `max_axis_repeats = max(axis_unproductive_count(k) for k in ledger)` as one of its five inputs. A `rockyou-5k` → `10k-common` → `rockyou-100k` sequence against `username=admin` collapses onto a single axis key, the counter reads 3 after the third attempt, and (combined with the late-session weight bump on this term, see below) the score crosses the red or critical threshold by the third attempt - forcing the agent to either name a different fixed dial (try another username) or articulate why the current dial is still worth retrying.
+
+The wave path records axes per wave step. Steps that don't have an extractable axis (cheap recon, custom Python that isn't brute-force-shaped) are silently skipped - false negatives are cheap (just no axis-repeat signal), false positives would block legitimate calls and are far more costly.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `AXIS_REPEAT_WARN_COUNT` | `2` | Threshold for a soft warning ("axis tested before") |
+| `AXIS_REPEAT_REQUIRE_PIVOT_COUNT` | `3` | Threshold that demands a "what is different" justification |
+| `AXIS_REPEAT_BLOCK_COUNT` | `4` | Threshold at which the agent is warned the next call on the axis will be rejected |
+
+### Continuous Productivity Score
+
+`compute_productivity_score()` aggregates the five signals every think turn and returns a dict with the final `score`, the raw `components`, the effective `weights`, and per-component contributions in `weighted`. The formula:
+
+```
+score =
+    + w_verdict_count   * unproductive_verdicts_in_window
+    + w_state_growth    * iterations_since_state_grew_clipped  (clipped to 10)
+    + w_axis_repeats    * max_axis_repeats
+    + w_same_pattern    * same_pattern_count
+    - r_new_info        * new_info_events_in_last_5
+    - r_actionable      * actionable_events_in_last_5
+
+score = max(0.0, score)    # clamped at zero; negative means "very healthy"
+```
+
+The score is **continuous** and **non-negative**. Reward terms can offset penalty terms; healthy sessions stay near zero. A `tier` label is derived by lookup:
+
+| Score | Tier | Action |
+|---|---|---|
+| 0 - 3 | `green` | No action |
+| 3 - 5 | `yellow` | Inject soft prompt hint: "state has not grown in N iterations, consider whether the current hypothesis is still viable" |
+| 5 - 7 | `orange` | Fire Deep Think (subject to cooldown + novelty check) |
+| 7 - 9 | `red` | Demand the agent name a different hypothesis class in its next reasoning |
+| ≥ 9 | `critical` | Warn that the next expensive call on the dominant axis will be rejected |
+
+The score and its components are persisted onto `state["_last_productivity_score"]` every turn for the UI and for post-session diagnostics, and logged on every think turn:
+
+```
+[user/project/session] Productivity score 5.4 (orange) iter=22 components={
+  'unproductive_verdicts': 3, 'iterations_since_state_grew': 4,
+  'max_axis_repeats': 1, 'same_pattern_count': 2,
+  'new_info_events': 0, 'actionable_events': 0
+}
+```
+
+Settings:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `PRODUCTIVITY_SCORE_ENABLED` | `true` | Master switch. When off, falls back to the legacy 3-of-6 binary counter |
+| `PRODUCTIVITY_SCORE_HINT_THRESHOLD` | `3.0` | Yellow tier (soft hint) |
+| `PRODUCTIVITY_SCORE_DEEPTHINK_THRESHOLD` | `5.0` | Orange tier (Deep Think) |
+| `PRODUCTIVITY_SCORE_REQUIRE_PIVOT_THRESHOLD` | `7.0` | Red tier (demand pivot) |
+| `PRODUCTIVITY_SCORE_BLOCK_THRESHOLD` | `9.0` | Critical tier (next call blocked); also bypasses Deep Think cooldown |
+
+### Dynamic Weights (Session Age + Phase)
+
+The weights themselves are not constants - they scale with two contextual inputs:
+
+1. **Session age**, expressed as `bracket = clip(iteration / max_iterations, 0, 1)`. Bracket starts at 0 (first iteration) and reaches 1 by the end of the iteration budget.
+2. **Current phase**, with extra punishment for axis repeats in exploitation phase (every shot should be deliberate).
+
+Concretely:
+
+| Weight | Formula | Range | Rationale |
+|---|---|---|---|
+| `w_verdict_count` | constant 1.0 (+0.5 in exploitation) | 1.0 - 1.5 | LLM-emitted signal, baseline weight; bumped slightly in exploitation to penalize careless probes |
+| `w_state_growth` | `1.0 + 2.0 * bracket` | 1.0 - 3.0 | Early in a session, no growth is normal (still exploring). Late in a session, no growth is alarming |
+| `w_axis_repeats` | `2.0 + 2.0 * bracket` (+1.0 in exploitation) | 2.0 - 5.0 | Repeating an axis is always bad; it gets worse late and worse in exploitation |
+| `w_same_pattern` | constant 0.5 | 0.5 | Mild - the same-pattern audit already does the LLM-side push |
+| `r_new_info` (reward) | `2.0 - 1.0 * bracket` | 1.0 - 2.0 | Late-session `new_info` is *less* discountable - you should already have most of your facts |
+| `r_actionable` (reward) | `1.0 - 0.5 * bracket` | 0.5 - 1.0 | Same logic |
+
+The same algorithm runs cleanly across radically different scenarios because the weights adapt. A 5-iteration smoke test stays in green throughout (bracket=0.1, all weights near minimum). A 60-iteration CTF crosses orange around iteration 25 if state has stalled (bracket=0.42, state-growth weight ≈ 1.84). A 500-iteration enterprise audit pushes the score sharply when state-growth stalls past iteration 100, because the late-session bracket pushes weights to maximum.
+
+### Loop Detector Integration
+
+`is_unproductive(step)` is the single read-side helper for the verdict signal. It returns `True` when `verdict in {"no_progress", "duplicate", "blocked"}` or `new_information_gained == false`. It is the source for the legacy 3-of-6 fallback path and one of the five inputs to the v2 score.
+
+The retained settings (controlling the verdict-window component of the score):
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `PRODUCTIVITY_AUDIT_WINDOW` | `6` | How many recent execution-trace steps the verdict / same-pattern audit considers |
+| `UNPRODUCTIVE_STREAK_THRESHOLD` | `3` | Legacy 3-of-6 trigger - only used when `PRODUCTIVITY_SCORE_ENABLED=false` |
+
+When the score crosses a tier (or, in fallback mode, when the legacy count crosses `UNPRODUCTIVE_STREAK_THRESHOLD`), three side effects fire in the same `think_node` iteration:
+
+1. **Deep Think is triggered** (subject to cooldown + novelty check, see Deep Think chapter) with reason `"Productivity tier '<tier>' (score <N>) - components: {...}"`. Fallback-mode trigger reason is the original `"Unproductive streak detected (N/W ...)"`.
+2. **A tiered prompt hint is appended** to the system prompt. The text intensifies with the tier:
+   - **yellow** - "Score N. Engagement state has not grown in K iterations. Consider whether your current hypothesis is still viable. If your last 2-3 probes returned no new information, the next probe should change a different parameter than 'how big' or 'how many' - change the *hypothesis class* or the *target* instead."
+   - **red** - "Score N. State-growth stall = K, max axis-repeat = M. Your next action MUST be on a different hypothesis class. In your `output_analysis.rationale` (or your `thought` before the next tool call), name the new hypothesis explicitly and state WHY the previous hypothesis class has been ruled out."
+   - **critical** - "Score N. The engagement appears genuinely stuck (stall K, axis-repeats M). Spawning another expensive call on the same axis will be rejected. Either: (a) pick a fundamentally different vulnerability class, (b) target a different endpoint / credential / user, or (c) emit action='ask_user' to request a hint. Do NOT repeat the dominant axis."
+3. **The legacy "UNPRODUCTIVE STREAK DETECTED" pivot warning** is also appended when 3+ of the last 6 verdicts are unproductive (regardless of which score path is active), preserving backward-compatible language for sessions that audit by grep.
+
+### Diagnostic Annotations (`error_class` + `duration_ms`)
+
+Every executed tool step is tagged with a `duration_ms` measurement (recorded by `execute_plan_node` and `execute_tool_node`) and an `error_class` label produced by the 7-way classifier in [agentic/orchestrator_helpers/error_class.py](../agentic/orchestrator_helpers/error_class.py). The two fields are surfaced inline in the chain context the LLM reads on every iteration via `_format_step_diagnostics()` in [agentic/state.py](../agentic/state.py):
+
+```
+- execute_curl [3ms, application_5xx_fast]: {'args': '-X POST .../jobs -d ...'}
+- execute_curl [105ms, application_4xx]: {'args': '-s .../robots.txt'}
+- execute_curl [77ms, tool_internal_error]: {'args': '-sv .../ 2>&1'}
+```
+
+The seven classes, in classifier order:
+
+| Class | Definition | Signal |
+|---|---|---|
+| `shell_parser_error` | bash/shlex/quoting failure (matches `no closing quot`, `unexpected end of file`, `syntax error near unexpected token`, etc.) | Request never sent - the harness died |
+| `transport_error` | DNS/connection/SSL failure (matches `could not resolve host`, `connection refused`, `NewConnectionError`, etc.) | Request never reached the app |
+| `tool_internal_error` | Tool wrapper or MCP failure (matches `[ERROR] execute_X failed: returncode=`, `Tool execution failed:`, `playwright._impl._errors.`, `Command timed out`, etc.) | The wrapper itself failed before/after the actual call |
+| `application_4xx` | Explicit `HTTP/x.y 4xx` line in body, or generic 4xx body markers (`method not allowed`, `not found`, `unauthorized`) | Legitimate semantic rejection - the layer was reached, the request envelope is wrong |
+| `application_5xx_fast` | 5xx detected AND `0 < duration_ms < 50` | Parse-time crash or early-guard rejection - input likely never reached business logic |
+| `application_5xx_normal` | 5xx detected AND `duration_ms >= 50` (or zero/unknown timing) | Application / DB-level error - input reached the layer and crashed it there |
+| `success` | 2xx OR `success=True` with no failure signature | OK |
+
+The split between `application_5xx_fast` and `application_5xx_normal` is the load-bearing diagnostic. Twelve identical 5xx responses with `duration_ms ~3` is **not** evidence the vulnerability class is dead - it is evidence the input was rejected by a parser or framework guard before the layer under test ever executed. Without this signal, the LLM treats "all SQL payloads returned 500" as "SQLi exhausted" and pivots prematurely. With it, the LLM sees that the test result is *inconclusive*, not *negative*.
+
+The classifier helper `is_diagnostic_failure(error_class)` returns `True` for `shell_parser_error`, `transport_error`, `tool_internal_error`, and `application_5xx_fast` - the four classes where the layer under test was never exercised. Future coverage-map logic can use this to distinguish "real negative result" from "harness/parser glitch."
+
+### Response-Uniformity Anomaly Detector
+
+Complementary to the same-pattern fingerprint audit (which catches *same TOOL/ARGS* loops), `detect_uniform_response_anomaly()` in [agentic/orchestrator_helpers/productivity.py](../agentic/orchestrator_helpers/productivity.py) catches the opposite failure mode: *different* payloads producing *identical* short-duration failures. The detector scans the last `UNIFORM_RESPONSE_WINDOW` (default 8) steps; when `UNIFORM_RESPONSE_MIN_COUNT` (default 5) of them share the same `(error_class, body_size_bucket)` signature AND all complete in under `UNIFORM_RESPONSE_DURATION_MS` (default 50ms), a warning block is injected into the next system prompt:
+
+```
+## RESPONSE-UNIFORMITY ANOMALY
+
+Of your last 8 tool calls, 6 share an identical response shape:
+  - classification: `application_5xx_fast`
+  - response size:  ~32 bytes (bucket 1, ±32B)
+  - duration:       all <50ms (avg 3ms)
+
+Same status + same size + sub-50ms latency across 6 probes is NOT
+a 'this vector is blocked' signal. It means every probe is being short-circuited
+uniformly - your input is not being processed by the layer you think you're testing.
+
+**What to do:** <class-specific remediation hint>
+
+**Do NOT mark the current vector class 'tested' on the basis of these responses.**
+The test result is INCONCLUSIVE, not NEGATIVE.
+```
+
+Each `error_class` carries its own remediation hint: `shell_parser_error` streaks recommend switching from `execute_curl` (bash escaping) to `execute_code` (Python `requests`); `transport_error` streaks recommend re-verifying reachability before more probes; `application_5xx_fast` streaks recommend re-examining payload validity for the framework (JSON shape, Content-Type, encoding) before pivoting to a different vector class. Steps without `error_class` (legacy traces from before this feature shipped) land in a `_legacy` bucket that never reaches `min_count`, so the detector silently ignores them.
+
+The detector's design choice is **silence when uncertain**. A streak of clean 200s does not fire it (success is the baseline, not a problem). A streak with one slow response in the middle (≥50ms) does not fire it (the slow call reached *something*, so the streak isn't a parse-time uniformity signal). Mixed classes do not fire it (the LLM is exploring, not looping). It fires only when the diagnostic signature is unambiguous.
+
+### Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant T as think_node
+    participant S as compute_productivity_score
+    participant L as LLM (main think)
+    participant A as audit_productivity_claim
+    participant LDR as tested_axes ledger
+    participant DT as Deep Think trigger
+
+    Note over T: Iteration start
+    T->>S: score(execution_trace, tested_axes, state_grew_counter, iteration, phase)
+    S-->>T: {score, tier, components, weights}
+    T->>T: Persist _last_productivity_score
+    alt tier in (yellow, orange, red, critical)
+        T->>T: Append tier-specific hint to system prompt
+    end
+    T->>T: Append productivity-audit fingerprint block (if 3+ same-pattern recent)
+    T->>T: Append prior-iteration downgrade reason (if any)
+
+    T->>L: ainvoke
+    L-->>T: LLMDecision with output_analysis.productivity
+
+    T->>A: audit_productivity_claim(verdict, extracted_info, findings_grew)
+    alt Claim consistent with state delta
+        A-->>T: None - verdict accepted
+    else Claim contradicts state delta
+        A-->>T: discrepancy string
+        T->>T: downgrade_verdict_to_no_progress
+    end
+    T->>T: Persist verdict on step
+
+    Note over T: Post-LLM observed signals
+    T->>T: Tick _iterations_since_state_grew (0 if grew, else +1)
+    T->>LDR: extract_axis(tool_name, args) → axis_key
+    alt axis is extractable
+        T->>LDR: record_axis_attempt(key, iteration, verdict, tool)
+    end
+
+    T->>DT: Should Deep Think fire?
+    alt tier in (orange, red, critical) AND cooldown inactive OR critical/stall override OR self-request
+        DT-->>T: Fire Deep Think LLM call
+        DT->>DT: priority_order_jaccard(new, prev) - prepend warning if >= 0.6
+        DT-->>T: Arm cooldown (iter + DEEP_THINK_COOLDOWN_ITERATIONS)
+    else cooldown active and no override
+        DT-->>T: Suppress
+    end
+```
+
+### Why the Audit Cannot Be Tricked
+
+Five independent forces converge to make the productivity layer reliable:
+
+1. **Schema-level coercion.** The closed enum and the mandatory `what_was_new` field mean a "confirmation" verdict with empty `what_was_new` is structurally suspicious before it even reaches the audit.
+2. **State-delta cross-check.** Claiming new information is auto-falsified the moment no `chain_finding` is appended and no `extracted_info` is populated. The model cannot "claim and run" - the audit runs in the same iteration that wrote the verdict.
+3. **Visible fingerprint history.** Three identical fingerprints in the prompt with the audit's decision rule attached makes a fourth "confirmation" a visibly wrong answer. The model is shown its own pattern before being asked to classify the next call.
+4. **Orchestrator-observed state-growth signal.** Even if the LLM lies through every verdict, the state-growth counter still ticks every iteration where no fact was added. After 5 ticks the score hits yellow, after 10 it overrides the Deep Think cooldown, and the weights on this term scale up linearly with session age. This signal is observed, not declared.
+5. **Session-long axis ledger.** Repeating an axis is recorded at the orchestrator level the moment the call lands, with no LLM involvement. By the third unproductive attempt on the same axis the score crosses red regardless of the LLM's verdict on any of those calls.
+
+The combination is what lets the orchestrator break out of "successful but useless" loops, axis lock-in, and rephrased-plan loops without depending on the LLM to honestly self-report any of them.
 
 ---
 
@@ -3606,13 +3985,13 @@ How the agent recovers from parse errors, stuck loops, and tool failures.
 | Attack-path fallback (secondary path) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Exponential backoff on transient errors | ✅ | ⚠️ | ⚠️ | ✅ | ✅ |
 | Stuck-loop / iteration-cap detection | ✅ | ✅ | ⚠️ | ✅ | ✅ |
-| Repeated-call detection | ⚠️ | ✅ | ❌ | ❌ | ❌ |
+| Repeated-call detection | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Classified error-code taxonomy | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **Subtotal (max 7.0)** | **5.5** | **4.5** | **1.5** | **3.0** | **4.0** |
+| **Subtotal (max 7.0)** | **6.0** | **4.5** | **1.5** | **3.0** | **4.0** |
 
 **What each row in this matrix means.** Self-correction is *what the agent does when something goes wrong*. *Parse-retry on malformed output* asks whether the system retries the LLM call (with the parser error attached as context) when the model emits invalid JSON or a malformed tool call. *Strategic replanning ("Deep Think")* asks whether the agent has a dedicated mechanism for stepping back and re-evaluating its overall approach when local progress stalls, distinct from just retrying the failed step. *Attack-path fallback* asks whether the system can switch to a secondary attack path (e.g. brute-force after CVE exploit fails) without operator intervention. *Exponential backoff on transient errors* asks whether retries use increasing delays to avoid hammering a slow target or rate-limited API. *Stuck-loop / iteration-cap detection* asks whether the system detects when the agent is making no progress and forces a pivot or termination. *Repeated-call detection* asks whether the system notices when the agent tries the same tool with the same arguments multiple times and breaks the loop. *Classified error-code taxonomy* asks whether errors are categorised (retryable vs. non-retryable, transient vs. permanent) rather than treated as opaque exceptions.
 
-**What the comparison reveals.** Self-correction is one of the more even dimensions in the benchmark, every system except PentestGPT has parse retry, stuck-loop detection, and exponential backoff in some form. Three systems differentiate meaningfully. **RedAmon** combines a strategic Deep Think pre-step (triggered on first iteration, phase transition, 3+ failures, or LLM self-request) with attack-path fallback (the classifier emits a `secondary_attack_path` for when the primary fails), making it the only system that has *both* tactical correction (retry the step) and *strategic* correction (pivot the whole approach). **PentAGI** has the strongest *internal* self-correction via its `Reflector` MsgchainType (a dedicated agent role that reviews other agents' outputs and triggers replanning) and its repeated-call detector. **Shannon** has the only **classified error-code taxonomy** in the benchmark, its Temporal workflow distinguishes retryable infrastructure errors (network, rate-limit) from non-retryable logic errors (schema validation, scope violation), with separate retry policies for each (`workflows.ts:52-114`). **PentestGPT** has minimal self-correction in its current code path; the legacy v0.15 had retry decorators but the active v1.0 codebase relies primarily on operator pause/resume to recover from problems. The aggregate (RedAmon 5.5, PentAGI 4.5, Shannon 4.0, Strix 3.0, PentestGPT 1.5) reflects RedAmon's lead but with the smallest gap of any category.
+**What the comparison reveals.** Self-correction is one of the more even dimensions in the benchmark, every system except PentestGPT has parse retry, stuck-loop detection, and exponential backoff in some form. Three systems differentiate meaningfully. **RedAmon** combines a strategic Deep Think pre-step (triggered on first iteration, phase transition, an unproductive-streak detection over the last N steps, or LLM self-request) with attack-path fallback (the classifier emits a `secondary_attack_path` for when the primary fails) and a **productivity-verdict + same-pattern fingerprint audit** that catches repeated-call loops even when each call reports a 200-OK success, making it the only system that has *both* tactical correction (retry the step) and *strategic* correction (pivot the whole approach) and that detects *successful-but-useless* repetition (the keyword-only detectors in other systems miss this). **PentAGI** has the strongest *internal* self-correction via its `Reflector` MsgchainType (a dedicated agent role that reviews other agents' outputs and triggers replanning) and its repeated-call detector. **Shannon** has the only **classified error-code taxonomy** in the benchmark, its Temporal workflow distinguishes retryable infrastructure errors (network, rate-limit) from non-retryable logic errors (schema validation, scope violation), with separate retry policies for each (`workflows.ts:52-114`). **PentestGPT** has minimal self-correction in its current code path; the legacy v0.15 had retry decorators but the active v1.0 codebase relies primarily on operator pause/resume to recover from problems. The aggregate (RedAmon 6.0, PentAGI 4.5, Shannon 4.0, Strix 3.0, PentestGPT 1.5) reflects RedAmon's lead.
 
 **Operational implications for the operator.** Self-correction determines *how long the agent can run unattended before the operator has to intervene*. With RedAmon's Deep Think + attack-path fallback, an agent that fails the primary CVE exploit path will autonomously try a secondary brute-force path before giving up and asking the operator. With PentAGI's Reflector, output quality stays consistent over long runs because there is a dedicated review agent watching for drift. With Shannon's error taxonomy, transient infrastructure failures are silently retried (Temporal's job) while logic errors immediately escalate, the operator only sees the errors that actually require their attention. With Strix, the agent will try several variations of a failed step but lacks the strategic pivot mechanism. With PentestGPT, the operator must watch the screen because the agent will not recover from an unexpected failure without help. For overnight or weekend autonomous runs, RedAmon's strategic-correction layer is the difference between waking up to a completed engagement vs. waking up to an agent stuck on iteration 3.
 
@@ -4067,7 +4446,9 @@ flowchart LR
 | `HYDRA_EXTRA_CHECKS` | `"nsr"` | Extra checks: n=null, s=login-as-pass, r=reversed (-e) |
 | `HYDRA_VERBOSE` | `true` | Show each login attempt (-V) |
 | `HYDRA_MAX_WORDLIST_ATTEMPTS` | `3` | Max wordlist strategies before giving up |
-| `DEEP_THINK_ENABLED` | `true` | Enable strategic Deep Think pre-step (1st iter, phase transition, 3+ failures, LLM self-request) |
+| `DEEP_THINK_ENABLED` | `true` | Enable strategic Deep Think pre-step (1st iter, phase transition, unproductive streak, LLM self-request) |
+| `PRODUCTIVITY_AUDIT_WINDOW` | `6` | How many recent execution-trace steps the productivity loop detector considers |
+| `UNPRODUCTIVE_STREAK_THRESHOLD` | `3` | Count of unproductive steps (LLM verdict OR keyword failure) in the window that triggers Deep Think + pivot warning |
 | `STEALTH_MODE` | `false` | Prepend stealth-mode rules to system prompt (slow scans, low noise, IDS evasion) |
 | `AGENT_GUARDRAIL_ENABLED` | `true` | Soft LLM-based target guardrail + scope-reminder injection. Hard guardrail is non-disableable |
 | `IP_MODE` | `false` | Treat project as IP-scoped (skips domain hard-block, runs soft guardrail over IP→hostname resolution) |
@@ -4199,7 +4580,7 @@ The RedAmon Agentic System provides:
 10. **Multi-Tenancy** - Isolated sessions with tenant-filtered data access
 11. **Stateful Exploitation** - Persistent Metasploit sessions with auto-reset and session/credential detection
 12. **No-Module Fallback** - When Metasploit has no module for a CVE, the agent falls back to manual exploitation using curl, nuclei, code execution, and Kali shell tools
-13. **Failure Loop Detection** - Detects 3+ consecutive similar failures and forces the agent to pivot to a different strategy
+13. **Productivity Verdict & Unproductive-Streak Loop Detection** - Every tool output is classified by the LLM into one of five productivity verdicts (`new_info` / `confirmation` / `no_progress` / `blocked` / `duplicate`) with mandatory `what_was_new` citation. The orchestrator audits the claim against actual state delta (chain_findings growth, extracted_info population) and auto-downgrades dishonest verdicts to `no_progress`. When `UNPRODUCTIVE_STREAK_THRESHOLD` of the last `PRODUCTIVITY_AUDIT_WINDOW` steps are unproductive, Deep Think is triggered and a same-pattern fingerprint audit (sha256-truncated normalized response body) is injected into the prompt. Catches "successful but useless" loops (HTTP 200 with empty body, identical fuzzing fingerprints, stable 404s, WAF HTML) that the legacy keyword-only failure detector missed. Diagnostic annotations (`error_class` + `duration_ms`) on every step distinguish a parse-time 5xx crash from a real application-level error; a separate **response-uniformity anomaly detector** fires when 5+ recent probes share identical `(error_class, body_size, <50ms)` shape, instructing the LLM not to mark the vector class "tested" on the basis of uniform front-door rejections
 14. **Token Optimization** - Compact formatting for older execution trace steps; conditional prompt injection to minimize token usage
 14. **Expanded Kali Tooling** - nmap, nuclei, kali_shell (netcat, socat, sqlmap, john, searchsploit, msfvenom, gcc/g++), and execute_code for shell-escaping-free script execution
 15. **Multi-Objective Support** - Continuous conversations with context preservation and per-objective attack path classification
@@ -4208,7 +4589,7 @@ The RedAmon Agentic System provides:
 18. **MCP Retry Logic** - Exponential backoff retry for MCP server connections to handle container startup races
 19. **EvoGraph** - Persistent evolutionary attack chain graph in Neo4j tracking every step, finding, decision, and failure. Dual memory architecture (in-memory for speed, Neo4j for persistence) with bridge relationships to the recon graph and cross-session evolutionary learning
 20. **Fireteam Fan-Out** - The root agent can deploy a fireteam of N specialist sub-agents, each running its own ReAct subgraph in parallel via `asyncio.gather()` inside the same event loop. Per-member dangerous-tool confirmations land on independent `asyncio.Event`s so N specialists can pause for approval simultaneously without serializing. Members write attributed `ChainStep` / `ChainFinding` rows to EvoGraph in real time; the collect node merges `target_info` deltas and auto-completes matching TODOs back into the parent. All safety invariants (hard guardrail, soft guardrail, RoE, phase gating, tool confirmation, no recursive deployment) are preserved
-21. **Deep Think (Strategic Reasoning Pre-Step)** - When triggered (first iteration, phase transition, 3+ consecutive failures, or LLM self-request via `need_deep_think=true`), an extra LLM call produces a structured `DeepThinkResult` (situation / vectors / approach / priority / risks). The result is rendered as markdown, stored in state, and re-injected into every subsequent think prompt so the strategic frame persists. Streamed to the UI as a distinct `deep_think` event with its own timeline card
+21. **Deep Think (Strategic Reasoning Pre-Step)** - When triggered (first iteration, phase transition, unproductive-streak detection, or LLM self-request via `need_deep_think=true`), an extra LLM call produces a structured `DeepThinkResult` (situation / competing_hypotheses / vectors / approach / priority / risks). The `competing_hypotheses` section is the anti-confirmation-bias mechanism: on unproductive-streak triggers or when chain findings exceed confidence 60, the schema requires ≥2 candidate explanations for the current evidence, each with `supporting_evidence` and a concrete `disambiguating_probe` that would tell the alternatives apart. The result is rendered as markdown, stored in state, and re-injected into every subsequent think prompt so the strategic frame persists. Streamed to the UI as a distinct `deep_think` event with its own timeline card
 22. **Skills System (Built-In, User, Chat)** - Three families of expert playbooks: built-in attack-skill prompt blocks (CVE exploit, brute force, SQL injection, XSS, phishing, DoS), markdown-defined user attack skills under `agentic/skills/` (loaded by `skill_loader.py`, classified as `user_skill:<id>`), and chat skills under `agentic/community-skills/` injected on-demand via the `/skill` command or guidance queue
 23. **Output Analysis (Inline)** - Every think iteration analyzes the previous tool's output inline with its decision, emitting structured findings (`OutputAnalysisInline`) that feed `target_info`, EvoGraph chain-finding writes, and the per-tool `tool_complete` event, no separate analysis LLM call
 24. **Three-Layer Guardrails** - Hard (deterministic regex + ~200-domain set, non-disableable, blocks .gov/.mil/.edu/.int + IGOs), Soft (LLM-based, configurable, blocks tech giants/clouds/social/banks), Scope reminder (prompt-level injection on every think iteration). Hard guardrail is mirrored byte-for-byte in TypeScript for frontend pre-flight

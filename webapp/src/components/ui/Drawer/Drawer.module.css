@@ -12,6 +12,39 @@
     transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Disable transitions while user is dragging the resize handle */
+.drawerResizing,
+.drawerResizing.drawerPush.drawerOpen,
+.drawerResizing.drawerOverlay {
+  transition: none;
+}
+
+/* Resize handle */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 20;
+  touch-action: none;
+}
+
+.resizeHandleRight {
+  right: 0;
+}
+
+.resizeHandleLeft {
+  left: 0;
+}
+
+.resizeHandle:hover,
+.resizeHandleActive {
+  background: var(--border-focus, var(--accent-primary, #3b82f6));
+  opacity: 0.6;
+}
+
 /* Push mode - uses width transition */
 .drawerPush {
   width: 0;
@@ -106,6 +139,14 @@
   white-space: nowrap;
   flex: 1;
   margin-right: var(--space-3);
+}
+
+.drawerHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: var(--space-2);
+  flex-shrink: 0;
 }
 
 .drawerClose {

@@ -142,6 +142,7 @@ IMAGES=(
     "jauderho/hakrawler:latest"
     "projectdiscovery/uncover:latest"
     "dolevf/graphql-cop:1.14"
+    "ghcr.io/zaproxy/zaproxy:stable"
 )
 
 for IMAGE in "${IMAGES[@]}"; do

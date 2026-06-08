@@ -204,6 +204,40 @@ async def fireteam_collect_node(
 
     summary = _render_summary(fireteam_id, results)
 
+    # Build a structured wave-completion entry for chain_waves_memory. Written
+    # unconditionally (even for zero-finding waves) so the next root think_node
+    # has evidence the wave ran — without this, the planner would see the same
+    # chain context a brand-new session sees and redeploy an identical plan.
+    plan_members_by_name: dict = {}
+    plan = state.get("_current_fireteam_plan") or {}
+    for spec in (plan.get("members") or []):
+        nm = (spec.get("name") or "").strip()
+        if nm:
+            plan_members_by_name[nm] = spec
+    wave_entry = {
+        "wave_id": fireteam_id,
+        "completed_at_iteration": state.get("current_iteration", 0),
+        "n_members": len(results),
+        "n_success": sum(1 for r in results if r.get("status") == "success"),
+        "n_timeout": sum(1 for r in results if r.get("status") == "timeout"),
+        "n_error":   sum(1 for r in results if r.get("status") == "error"),
+        "total_findings": findings_added,
+        "members": [
+            {
+                "name": (r.get("name") or "(unnamed)"),
+                "task_summary": (
+                    (plan_members_by_name.get((r.get("name") or "").strip(), {}).get("task") or "")
+                )[:200],
+                "status": r.get("status", "unknown"),
+                "iterations_used": int(r.get("iterations_used", 0) or 0),
+                "findings_count": len(r.get("findings") or []),
+                "completion_reason": (r.get("completion_reason") or ""),
+            }
+            for r in results
+        ],
+    }
+    chain_waves = list(state.get("chain_waves_memory") or []) + [wave_entry]
+
     # Collect every member that escalated. Per FIRETEAM.md §20 Q3, v1 surfaces
     # each one sequentially (not coalesced) so the operator decides each in
     # turn. We queue all of them now; the first drains into
@@ -248,6 +282,7 @@ async def fireteam_collect_node(
     update: dict = {
         "target_info": merged_target_info,
         "chain_findings_memory": chain_findings,
+        "chain_waves_memory": chain_waves,
         "_current_fireteam_plan": None,
         "_current_fireteam_results": None,
         "todo_list": updated_todos,

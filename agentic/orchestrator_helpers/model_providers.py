@@ -270,7 +270,7 @@ async def fetch_deepseek_models(api_key: str = "") -> list[dict]:
                 description="DeepSeek",
             ))
     except Exception as e:
-        logger.warning(f"DeepSeek /v1/models unreachable, using fallback list: {e}")
+        logger.warning(f"DeepSeek /v1/models unreachable, using fallback list: {type(e).__name__}: {e}")
 
     if not discovered:
         for mid, mname in _DEEPSEEK_FALLBACK_MODELS:
@@ -307,7 +307,7 @@ async def _fetch_openai_compat_models(
             resp.raise_for_status()
         data = resp.json().get("data", [])
     except Exception as e:
-        logger.warning(f"{id_prefix} /models unreachable: {e}")
+        logger.warning(f"{id_prefix} /models unreachable: {type(e).__name__}: {e}")
         return []
 
     models = []
@@ -392,32 +392,75 @@ async def fetch_gemini_models(api_key: str = "") -> list[dict]:
 # ---------------------------------------------------------------------------
 # AWS Bedrock
 # ---------------------------------------------------------------------------
+_BEDROCK_BEARER_ENV_LOCK = None
+
+
+def _get_bedrock_bearer_lock():
+    """Lazy singleton — avoids importing threading at module load."""
+    global _BEDROCK_BEARER_ENV_LOCK
+    if _BEDROCK_BEARER_ENV_LOCK is None:
+        import threading
+        _BEDROCK_BEARER_ENV_LOCK = threading.Lock()
+    return _BEDROCK_BEARER_ENV_LOCK
+
+
 async def fetch_bedrock_models(
     region: str = "",
     access_key_id: str = "",
     secret_access_key: str = "",
+    bearer_token: str = "",
 ) -> list[dict]:
-    """Fetch foundation models from AWS Bedrock."""
+    """Fetch foundation models from AWS Bedrock.
+
+    Auth mode is picked from the supplied credentials:
+      - bearer_token non-empty -> Bedrock long-term API key (boto3 >= 1.39
+        reads ``AWS_BEARER_TOKEN_BEDROCK`` from env to bake bearer auth into
+        the client at construction time).
+      - else IAM access key + secret (SigV4).
+    """
     import asyncio
+    import os
 
     if not region:
         region = "us-east-1"
 
-    if not access_key_id or not secret_access_key:
+    if not bearer_token and (not access_key_id or not secret_access_key):
         return []
 
     def _list_models() -> list[dict]:
         import boto3
-        client = boto3.client(
-            "bedrock",
-            region_name=region,
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
-        )
-        response = client.list_foundation_models(
-            byOutputModality="TEXT",
-            byInferenceType="ON_DEMAND",
-        )
+        if bearer_token:
+            # boto3 has no direct kwarg for the Bedrock bearer token. Botocore
+            # consults AWS_BEARER_TOKEN_BEDROCK lazily on the first request
+            # (not at client construction), so the env var must stay set across
+            # the actual list_foundation_models call. A lock keeps the env var
+            # from leaking to concurrent requests.
+            lock = _get_bedrock_bearer_lock()
+            with lock:
+                prev = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+                os.environ["AWS_BEARER_TOKEN_BEDROCK"] = bearer_token
+                try:
+                    client = boto3.client("bedrock", region_name=region)
+                    response = client.list_foundation_models(
+                        byOutputModality="TEXT",
+                        byInferenceType="ON_DEMAND",
+                    )
+                finally:
+                    if prev is None:
+                        os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
+                    else:
+                        os.environ["AWS_BEARER_TOKEN_BEDROCK"] = prev
+        else:
+            client = boto3.client(
+                "bedrock",
+                region_name=region,
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+            )
+            response = client.list_foundation_models(
+                byOutputModality="TEXT",
+                byInferenceType="ON_DEMAND",
+            )
         summaries = response.get("modelSummaries", [])
 
         results = []
@@ -511,6 +554,7 @@ async def fetch_all_models(
                 region=p.get("awsRegion", "us-east-1"),
                 access_key_id=p.get("awsAccessKeyId", ""),
                 secret_access_key=p.get("awsSecretKey", ""),
+                bearer_token=p.get("awsBearerToken", ""),
             )
         elif ptype == "openai_compatible":
             # Single model entry — no discovery needed
@@ -539,7 +583,7 @@ async def fetch_all_models(
         gathered_db = await asyncio.gather(*coro_tasks.values(), return_exceptions=True)
         for prov_name, result in zip(coro_tasks.keys(), gathered_db):
             if isinstance(result, Exception):
-                logger.warning(f"Failed to fetch models from {prov_name}: {result}")
+                logger.warning(f"Failed to fetch models from {prov_name}: {type(result).__name__}: {result}")
                 results_db[prov_name] = []
             else:
                 results_db[prov_name] = result

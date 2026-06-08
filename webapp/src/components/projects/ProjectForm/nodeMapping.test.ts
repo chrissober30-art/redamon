@@ -20,6 +20,13 @@ describe('GraphqlScan node mapping', () => {
   })
 })
 
+describe('ZapAjaxSpider node mapping', () => {
+  test('consumes BaseURL + Endpoint and produces crawl graph nodes', () => {
+    expect(SECTION_INPUT_MAP.ZapAjaxSpider).toEqual(['BaseURL', 'Endpoint'])
+    expect(SECTION_NODE_MAP.ZapAjaxSpider).toEqual(['Endpoint', 'Parameter', 'BaseURL', 'ExternalDomain'])
+  })
+})
+
 describe('GraphqlScan workflow definition', () => {
   const tool = WORKFLOW_TOOLS.find(t => t.id === 'GraphqlScan')
 

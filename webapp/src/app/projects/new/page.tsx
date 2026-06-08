@@ -33,6 +33,19 @@ export default function NewProjectPage() {
       roeFile,
     })
 
+    // Remember the chosen models so the next new project pre-fills them.
+    // Fire-and-forget: a failure here must not block project creation.
+    if (projectData.agentOpenaiModel && projectData.aiPipelineModel) {
+      fetch(`/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          defaultAgentModel: projectData.agentOpenaiModel,
+          defaultAiPipelineModel: projectData.aiPipelineModel,
+        }),
+      }).catch(() => {})
+    }
+
     setCurrentProject({
       id: project.id,
       name: project.name,

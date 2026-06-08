@@ -481,7 +481,7 @@ FOR (c:Certificate) REQUIRE (c.subject_cn, c.user_id, c.project_id) IS UNIQUE;
 ---
 
 ### 8. Endpoint
-Specific web application endpoints (paths) discovered through Katana crawling, Hakrawler crawling, ParamSpider parameter mining, jsluice JavaScript analysis, or vulnerability scanning.
+Specific web application endpoints (paths) discovered through Katana crawling, Hakrawler crawling, ZAP Ajax Spider browser-driven crawling, ParamSpider parameter mining, jsluice JavaScript analysis, or vulnerability scanning.
 These are linked to their parent BaseURL and contain discovered parameters.
 
 ```cypher
@@ -544,7 +544,7 @@ FOR (e:Endpoint) REQUIRE (e.path, e.method, e.baseurl, e.user_id, e.project_id) 
 
 ### 8. Parameter
 URL parameters that represent potential attack vectors. These are discovered through Katana crawling,
-Hakrawler crawling, ParamSpider passive parameter mining, jsluice JavaScript analysis, and marked as injectable when vulnerabilities are found through DAST scanning.
+Hakrawler crawling, ZAP Ajax Spider browser-driven crawling, ParamSpider passive parameter mining, jsluice JavaScript analysis, and marked as injectable when vulnerabilities are found through DAST scanning.
 
 ```cypher
 (:Parameter {
@@ -1138,7 +1138,7 @@ to or what domains share certificates/hosting with the target.
 | Property | Type | Description |
 |----------|------|-------------|
 | `domain` | String | Foreign domain name (UNIQUE per tenant) |
-| `sources` | String[] | Discovery sources: http_probe_redirect, urlscan, gau, katana, hakrawler, jsluice, cert_discovery |
+| `sources` | String[] | Discovery sources: http_probe_redirect, urlscan, gau, katana, hakrawler, jsluice, zap_ajax_spider, cert_discovery |
 | `first_seen_at` | DateTime | When first encountered |
 | `redirect_from_urls` | String[] | In-scope URLs that redirected to this domain |
 | `redirect_to_urls` | String[] | The actual foreign URLs encountered |
@@ -2447,7 +2447,8 @@ The `JsReconFinding` label is used for two sub-types:
   id: "jsrf-{user_id}-{project_id}-{hash}",
   user_id: "{user_id}",
   project_id: "{project_id}",
-  finding_type: "dependency_confusion|source_map_exposure|dom_sink|framework|dev_comment|source_map_reference",
+  finding_type: "dependency_confusion|source_map_exposure|dom_sink|framework|dev_comment|source_map_reference
+                | ai-sdk-client | ai-sdk-key-literal | ai-sdk-browser-allowed | ai-frontend-detected | ai-provider-url",
   severity: "critical|high|medium|low|info",
   confidence: "high|medium|low",
   title: "Human-readable finding title",
@@ -2456,14 +2457,20 @@ The `JsReconFinding` label is used for two sub-types:
   source_url: "JS file URL where finding was discovered",
   base_url: "Parent BaseURL or 'upload'",
   source: "js_recon",
-  discovered_at: "ISO timestamp"
+  discovered_at: "ISO timestamp",
+  -- ai-sdk-* findings carry additional fields:
+  sdk_name: "OpenAI | Anthropic | LangChain Core | Pinecone | Open WebUI | ..." -- canonical product name
+  ai_provider: "<same as sdk_name>" -- mirror property for prefix-consistent queries (`WHERE jf.ai_provider IS NOT NULL`)
+  sample: "abc123...xyz9" -- redacted key (first6 + last4), empty for non-key categories. Never the full secret.
+  byte_offset: 12345 -- position in source JS, stable across re-scans (id is derived from sig including offset)
+  detection_method: "ai_sdk_catalogue" -- distinguishes from "regex" used by the legacy secret pass
 })
 ```
 
 **Relationships (hierarchical: parent -> file -> findings):**
 - `BaseURL -[:HAS_JS_FILE]-> JsReconFinding(js_file)` -- pipeline-crawled JS files
 - `Domain -[:HAS_JS_FILE]-> JsReconFinding(js_file)` -- uploaded JS files
-- `JsReconFinding(js_file) -[:HAS_JS_FINDING]-> JsReconFinding` -- findings from that file
+- `JsReconFinding(js_file) -[:HAS_JS_FINDING]-> JsReconFinding` -- findings from that file (includes ai-sdk-* findings)
 - `JsReconFinding(js_file) -[:HAS_SECRET]-> Secret` -- secrets found in that file
 - `JsReconFinding(js_file) -[:HAS_ENDPOINT]-> Endpoint` -- endpoints extracted from that file
 
@@ -2475,6 +2482,14 @@ JS Recon secrets extend the existing Secret node with:
 - `confidence`: high, medium, low
 - `detection_method`: regex
 - `key_type`: category (cloud, payment, auth, js_service, etc.)
+- `ai_provider`: (Phase 6) canonical AI provider product name when the secret matches an AI key shape AND the parent JS file
+  also has an ai-sdk-key-literal finding for the same captured value. Lets generic Secret queries pivot directly into
+  the AI-context taxonomy. Example values: `"OpenAI SDK constructor"`, `"Anthropic SDK constructor"`, `"Langfuse Secret Key"`.
+  Only set on Secret nodes whose `matched_text` starts with a known AI provider prefix (`sk-`, `hf_`, `lsv2_`, `gsk_`,
+  `r8_`, `pcsk_`, `pplx-`, `xai-`, `csk-`, `tgp_`, `pa-`, `AIzaSy`, `co_`, `rpa_`, `pk-lf-`, `fw_`) -- guarded to avoid
+  enriching Stripe / Slack / AWS literals that happen to co-locate in the same JS file.
+- `ai_finding_id`: foreign key into the matching `JsReconFinding(finding_type='ai-sdk-key-literal')` node for full
+  provenance (SDK constructor span, byte offset, sdk_name).
 
 ### Constraints & Indexes
 
@@ -2803,6 +2818,130 @@ MATCH (ac:AttackChain {chain_id: "session-123", user_id: $userId, project_id: $p
 RETURN d.decision_type, d.from_state, d.to_state, d.reason, d.made_by, d.approved
 ORDER BY s.iteration
 ```
+
+---
+
+## 🤖 AI Surface Annotations
+
+The adversarial-AI surface recon (see `internal/ADVERSARIAL_AI/AI_SURFACE_RECON.md`) lands as **property additions on existing nodes** plus new instances on existing labels. **Zero new node labels are introduced.**
+
+### Naming convention — prefix-based discovery
+
+Every property added by the AI recon path carries one of two prefixes so the agent's text-to-cypher path can identify AI annotations *structurally* instead of from an enumerated allow-list:
+
+| Pattern | When | Example |
+|---|---|---|
+| `ai_*` | Non-boolean AI property whose name alone wouldn't make its AI nature obvious | `ai_framework_name`, `ai_runtime_version`, `ai_service_hint`, `ai_frontend_product_guess` |
+| `is_ai_*` | AI boolean classifier (matches the existing `is_*` boolean convention) | `is_ai_framework_detected` |
+| Value-prefixed (no field rename) | The host module already owns a generic field (`Technology.category`, etc.). We add new *values* whose own prefix (`ai-`, `llm-`, `AML.T`) signals the AI nature | `Technology.category="ai-runtime"` |
+
+Once this rule is in the agent's text-to-cypher prompt, future AI properties added by later laps inherit semantic accessibility for free:
+
+```cypher
+// Any node carrying any AI annotation
+MATCH (n) WHERE any(k IN keys(n) WHERE k STARTS WITH 'ai_' OR k STARTS WITH 'is_ai_')
+  AND n.project_id = $pid
+RETURN labels(n) AS label, count(*) AS n
+```
+
+### Property additions (lap 1 — domain_recon + port_scan + http_probe)
+
+| Node label | New property | Type | Written by |
+|---|---|---|---|
+| `Subdomain` | `ai_service_hint` | string (provider name like `"anthropic"`, `"replicate"`, `"huggingface"`, or `"ai-hosting-candidate"`) | `domain_recon` (TXT / NS regex against `AI_TXT_PATTERNS` and `AI_NS_HINT_PATTERNS`) |
+| `Service` | `ai_runtime_version` | string (e.g. `"ollama"`, `"vllm"`, `"litellm"`, `"tgi"`) | `nmap_scan` (regex over nmap product/version field) |
+| `Endpoint` | `is_ai_framework_detected` | bool | `http_probe` (any of: header match, favicon hash hit, title regex hit) |
+| `Endpoint` | `ai_framework_name` | string (e.g. `"langchain"`, `"vllm"`, `"litellm"`) | `http_probe` (header signature winner) |
+| `Endpoint` | `ai_frontend_product_guess` | string (e.g. `"open-webui"`, `"flowise"`, `"gradio"`) | `http_probe` (favicon hash or title regex; favicon wins) |
+| `Endpoint` | `ai_interface_type` | enum (`"llm-chat"`, `"llm-completion"`, `"llm-embedding"`, `"llm-tool-call"`, `"sse-stream"`, `"mcp"`, `"llm-graphql"`, `"non-llm"`) | `resource_enum` (path regex against `AI_PATH_PATTERNS`) |
+| `Endpoint` | `is_ai_rag_ingest` | bool | `resource_enum` (path regex against `AI_RAG_PATH_PATTERNS`; ambiguous paths gated on parent BaseURL being AI-tagged) |
+| `Parameter` | `is_ai_prompt_injectable` | bool | `resource_enum` (name in `AI_PARAM_NAMES` AND parent Endpoint AI-classified) |
+| `Parameter` | `ai_tool_arg_path` | string (JSON Pointer e.g. `"/parameters/properties/query"`) | reserved for central `ai_surface_recon` module — resolves against discovered OpenAPI / `ai-plugin.json` / MCP `tools/list` specs |
+
+> **Patch D model split (May 2026)**: AI annotations now live on `Endpoint` rather than `BaseURL`. `BaseURL` was redefined as host-level (`scheme://host:port`) — one per HTTP service — and `Endpoint` carries each probed path's status/headers/title/AI signals. Endpoints reach their parent via `(BaseURL)-[:HAS_ENDPOINT]->(Endpoint)`, or directly via `Endpoint.baseurl` property. The `USES_TECHNOLOGY` edge from `http_probe` also moved to `Endpoint`.
+
+### Value-prefixed reused fields (lap 1)
+
+| Node label | Field (existing) | New AI-prefixed values added | Written by |
+|---|---|---|---|
+| `Technology` | `category` | `ai-framework`, `ai-runtime`, `ai-vector-db`, `ai-proxy`, `ai-sdk-client`, `ai-frontend`, `ai-mlops` (existing non-AI values untouched). `ai-mlops` covers experiment-tracking / observability surfaces: MLflow, Langfuse, Phoenix-Arize, Ray Dashboard, Argilla, AutoGen Studio. | `port_scan` / `http_probe` |
+| `Technology` relationship `:USES_TECHNOLOGY` | `detected_by` | `naabu-ai-port`, `masscan-ai-port`, `httpx-ai-header`, `httpx-ai-favicon`, `httpx-ai-title` | `port_scan` / `masscan_scan` / `http_probe` |
+
+### Relationships reused — no new edge types
+
+- `(Service)-[:USES_TECHNOLOGY]->(Technology)` and `(Port)-[:HAS_TECHNOLOGY]->(Technology)` — existing relationships used by `port_mixin.py`. The AI hook MERGEs new Technology nodes with `category` in `ai-*` and links via the existing relationship type, distinguished by the new `detected_by` property value.
+- `(Endpoint)-[:USES_TECHNOLOGY {confidence, detected_by}]->(Technology)` — existing relationship used by `http_mixin.py`. Patch D moved this edge from `BaseURL` to `Endpoint` so the per-path Technology signal lines up with the per-path AI annotations. The `BaseURL` carries no `USES_TECHNOLOGY` edges from `http_probe`.
+
+### Useful query patterns
+
+```cypher
+// All AI endpoints (Patch D: AI annotations live on Endpoint, BaseURL hosts the service)
+MATCH (b:BaseURL)-[:HAS_ENDPOINT]->(e:Endpoint)
+WHERE e.is_ai_framework_detected = true
+  AND e.project_id = $pid
+RETURN b.url AS base_url, e.path, e.ai_framework_name, e.ai_frontend_product_guess
+
+// AI Technology rollup (frameworks/runtimes/vector-dbs/frontends/proxies)
+MATCH (t:Technology) WHERE t.category STARTS WITH 'ai-'
+  AND t.project_id = $pid
+RETURN t.category, t.name, count(*) AS instances
+
+// Hosts with DNS evidence of an AI provider (before any port/HTTP probe)
+MATCH (s:Subdomain) WHERE s.ai_service_hint IS NOT NULL
+  AND s.project_id = $pid
+RETURN s.name, s.ai_service_hint
+
+// Vector databases exposed (via port_scan AI port catalogue)
+MATCH (svc:Service)-[:USES_TECHNOLOGY]->(t:Technology)
+WHERE t.category = 'ai-vector-db' AND svc.project_id = $pid
+RETURN svc.port, t.name, svc.host
+```
+
+### Property additions (central ai_surface_recon lap — active probing)
+
+Written by `recon/main_recon_modules/ai_surface_recon.py` (full pipeline,
+display Phase 4.5) and its partial-recon twin, via
+`update_graph_from_ai_surface_recon`. All COALESCE-merged. See
+[AI_SURFACE_RECON_MODULE.md](AI_SURFACE_RECON_MODULE.md) for the full module
+walkthrough (per-workload input/output nodes, settings, developer guide).
+
+| Node label | New property | Type | Meaning |
+|---|---|---|---|
+| `Endpoint` | `ai_supports_tools` | bool | tool-call schema present in a discovered OpenAPI / ai-plugin spec |
+| `Endpoint` | `ai_supports_vision` | bool | image content type present in spec |
+| `Endpoint` | `ai_supports_streaming` | bool | SSE confirmed by chat-shape probe **or** advertised by a discovered OpenAPI spec |
+| `Endpoint` | `ai_model_family_guess` | string (`gpt`/`claude`/`llama`/…) | from `/v1/models`, `/api/tags`, or Julius extract |
+| `Endpoint` | `ai_model_ids` | string[] (≤50) | deployed model ids from `/v1/models` + Julius extract (deduped) |
+| `Endpoint` | `ai_tool_schema_ref` | string (path) | cached OpenAPI/manifest spec on disk; read by the resource_enum tool-arg resolver |
+| `Endpoint` | `ai_latency_p50_ms` | float | p50 latency from the 1-token chat ping |
+| `Endpoint` | `ai_mcp_server_name` / `ai_mcp_server_version` / `ai_mcp_protocol_version` | string | MCP `InitializeResult` serverInfo + negotiated version |
+| `Endpoint` | `ai_mcp_tool_count` / `ai_mcp_resource_count` / `ai_mcp_prompt_count` | int | MCP manifest sizes |
+| `Endpoint` | `ai_mcp_caps` | string[] | advertised MCP capabilities (`tools`/`resources`/`prompts`/…) |
+| `Endpoint` | `ai_mcp_auth_required` | bool | 401 + `WWW-Authenticate` on the MCP endpoint |
+| `Endpoint` | `ai_mcp_tools_hash` / `ai_mcp_instructions_hash` | string (sha256) | rug-pull pins — change across scans flags a sleeper/rug-pull |
+| `Parameter` | `ai_tool_arg_path` | string (JSON Pointer) | now populated for MCP tool args (`/inputSchema/properties/<arg>`) |
+| `Technology` | `category="ai-vector-db"` via `USES_TECHNOLOGY {detected_by="ai-surface-recon-probe"}` | — | confirmed by a benign read against Chroma/Qdrant/Weaviate/Milvus |
+| `Technology` | `category="ai-*"` (e.g. `ai-runtime`) via `USES_TECHNOLOGY {detected_by="ai-surface-recon-julius"}` | — | AI service software (Ollama, vLLM, LiteLLM, …) confirmed by the Julius fingerprint pack, linked to the host Endpoint |
+
+**New `Vulnerability` source — `ai_surface_recon`** (MCP static findings):
+`type` ∈ {`mcp_tool_poisoning`, `mcp_prompt_injection`, `mcp_data_exfiltration`,
+`mcp_command_injection`, `mcp_code_execution`, `mcp_credential_harvesting`,
+`mcp_annotation_mismatch`}; carries `ai_owasp_llm_id`, `ai_atlas_technique`,
+`ai_payload_class="mcp_static"`, `evidence` (YARA matched string + offset).
+Deterministic `id` (`aisr_<sha16>`); linked to the MCP `Endpoint` via
+`HAS_VULNERABILITY` (fallback BaseURL → Subdomain → Domain).
+
+### Properties reserved for later laps
+
+Documented here so the prefix convention stays coherent as later laps land. Empty / `IS NULL` until the relevant lap ships.
+
+| Node label | Reserved property | Lap |
+|---|---|---|
+| `Vulnerability` | `ai_asr`, `ai_trials`, `ai_oracle_kind`, `ai_transcript_ref` | ai_guardrail_probe lap |
+| `CVE` | `is_ai_library` | vuln_scan AI library lookup lap |
+| `Secret` / `TrufflehogFinding` / `GithubSecret` | `ai_provider` | trufflehog / github-secret-hunt AI detector lap |
+| `JsReconFinding` | `finding_type` values `ai-sdk-client`, `ai-sdk-key-literal`, `ai-sdk-browser-allowed`, `ai-frontend-detected` | js_recon AI SDK lap |
+| `MitreData` | `id` starting with `AML.T` | add_mitre ATLAS lap |
 
 ---
 

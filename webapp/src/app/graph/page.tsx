@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GraphToolbar } from './components/GraphToolbar'
+import { FileSystemDrawer } from './components/FileSystemDrawer'
 import { GraphCanvas, AUTO_2D_THRESHOLD } from './components/GraphCanvas'
 import { NodeDrawer } from './components/NodeDrawer'
 import { AIAssistantDrawer } from './components/AIAssistantDrawer'
@@ -29,6 +30,8 @@ import {
   ThreatIntelTable,
   SupplyChainTable,
   DnsDriftTable,
+  AiSurfaceTable,
+  AiRiskTable,
 } from './components/RedZoneTables'
 import { ActiveSessions } from './components/ActiveSessions'
 import { RoeViewer } from './components/RoeViewer'
@@ -70,6 +73,7 @@ export default function GraphPage() {
     setShowLabels,
   } = useGraphViewPrefs(projectId)
   const [isAIOpen, setIsAIOpen] = useState(false)
+  const [isFileSystemOpen, setIsFileSystemOpen] = useState(false)
   const [isReconModalOpen, setIsReconModalOpen] = useState(false)
   const [activeLogsDrawer, setActiveLogsDrawer] = useState<'recon' | 'gvm' | 'githubHunt' | 'trufflehog' | `partialRecon:${string}` | null>(null)
   const [hasReconData, setHasReconData] = useState(false)
@@ -94,6 +98,19 @@ export default function GraphPage() {
     expandChild,
     collapseChild,
   } = useNodeSelection()
+  // Toggle the FS drawer. Opening must close the node drawer first - both
+  // live on the left edge of the graph; otherwise the FS would slide over
+  // the node panel and the user would see a confusing stack.
+  const toggleFileSystemDrawer = useCallback(() => {
+    setIsFileSystemOpen(prev => {
+      if (!prev) clearSelection()
+      return !prev
+    })
+  }, [clearSelection])
+  const handleNodeClick = useCallback((node: Parameters<typeof selectNode>[0]) => {
+    setIsFileSystemOpen(false)
+    selectNode(node)
+  }, [selectNode])
   const dimensions = useDimensions(contentRef)
 
   // Close all drawers when project changes
@@ -913,22 +930,6 @@ export default function GraphPage() {
     }
   }, [projectId, currentProject, setCurrentProject])
 
-  const handleToggleDeepThink = useCallback(async (newValue: boolean) => {
-    if (!projectId) return
-    try {
-      const res = await fetch(`/api/projects/${projectId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentDeepThinkEnabled: newValue }),
-      })
-      if (res.ok && currentProject) {
-        setCurrentProject({ ...currentProject, agentDeepThinkEnabled: newValue })
-      }
-    } catch (error) {
-      console.error('Failed to toggle deep think:', error)
-    }
-  }, [projectId, currentProject, setCurrentProject])
-
   const handleModelChange = useCallback(async (modelId: string) => {
     if (!projectId) return
     try {
@@ -1163,6 +1164,8 @@ export default function GraphPage() {
         onToggleLabels={setShowLabels}
         onToggleAI={handleToggleAI}
         isAIOpen={isAIOpen}
+        onOpenFileSystem={toggleFileSystemDrawer}
+        isFileSystemOpen={isFileSystemOpen}
         // Target info
         targetDomain={currentProject?.targetDomain}
         subdomainList={currentProject?.subdomainList}
@@ -1325,7 +1328,7 @@ export default function GraphPage() {
               height={dimensions.height}
               showLabels={showLabels}
               selectedNode={selectedNode}
-              onNodeClick={selectNode}
+              onNodeClick={handleNodeClick}
               isDark={isDark}
               activeChainId={sessionId}
             />
@@ -1349,6 +1352,10 @@ export default function GraphPage() {
               />
             ) : tableViewMode === 'jsRecon' ? (
               <JsReconTable projectId={projectId} search={jsReconSearch} onDataLoaded={setJsReconData} />
+            ) : tableViewMode === 'aiSurface' ? (
+              <AiSurfaceTable projectId={projectId} />
+            ) : tableViewMode === 'aiRisk' ? (
+              <AiRiskTable projectId={projectId} />
             ) : tableViewMode === 'killChain' ? (
               <KillChainTable projectId={projectId} />
             ) : tableViewMode === 'blastRadius' ? (
@@ -1506,14 +1513,19 @@ export default function GraphPage() {
         toolPhaseMap={currentProject?.agentToolPhaseMap}
         stealthMode={currentProject?.stealthMode}
         onToggleStealth={handleToggleStealth}
-        deepThinkEnabled={currentProject?.agentDeepThinkEnabled}
-        onToggleDeepThink={handleToggleDeepThink}
         onRefetchGraph={refetchGraph}
         isOtherChainsHidden={isOtherChainsHidden}
         onToggleOtherChains={handleToggleOtherChains}
         hasOtherChains={sessionChainIds.length > 1 || (sessionChainIds.length === 1 && sessionChainIds[0] !== sessionId)}
         requireToolConfirmation={currentProject?.agentRequireToolConfirmation ?? true}
         graphViewCypher={selectedFilterCypher}
+        onOpenFileSystem={toggleFileSystemDrawer}
+      />
+
+      <FileSystemDrawer
+        isOpen={isFileSystemOpen}
+        onClose={() => setIsFileSystemOpen(false)}
+        projectId={projectId || ''}
       />
 
       <ReconConfirmModal

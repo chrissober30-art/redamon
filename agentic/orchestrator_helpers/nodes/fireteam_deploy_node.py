@@ -24,7 +24,7 @@ from uuid import uuid4
 import httpx
 from langchain_core.messages import SystemMessage
 
-from state import AgentState, FireteamMemberResult
+from state import AgentState, FireteamMemberResult, ChainFindingExtract
 from orchestrator_helpers.config import get_identifiers
 from project_settings import get_setting, TOOL_MUTEX_GROUPS
 from tools import set_tenant_context, set_phase_context, set_graph_view_context
@@ -78,25 +78,6 @@ def _validate_mutex_groups(plan_members: list) -> Optional[str]:
     return None
 
 
-def _snapshot_parent_trace(parent_state: AgentState) -> list[dict]:
-    """Capture the parent's execution_trace plus any `_completed_step` not
-    yet merged in. Defensive against the iteration-edge case where think_node
-    decides deploy_fireteam in the same call that finalizes the prior tool's
-    output: depending on langgraph's update merge order, the freshly-analyzed
-    step may live in `_completed_step` while the trace itself still reflects
-    the pre-iteration state."""
-    trace = list(parent_state.get("execution_trace") or [])
-    completed = parent_state.get("_completed_step")
-    if completed:
-        completed_id = completed.get("step_id")
-        already_in_trace = any(
-            (s or {}).get("step_id") == completed_id for s in trace
-        ) if completed_id else False
-        if not already_in_trace:
-            trace = trace + [completed]
-    return trace
-
-
 def _build_member_state(
     parent_state: AgentState,
     spec: dict,
@@ -130,7 +111,7 @@ def _build_member_state(
         len(((parent_state.get("_current_fireteam_plan") or {}).get("members") or [])) - 1,
     )
     logger.info(
-        "[%s] member=%s SNAPSHOT parent counts: findings=%d failures=%d decisions=%d trace=%d target_keys=%d peers=%d _completed_step=%s",
+        "[%s] member=%s SNAPSHOT parent counts: findings=%d failures=%d decisions=%d trace=%d target_keys=%d peers=%d",
         parent_state.get("session_id", "?"),
         member_id,
         len(parent_state.get("chain_findings_memory") or []),
@@ -139,7 +120,6 @@ def _build_member_state(
         len(parent_state.get("execution_trace") or []),
         len(parent_state.get("target_info") or {}),
         _peer_count,
-        bool(parent_state.get("_completed_step")),
     )
 
     base: dict = {
@@ -174,18 +154,10 @@ def _build_member_state(
         # attribution), failed attempts, decisions, and recent tool outputs
         # instead of a 200-char-per-step trace that omits the artifacts they
         # need (captured JWTs, cleared endpoints, registered users, etc.).
-        #
-        # Edge case: when the parent decides to deploy_fireteam in the same
-        # think_node iteration that processes the prior tool's output, the
-        # latest step may live in `_completed_step` while `execution_trace`
-        # still reflects the pre-iteration state (depending on how langgraph
-        # serialized the updates between nodes). Belt-and-suspenders: merge
-        # `_completed_step` into the snapshot if it's not already in the
-        # trace. Dedup by step_id.
         "_parent_chain_findings": list(parent_state.get("chain_findings_memory") or []),
         "_parent_chain_failures": list(parent_state.get("chain_failures_memory") or []),
         "_parent_chain_decisions": list(parent_state.get("chain_decisions_memory") or []),
-        "_parent_execution_trace": _snapshot_parent_trace(parent_state),
+        "_parent_execution_trace": list(parent_state.get("execution_trace") or []),
 
         # Sibling member specs for this wave (everyone in the plan except this
         # member). Rendered into the system prompt as an "out of scope" block
@@ -297,22 +269,30 @@ def _result_from_final_state(final_state: dict, spec: dict, member_id: str, wall
     # report pipeline joins there directly — this field is a best-effort
     # denormalization for the FireteamMember.resultBlob dump.
     findings = []
-    try:
-        from state import ChainFindingExtract
-        for f in (final_state.get("chain_findings_memory") or []):
-            if isinstance(f, dict):
-                findings.append(ChainFindingExtract(
-                    finding_type=f.get("finding_type", "custom"),
-                    severity=f.get("severity", "info"),
-                    title=f.get("title", ""),
-                    evidence=f.get("evidence", ""),
-                    related_cves=f.get("related_cves") or [],
-                    related_ips=f.get("related_ips") or [],
-                    confidence=f.get("confidence", 80),
-                    step_iteration=int(f.get("step_iteration") or 0),
-                ))
-    except Exception as e:
-        logger.debug("findings conversion skipped: %s", e)
+    for f in (final_state.get("chain_findings_memory") or []):
+        if not isinstance(f, dict):
+            continue
+        try:
+            findings.append(ChainFindingExtract(
+                finding_type=f.get("finding_type", "custom"),
+                severity=f.get("severity", "info"),
+                title=f.get("title", ""),
+                evidence=f.get("evidence", ""),
+                related_cves=f.get("related_cves") or [],
+                related_ips=f.get("related_ips") or [],
+                confidence=f.get("confidence", 80),
+                step_iteration=int(f.get("step_iteration") or 0),
+            ))
+        except Exception as e:
+            # Per-item try/except: one malformed dict no longer drops the
+            # rest of the batch. Warning level so failures are visible on
+            # the default console handler (CONSOLE_LOG_LEVEL is INFO).
+            # Offending dict is truncated to keep logs bounded when evidence
+            # fields carry large blobs.
+            logger.warning(
+                "findings conversion skipped one item: %s; offending=%s",
+                e, str(f)[:300],
+            )
 
     return FireteamMemberResult(
         member_id=member_id,
@@ -359,6 +339,38 @@ def _timeout_result(spec: dict, member_id: str, wall_s: float) -> dict:
         tokens_used=0,
         wall_clock_seconds=round(wall_s, 3),
     ).model_dump()
+
+
+def _timeout_result_from_snapshot(
+    snapshot: Optional[dict],
+    spec: dict,
+    member_id: str,
+    wall_s: float,
+) -> dict:
+    """Build a timeout-labeled result from an in-flight member snapshot.
+
+    The wave-timeout handler cancels in-flight tasks, which destroys the
+    closure-local ``final_state`` inside ``_run_one``. To preserve real
+    iteration/token/findings counts for productive work done before the
+    cancellation, ``_run_one`` registers a reference to its ``final_state``
+    in the outer-scope ``member_snapshots`` dict at startup; the in-place
+    ``.update(node_update)`` calls during the astream loop keep that
+    reference current. Here we reuse ``_result_from_final_state`` to extract
+    those counts and then override status/completion_reason to mark the
+    member as timed out.
+
+    Falls back to the all-zeros ``_timeout_result`` when no snapshot exists
+    (member cancelled before any state update).
+    """
+    if not snapshot:
+        return _timeout_result(spec, member_id, wall_s)
+    result = _result_from_final_state(snapshot, spec, member_id, wall_s)
+    result["status"] = "timeout"
+    result["completion_reason"] = "wave_timeout"
+    # Suppress any pending operator-approval signal: the member is
+    # terminating, not awaiting confirmation.
+    result["pending_confirmation"] = None
+    return result
 
 
 def _error_result(spec: dict, member_id: str, exc: BaseException, wall_s: float) -> dict:
@@ -482,7 +494,9 @@ async def fireteam_deploy_node(
     plan_data["fireteam_id"] = fireteam_id_key
 
     max_concurrent = get_setting("FIRETEAM_MAX_CONCURRENT", 3)
-    timeout_s = get_setting("FIRETEAM_TIMEOUT_SEC", 1800)
+    # Fallback matches project_settings.py DEFAULT_AGENT_SETTINGS; the prior
+    # 1800 was stale residue.
+    timeout_s = get_setting("FIRETEAM_TIMEOUT_SEC", 7200)
     sem = asyncio.Semaphore(max_concurrent)
 
     # ---- Observability: wave deploy header ----
@@ -560,6 +574,14 @@ async def fireteam_deploy_node(
     from orchestrator_helpers.member_streaming import scoped_member_streaming
     from orchestrator_helpers.streaming import emit_streaming_events
 
+    # Snapshot map: each _run_one registers a reference to its closure-local
+    # ``final_state`` here, keyed by member_id. The in-place mutations inside
+    # the astream loop (`final_state.update(node_update)`) keep these
+    # references current. On wave timeout, the outer handler reads from this
+    # map via _timeout_result_from_snapshot to preserve real iteration/
+    # token/findings counts for productive work done before cancellation.
+    member_snapshots: dict = {}
+
     async def _run_one(spec: dict, member_id: str) -> dict:
         async with sem:
             member_state = _build_member_state(state, spec, member_id, fireteam_id_key)
@@ -581,6 +603,10 @@ async def fireteam_deploy_node(
                 except Exception:
                     pass
             final_state = dict(member_state)
+            # Register the snapshot reference. The outer wave-timeout handler
+            # reads this to recover real iter/token/findings counts even when
+            # the member's task is cancelled mid-loop.
+            member_snapshots[member_id] = final_state
             try:
                 # Activate the member-scoped streaming proxy. While this
                 # context is active, resolve_streaming_callback returns the
@@ -620,10 +646,12 @@ async def fireteam_deploy_node(
                 )
             except asyncio.CancelledError:
                 logger.info("[%s] wave=%s member=%s CANCELLED", session_id, fireteam_id_key, member_id)
-                # Propagate cancellation to gather. Per-member DB persistence on
-                # wave-timeout happens in the outer TimeoutError handler below,
-                # which has access to the full results list (including real
-                # iteration/token counts) and can label status correctly.
+                # Propagate cancellation to gather. The outer TimeoutError
+                # handler builds the per-member result via
+                # _timeout_result_from_snapshot, which reads this member's
+                # last in-flight final_state from member_snapshots (kept in
+                # sync via in-place .update() calls in the astream loop
+                # above). That preserves real iter/token/findings counts.
                 raise
             except Exception as exc:
                 logger.exception("[%s] wave=%s member=%s CRASHED", session_id, fireteam_id_key, member_id)
@@ -667,21 +695,56 @@ async def fireteam_deploy_node(
 
     wave_start = time.monotonic()
     results: list = []
+    # Operator-confirmation waits do NOT consume the wave wall-clock. The
+    # per-member `await asyncio.wait_for(entry.event.wait(), ...)` is just
+    # another `await` from the event loop's perspective and would otherwise
+    # accumulate against this outer timer. The deadline-extension loop below
+    # polls get_credit_s and extends `deadline` by any new paused time.
+    from orchestrator_helpers.fireteam_confirmation_registry import (
+        get_credit_s as _get_credit_s,
+    )
     try:
-        raw = await asyncio.wait_for(
-            asyncio.gather(*tasks, return_exceptions=True),
-            timeout=timeout_s,
-        )
-        results = [
-            r if isinstance(r, dict) else _error_result(m, mid, r, time.monotonic() - wave_start)
-            for r, m, mid in zip(raw, members, member_ids)
-        ]
+        deadline = wave_start + timeout_s
+        last_credit = 0.0
+        pending = set(tasks)
+        while pending:
+            new_credit = _get_credit_s(session_id, fireteam_id_key) - last_credit
+            if new_credit > 0:
+                deadline += new_credit
+                last_credit += new_credit
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            # 1s poll cap so credit accrued mid-wait is applied promptly.
+            # asyncio.wait returns earlier whenever any task completes.
+            _, pending = await asyncio.wait(
+                pending,
+                timeout=min(remaining, 1.0),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        # All tasks finished before deadline. Match the previous
+        # `gather(..., return_exceptions=True)` shape: dict result if the
+        # task returned one, else wrap a raised exception into _error_result.
+        for t, m, mid in zip(tasks, members, member_ids):
+            try:
+                r = t.result()
+            except BaseException as exc:
+                results.append(_error_result(m, mid, exc, time.monotonic() - wave_start))
+                continue
+            if isinstance(r, dict):
+                results.append(r)
+            else:
+                results.append(_error_result(m, mid, r, time.monotonic() - wave_start))
     except asyncio.TimeoutError:
         logger.warning("[%s] fireteam %s timed out after %ds", session_id, fireteam_id_key, timeout_s)
         # Wake any members currently parked on the confirmation registry so
         # t.cancel() below doesn't race a forever-blocked asyncio.wait().
-        from orchestrator_helpers.fireteam_confirmation_registry import drop_wave as _drop_wave
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            drop_wave as _drop_wave,
+            drop_wave_credit as _drop_wave_credit,
+        )
         _drop_wave(session_id, fireteam_id_key, reason="wave_timeout")
+        _drop_wave_credit(session_id, fireteam_id_key)
         for t in tasks:
             if not t.done():
                 t.cancel()
@@ -696,9 +759,15 @@ async def fireteam_deploy_node(
                     results.append(t.result() if isinstance(t.result(), dict)
                                    else _error_result(m, mid, t.result(), time.monotonic() - wave_start))
                 else:
-                    results.append(_timeout_result(m, mid, time.monotonic() - wave_start))
+                    results.append(_timeout_result_from_snapshot(
+                        member_snapshots.get(mid), m, mid,
+                        time.monotonic() - wave_start,
+                    ))
             except asyncio.CancelledError:
-                results.append(_timeout_result(m, mid, time.monotonic() - wave_start))
+                results.append(_timeout_result_from_snapshot(
+                    member_snapshots.get(mid), m, mid,
+                    time.monotonic() - wave_start,
+                ))
             except Exception as e:
                 results.append(_error_result(m, mid, e, time.monotonic() - wave_start))
         # Persist per-member timeout to Postgres. Without this, members whose
@@ -742,8 +811,12 @@ async def fireteam_deploy_node(
                     logger.exception("timeout emit member_completed failed")
     except asyncio.CancelledError:
         logger.info("[%s] fireteam %s cancelled by operator", session_id, fireteam_id_key)
-        from orchestrator_helpers.fireteam_confirmation_registry import drop_wave as _drop_wave
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            drop_wave as _drop_wave,
+            drop_wave_credit as _drop_wave_credit,
+        )
         _drop_wave(session_id, fireteam_id_key, reason="wave_cancelled")
+        _drop_wave_credit(session_id, fireteam_id_key)
         for t in tasks:
             if not t.done():
                 t.cancel()
@@ -812,6 +885,13 @@ async def fireteam_deploy_node(
 
     wall = time.monotonic() - wave_start
     status_counts = _count_statuses(results)
+
+    # Normal-completion teardown for wave-clock credit tracking. The
+    # timeout / cancel branches do their own drop_wave_credit.
+    from orchestrator_helpers.fireteam_confirmation_registry import (
+        drop_wave_credit as _drop_wave_credit_final,
+    )
+    _drop_wave_credit_final(session_id, fireteam_id_key)
 
     # Overall fireteam status: timeout if any timeout, else completed.
     if status_counts.get("timeout", 0) > 0:

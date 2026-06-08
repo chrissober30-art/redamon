@@ -19,6 +19,7 @@ These tools are either installed in Docker images or pulled as Docker containers
 | **HTTPx** | HTTP probing and technology detection | AGPL-3.0 | https://github.com/projectdiscovery/httpx | Installed via `go install` in `mcp/kali-sandbox/Dockerfile`; also pulled as Docker image `projectdiscovery/httpx:latest` at runtime |
 | **Subfinder** | Subdomain enumeration via passive sources | AGPL-3.0 | https://github.com/projectdiscovery/subfinder | Pulled as Docker image `projectdiscovery/subfinder:latest` at runtime |
 | **DNSx** | Fast DNS toolkit (resolution, bruteforce, wildcard filtering) | AGPL-3.0 | https://github.com/projectdiscovery/dnsx | Pulled as Docker image `projectdiscovery/dnsx:latest` at runtime |
+| **uncover** | Exposed-host discovery via search-engine APIs (Shodan, Censys, FOFA, Quake, Hunter, etc.) for target expansion | MIT | https://github.com/projectdiscovery/uncover | Pulled as Docker image `projectdiscovery/uncover:latest` at runtime (`recon/main_recon_modules/uncover_enrich.py`, `recon/entrypoint.sh`); provider API keys injected at call time |
 | **Interactsh** | OOB (Out-of-Band) interaction gathering | MIT | https://github.com/projectdiscovery/interactsh | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
 | **vulnx** | CVE intelligence (NVD + CISA KEV + EPSS + HackerOne + GitHub PoCs + Nuclei template availability). Successor to cvemap. | MIT | https://github.com/projectdiscovery/vulnx | Installed via `go install` in `mcp/kali-sandbox/Dockerfile`. Invoked as a subprocess by the `cve_intel` agent tool ([mcp/servers/network_recon_server.py](mcp/servers/network_recon_server.py)). Optional PDCP API key (configured per-user in Global Settings) is injected at call time as `PDCP_API_KEY` env var; never logged or committed. |
 
@@ -67,6 +68,21 @@ These are AD reconnaissance and abuse primitives installed in the Kali sandbox c
 
 ---
 
+## Cloud Provider SDKs (Cloud-Attack Chat Skills)
+
+These SDKs are installed in the Kali sandbox container and used by cloud-enumeration / cloud-attack Chat Skills for Entra ID / Azure / GCP probing.
+
+| Library | Purpose | License | Source Repository | How Used |
+|---------|---------|---------|-------------------|----------|
+| **MSAL (msal)** | Microsoft Authentication Library (Entra ID token acquisition) | MIT | https://github.com/AzureAD/microsoft-authentication-library-for-python | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **azure-identity** | Azure credential / token provider | MIT | https://github.com/Azure/azure-sdk-for-python | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **azure-mgmt-resource** | Azure Resource Manager client | MIT | https://github.com/Azure/azure-sdk-for-python | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **google-auth** | Google authentication library | Apache-2.0 | https://github.com/googleapis/google-auth-library-python | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **google-api-python-client** | Google APIs client library | Apache-2.0 | https://github.com/googleapis/google-api-python-client | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **google-cloud-storage** | Google Cloud Storage client | Apache-2.0 | https://github.com/googleapis/python-storage | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+
+---
+
 ## Privilege Escalation Helpers (Staged Binaries)
 
 These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and served by the agent to a foothold host (HTTP, SMB, or upload primitive). They are **not** linked against RedAmon code; they are unmodified upstream artifacts staged for delivery.
@@ -89,14 +105,14 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 | **Nmap** | Network scanning and service detection | NPSL (Nmap Public Source License) | https://github.com/nmap/nmap | Installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
 | **Masscan** | Asynchronous TCP port scanner | AGPL-3.0 | https://github.com/robertdavidgraham/masscan | Built from source in `recon/Dockerfile`; also installed via `apt-get` in `mcp/kali-sandbox/Dockerfile` |
 | **Amass** | In-depth subdomain enumeration | Apache-2.0 | https://github.com/owasp-amass/amass | Pulled as Docker image `caffix/amass:latest` at runtime |
-| **Knockpy** | Subdomain enumeration via wordlist | GPL-3.0 | https://github.com/guelfoweb/knock | Installed via `pip` in `recon/Dockerfile` |
+| **Knockpy** | Subdomain enumeration via wordlist | GPL-3.0 | https://github.com/guelfoweb/knock | Installed via `pip` in `recon/Dockerfile`. **Invoked as a CLI subprocess only** (`knockpy -d ...` in `recon/main_recon_modules/domain_recon.py`); never imported into RedAmon source, so its GPL scope does not extend to RedAmon's code (mere aggregation). |
 | **puredns** | DNS wildcard filtering and resolution | GPL-3.0 | https://github.com/d3mondev/puredns | Pulled as Docker image `frost19k/puredns:latest` at runtime |
 | **Hakrawler** | Web crawling and link discovery | MIT | https://github.com/hakluke/hakrawler | Pulled as Docker image `jauderho/hakrawler:latest` at runtime |
 | **GAU (GetAllUrls)** | Passive URL discovery from web archives | MIT | https://github.com/lc/gau | Pulled as Docker image `sxcurity/gau:latest` at runtime |
 | **Kiterunner** | API endpoint discovery | AGPL-3.0 | https://github.com/assetnote/kiterunner | Binary downloaded from GitHub releases at runtime |
 | **jsluice** | JavaScript file analysis for endpoints and secrets | MIT | https://github.com/BishopFox/jsluice | Built from source via `go install` in `recon/Dockerfile` (multi-stage) |
 | **ffuf** | Web fuzzer (directories, parameters, vhosts) | MIT | https://github.com/ffuf/ffuf | Built from source in `recon/Dockerfile`; also installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
-| **Arjun** | HTTP hidden parameter discovery | AGPL-3.0 | https://github.com/s0md3v/Arjun | Installed via `pip` in `recon/requirements.txt` |
+| **Arjun** | HTTP hidden parameter discovery | AGPL-3.0 | https://github.com/s0md3v/Arjun | Installed via `pip` in `recon/requirements.txt`. **Invoked as a CLI subprocess only** (`shutil.which('arjun')` + `subprocess(['arjun', ...])` in `recon/helpers/resource_enum/arjun_helpers.py`); never imported into RedAmon source, so its AGPL scope does not extend to RedAmon's code (mere aggregation). |
 | **ParamSpider** | URL parameter mining from web archives | MIT | https://github.com/devanshbatham/ParamSpider | Installed via `pip` (git) in `recon/requirements.txt` |
 | **TruffleHog** | Credential and secret scanning | AGPL-3.0 | https://github.com/trufflesecurity/trufflehog | Pulled as Docker image `trufflesecurity/trufflehog:latest` at runtime; also installed as binary in `trufflehog_scan/Dockerfile` |
 | **gitleaks** | Git repository secret scanner (API keys, passwords, tokens) | MIT | https://github.com/gitleaks/gitleaks | Installed via `go install` in `mcp/kali-sandbox/Dockerfile` |
@@ -121,6 +137,9 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 | **tplmap** | SSTI scanner (Smarty / Velocity coverage) | GPL-3.0 | https://github.com/epinna/tplmap | Cloned from upstream in `mcp/kali-sandbox/Dockerfile` (isolated venv) |
 | **semgrep** | Source-aware static analysis (SAST) | LGPL-2.1 | https://github.com/semgrep/semgrep | Installed via `pip` in `mcp/kali-sandbox/Dockerfile`. Used by the source-aware-sast Chat Skill on operator-provided repos. |
 | **Playwright** | Browser automation (Chromium) for web recon | Apache-2.0 | https://github.com/microsoft/playwright-python | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **zeep** | Python SOAP client (WS-Security / XSW probing in the SOAP Chat Skill) | MIT | https://github.com/mvantellingen/python-zeep | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **python3-saml** | SAML toolkit (XSW / Comment Injection / Golden SAML construction in the SAML Chat Skill) | MIT | https://github.com/SAML-Toolkits/python3-saml | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
+| **OWASP ZAP (Zed Attack Proxy)** | Browser-driven (headless Firefox) Ajax Spider for resource enumeration of JS-heavy SPAs | Apache-2.0 | https://github.com/zaproxy/zaproxy | Pulled as Docker image `ghcr.io/zaproxy/zaproxy:stable` at runtime by the recon container (`recon/helpers/resource_enum/zap_ajax_spider_helpers.py`); run with `--net=host` via the ZAP Automation Framework. RedAmon never imports from ZAP; results are parsed from an exported artifact (process + filesystem boundary). |
 
 ---
 
@@ -181,6 +200,7 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 |----------|---------|---------|-------------------|----------|
 | **SecLists** | Security assessment wordlists (directories, passwords, payloads) | MIT | https://github.com/danielmiessler/SecLists | Downloaded in `recon/Dockerfile` for web content discovery |
 | **Trickest Resolvers** | Curated DNS resolver list | MIT | https://github.com/trickest/resolvers | Downloaded at runtime in `recon/entrypoint.sh` |
+| **jhaddix all.txt** | Curated subdomain bruteforce wordlist | Unspecified (public gist) | https://gist.github.com/jhaddix/86a06c5dc309d08580a018c66354a056 | Downloaded in `recon/Dockerfile` for subdomain discovery |
 
 ---
 
@@ -207,12 +227,18 @@ These are libraries and frameworks used to build RedAmon's own web application, 
 | **LangGraph** | Multi-agent orchestration framework | MIT | https://github.com/langchain-ai/langgraph | `agentic/requirements.txt` |
 | **LangChain-Anthropic** | Anthropic model integration for LangChain | MIT | https://github.com/langchain-ai/langchain | `agentic/requirements.txt` |
 | **LangChain-OpenAI** | OpenAI model integration for LangChain | MIT | https://github.com/langchain-ai/langchain | `agentic/requirements.txt` |
+| **LangChain-Google-GenAI** | Google Gemini model integration for LangChain | MIT | https://github.com/langchain-ai/langchain-google | `agentic/requirements.txt` |
+| **LangChain-Community** | Community LangChain integrations | MIT | https://github.com/langchain-ai/langchain | `agentic/requirements.txt` |
 | **LangChain-AWS** | AWS Bedrock integration for LangChain | MIT | https://github.com/langchain-ai/langchain-aws | `agentic/requirements.txt` |
 | **LangChain-Neo4j** | Neo4j graph integration for LangChain | MIT | https://github.com/langchain-ai/langchain | `agentic/requirements.txt` |
 | **LangChain-Tavily** | Tavily search integration for LangChain | MIT | https://github.com/langchain-ai/langchain | `agentic/requirements.txt` |
 | **LangChain-MCP-Adapters** | MCP server integration for LangChain | MIT | https://github.com/langchain-ai/langchain-mcp-adapters | `agentic/requirements.txt` |
 | **FastMCP** | Fast Model Context Protocol server framework | MIT | https://github.com/jlowin/fastmcp | `mcp/requirements.txt` |
-| **MCP SDK** | Model Context Protocol Python SDK | MIT | https://github.com/modelcontextprotocol/python-sdk | `mcp/requirements.txt` |
+| **MCP SDK** | Model Context Protocol Python SDK | MIT | https://github.com/modelcontextprotocol/python-sdk | `mcp/requirements.txt`; also `recon/requirements.txt` (AI Surface Recon MCP handshake + `tools/list`) |
+| **LangGraph-Checkpoint-Postgres** | Persistent LangGraph checkpointer (Fireteam state) | MIT | https://github.com/langchain-ai/langgraph | `agentic/requirements.txt` |
+| **FAISS (faiss-cpu)** | Vector similarity search for the knowledge base | MIT | https://github.com/facebookresearch/faiss | `agentic/requirements-kb.txt` (optional `--kbase` install only) |
+| **sentence-transformers** | Text embedding models for the vector knowledge base | Apache-2.0 | https://github.com/UKPLab/sentence-transformers | `agentic/requirements-kb.txt` (optional `--kbase` install only) |
+| **PyTorch (torch)** | Tensor / deep-learning backend (transitive dep of sentence-transformers) | BSD-3-Clause | https://github.com/pytorch/pytorch | Pulled in transitively by `sentence-transformers` (optional `--kbase` install only) |
 
 ---
 
@@ -230,6 +256,7 @@ These are libraries and frameworks used to build RedAmon's own web application, 
 | **httpx** | Async HTTP client for Python | BSD-3-Clause | https://github.com/encode/httpx | `mcp/requirements.txt`, `agentic/requirements.txt` |
 | **Requests** | HTTP library for Python | Apache-2.0 | https://github.com/psf/requests | Multiple `requirements.txt` files |
 | **dnspython** | DNS toolkit for Python | ISC | https://github.com/rthalley/dnspython | `recon/requirements.txt` |
+| **PySocks** | SOCKS proxy client (Tor / anonymity routing) | BSD-3-Clause | https://github.com/Anorov/PySocks | `recon/requirements.txt` |
 | **python-whois** | WHOIS lookup library | MIT | https://github.com/richardpenman/whois | `recon/requirements.txt` |
 | **xmltodict** | XML to Python dict parser | MIT | https://github.com/martinblech/xmltodict | `gvm_scan/requirements.txt` |
 | **SSE-Starlette** | Server-Sent Events for Starlette/FastAPI | BSD-3-Clause | https://github.com/sysid/sse-starlette | `recon_orchestrator/requirements.txt`, `mcp/requirements.txt` |
@@ -240,6 +267,16 @@ These are libraries and frameworks used to build RedAmon's own web application, 
 | **NetworkX** | Graph/network analysis library | BSD-3-Clause | https://github.com/networkx/networkx | `agentic/requirements.txt` |
 | **tree-sitter** | Incremental parsing system | MIT | https://github.com/tree-sitter/tree-sitter | `agentic/requirements.txt` |
 | **tree-sitter-languages** | Pre-built Tree-sitter language grammars | MIT | https://github.com/grantjenks/py-tree-sitter-languages | `agentic/requirements.txt` |
+| **mmh3** | MurmurHash3 bindings (favicon hashing for AI-frontend product detection) | MIT | https://github.com/hajimes/mmh3 | `recon/requirements.txt` (used by `recon/helpers/ai_signal_catalog.py`) |
+| **yara-python** | YARA bindings — static MCP tool-poisoning rules (deterministic, no LLM) in AI Surface Recon | Apache-2.0 | https://github.com/VirusTotal/yara-python | `recon/requirements.txt` (lazy-imported by `recon/main_recon_modules/ai_surface_recon.py`) |
+| **prance** | OpenAPI/Swagger `$ref`-resolving parser for AI Surface Recon OpenAPI discovery | MIT | https://github.com/RonnyPfannschmidt/prance | `recon/requirements.txt` (lazy-imported) |
+| **openapi-spec-validator** | OpenAPI 2.0/3.0/3.1 validation backend for prance | Apache-2.0 | https://github.com/python-openapi/openapi-spec-validator | `recon/requirements.txt` |
+| **jq.py** | Python bindings for jq (Julius probe-pack `models.extract` expressions); bundles libjq | BSD-2-Clause | https://github.com/mwilliamson/jq.py | `recon/requirements.txt` (lazy-imported) |
+| **markdownify** | HTML to Markdown converter (Tradecraft Lookup curated-resource crawl) | MIT | https://github.com/matthewwithanm/python-markdownify | `agentic/requirements.txt` |
+| **pypdf** | Pure-Python PDF text extraction (Tradecraft Lookup) | BSD-3-Clause | https://github.com/py-pdf/pypdf | `agentic/requirements.txt` |
+| **lxml** | C-backed XML/HTML parser | BSD-3-Clause | https://github.com/lxml/lxml | `agentic/requirements.txt` |
+| **psycopg** | PostgreSQL adapter for Python (persistent LangGraph checkpointer) | LGPL-3.0 | https://github.com/psycopg/psycopg | `agentic/requirements.txt` |
+| **OpenAI Python SDK** | OpenAI API client (vector knowledge base, provider-agnostic LLM calls) | Apache-2.0 | https://github.com/openai/openai-python | `agentic/requirements.txt` |
 
 ---
 
@@ -258,8 +295,13 @@ These are libraries and frameworks used to build RedAmon's own web application, 
 | **react-syntax-highlighter** | Syntax highlighting for React | MIT | https://github.com/react-syntax-highlighter/react-syntax-highlighter | `webapp/package.json` |
 | **remark-gfm** | GitHub Flavored Markdown plugin | MIT | https://github.com/remarkjs/remark-gfm | `webapp/package.json` |
 | **Lucide React** | Icon library for React | ISC | https://github.com/lucide-icons/lucide | `webapp/package.json` |
+| **React Flow (@xyflow/react)** | Node-based diagram UI (recon workflow / tool-node view) | MIT | https://github.com/xyflow/xyflow | `webapp/package.json` |
+| **react-icons** | Popular icon packs as React components | MIT | https://github.com/react-icons/react-icons | `webapp/package.json` |
+| **jose** | JavaScript JSON Web Token / JWE / JWS implementation | MIT | https://github.com/panva/jose | `webapp/package.json` |
+| **bcryptjs** | Pure-JS bcrypt password hashing | MIT | https://github.com/dcodeIO/bcrypt.js | `webapp/package.json` |
+| **Zod** | TypeScript-first schema validation | MIT | https://github.com/colinhacks/zod | `webapp/package.json` |
 | **Archiver** | Streaming archive generation (ZIP) | MIT | https://github.com/archiverjs/node-archiver | `webapp/package.json` |
-| **JSZip** | ZIP file creation and reading | MIT / GPL-3.0 (dual) | https://github.com/Stuk/jszip | `webapp/package.json` |
+| **JSZip** | ZIP file creation and reading | MIT (dual-licensed MIT/GPL-3.0; used by RedAmon under MIT) | https://github.com/Stuk/jszip | `webapp/package.json` |
 | **SheetJS (xlsx)** | Spreadsheet parser and writer | Apache-2.0 | https://github.com/SheetJS/sheetjs | `webapp/package.json` |
 | **pdf-parse** | PDF text extraction | MIT | https://gitlab.com/nicola.zanon/pdf-parse | `webapp/package.json` |
 | **Mammoth** | DOCX to HTML/Markdown converter | BSD-2-Clause | https://github.com/mwilliamson/mammoth.js | `webapp/package.json` |
@@ -300,6 +342,9 @@ The agent container (`agentic/Dockerfile`) bundles multiple language runtimes fo
 | **PHP** + Composer | CLI | PHP-3.01 / MIT | Installed via `apt-get` in `agentic/Dockerfile` |
 | **.NET SDK** | 8 | MIT | Installed in `agentic/Dockerfile` |
 | **ripgrep** | System | MIT / Unlicense (dual) | Installed via `apt-get` in `agentic/Dockerfile` |
+| **Yarn** | Classic | BSD-2-Clause | JS package manager, `npm install -g yarn` in `agentic/Dockerfile` |
+| **pnpm** | Latest | MIT | JS package manager, `npm install -g pnpm` in `agentic/Dockerfile` |
+| **uv** | Latest | Apache-2.0 / MIT (dual) | Python package installer for `uvx` MCP servers, `pip install uv` in `agentic/Dockerfile` |
 
 ---
 
@@ -330,7 +375,7 @@ All other RedAmon source code (the webapp, the agent, the recon orchestrator, MC
 
 ### LGPL libraries
 
-Several LGPL-licensed libraries (PyGithub, Paramiko, Proxychains4) are used via standard Python imports or dynamic linking. The LGPL explicitly permits this without requiring the calling code to adopt LGPL or GPL terms, provided the libraries can be replaced or re-linked by the end user. Since RedAmon installs these via standard `pip` (user-replaceable), this condition is satisfied.
+Several LGPL-licensed libraries (PyGithub, Paramiko, psycopg, ldap3, Proxychains4) are used via standard Python imports or dynamic linking. The LGPL explicitly permits this without requiring the calling code to adopt LGPL or GPL terms, provided the libraries can be replaced or re-linked by the end user. Since RedAmon installs these via standard `pip` (user-replaceable), this condition is satisfied.
 
 ### AGPL network-interaction obligation
 
@@ -338,4 +383,4 @@ AGPL-3.0 extends the GPL-3.0 copyleft to users who interact with the software **
 
 ---
 
-*Last updated: April 2026*
+*Last updated: June 2026*

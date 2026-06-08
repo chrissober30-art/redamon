@@ -641,4 +641,36 @@ class UserInputMixin:
                     "source": "graph" if record["domain"] else "settings",
                 }
 
+            elif tool_id == "AiSurfaceRecon":
+                # AI Surface Recon consumes BaseURLs + AI-tagged Endpoints + vector-DB Services.
+                result = session.run(
+                    """
+                    OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+                    WITH d
+                    OPTIONAL MATCH (b:BaseURL {user_id: $uid, project_id: $pid})
+                    WITH d, collect(DISTINCT b.url) AS baseurls
+                    OPTIONAL MATCH (e:Endpoint {user_id: $uid, project_id: $pid})
+                    WITH d, baseurls,
+                         count(DISTINCT CASE WHEN (e.ai_interface_type IS NOT NULL
+                               AND e.ai_interface_type <> 'non-llm')
+                               OR e.is_ai_framework_detected = true THEN e END) AS ai_endpoints,
+                         count(DISTINCT CASE WHEN e.ai_interface_type = 'mcp' THEN e END) AS mcp_endpoints
+                    OPTIONAL MATCH (svc)-[:HAS_TECHNOLOGY|USES_TECHNOLOGY]->(t:Technology {category:'ai-vector-db', user_id:$uid, project_id:$pid})
+                    RETURN d.name AS domain, baseurls, size(baseurls) AS baseurl_count,
+                           ai_endpoints, mcp_endpoints,
+                           count(DISTINCT svc) AS vector_db_services
+                    """,
+                    uid=user_id, pid=project_id,
+                )
+                record = result.single()
+                return {
+                    "domain": record["domain"] if record and record["domain"] else None,
+                    "existing_baseurls": (record["baseurls"] if record else []) or [],
+                    "existing_baseurls_count": (record["baseurl_count"] if record else 0) or 0,
+                    "existing_ai_endpoints_count": (record["ai_endpoints"] if record else 0) or 0,
+                    "existing_mcp_endpoints_count": (record["mcp_endpoints"] if record else 0) or 0,
+                    "existing_vector_db_services_count": (record["vector_db_services"] if record else 0) or 0,
+                    "source": "graph" if (record and record["domain"]) else "settings",
+                }
+
             return {"error": f"Unknown tool_id: {tool_id}"}

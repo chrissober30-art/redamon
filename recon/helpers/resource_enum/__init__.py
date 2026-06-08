@@ -62,8 +62,23 @@ from .hakrawler_helpers import (
 
 # jsluice helpers
 from .jsluice_helpers import (
+    DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
+    filter_jsluice_url,
     run_jsluice_analysis,
     merge_jsluice_into_by_base_url,
+    verify_jsluice_urls,
+)
+
+# ZAP Ajax Spider helpers
+from .zap_ajax_spider_helpers import (
+    pull_zap_ajax_docker_image,
+    run_zap_ajax_spider,
+    merge_zap_ajax_into_by_base_url,
+    parse_zap_ajax_header_lines,
+    mask_zap_ajax_header_line,
+    build_zap_ajax_automation_plan,
+    parse_zap_ajax_export_urls,
+    filter_zap_ajax_urls,
 )
 
 # FFuf helpers
@@ -123,8 +138,20 @@ __all__ = [
     "pull_hakrawler_docker_image",
     "merge_hakrawler_into_by_base_url",
     # jsluice
+    "DEFAULT_JSLUICE_EXCLUDE_PATTERNS",
+    "filter_jsluice_url",
     "run_jsluice_analysis",
     "merge_jsluice_into_by_base_url",
+    "verify_jsluice_urls",
+    # ZAP Ajax Spider
+    "pull_zap_ajax_docker_image",
+    "run_zap_ajax_spider",
+    "merge_zap_ajax_into_by_base_url",
+    "parse_zap_ajax_header_lines",
+    "mask_zap_ajax_header_line",
+    "build_zap_ajax_automation_plan",
+    "parse_zap_ajax_export_urls",
+    "filter_zap_ajax_urls",
     # FFuf
     "run_ffuf_discovery",
     "pull_ffuf_binary_check",

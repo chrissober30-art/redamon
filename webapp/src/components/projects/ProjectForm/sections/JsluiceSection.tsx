@@ -142,6 +142,65 @@ export function JsluiceSection({ data, updateField, onRun }: JsluiceSectionProps
                   />
                 </div>
               </div>
+
+              <div className={styles.subSection}>
+                <h3 className={styles.subSectionTitle}>URL Verification</h3>
+                <div className={styles.toggleRow}>
+                  <div>
+                    <span className={styles.toggleLabel}>Verify extracted URLs with httpx</span>
+                    <p className={styles.toggleDescription}>Drop bundled-library, sourcemap, and static-asset paths via a noise filter, then probe the rest with httpx so only live endpoints reach the graph. Disable to publish every URL jsluice extracts (legacy behavior).</p>
+                  </div>
+                  <Toggle
+                    checked={data.jsluiceVerifyUrls ?? true}
+                    onChange={(checked) => updateField('jsluiceVerifyUrls', checked)}
+                  />
+                </div>
+
+                {(data.jsluiceVerifyUrls ?? true) && (
+                  <>
+                    <div className={styles.fieldRow}>
+                      <div className={styles.fieldGroup}>
+                        <label className={styles.fieldLabel}>Verify Threads</label>
+                        <input
+                          type="number"
+                          className="textInput"
+                          value={data.jsluiceVerifyThreads ?? 50}
+                          onChange={(e) => updateField('jsluiceVerifyThreads', parseInt(e.target.value) || 50)}
+                          min={1}
+                          max={500}
+                        />
+                        <span className={styles.fieldHint}>httpx worker threads</span>
+                      </div>
+                      <div className={styles.fieldGroup}>
+                        <label className={styles.fieldLabel}>Verify Rate Limit (req/s)</label>
+                        <input
+                          type="number"
+                          className="textInput"
+                          value={data.jsluiceVerifyRateLimit ?? 50}
+                          onChange={(e) => updateField('jsluiceVerifyRateLimit', parseInt(e.target.value) || 50)}
+                          min={1}
+                          max={1000}
+                        />
+                        <span className={styles.fieldHint}>Cap probes per second to avoid hammering the target</span>
+                      </div>
+                    </div>
+                    <div className={styles.fieldRow}>
+                      <div className={styles.fieldGroup}>
+                        <label className={styles.fieldLabel}>Verify Timeout (s)</label>
+                        <input
+                          type="number"
+                          className="textInput"
+                          value={data.jsluiceVerifyTimeout ?? 5}
+                          onChange={(e) => updateField('jsluiceVerifyTimeout', parseInt(e.target.value) || 5)}
+                          min={1}
+                          max={60}
+                        />
+                        <span className={styles.fieldHint}>Per-request timeout for each probe</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>

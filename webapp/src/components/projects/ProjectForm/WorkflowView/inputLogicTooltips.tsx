@@ -34,8 +34,11 @@ const SubdomainDiscovery = (
       <li>The Subdomain node is tagged with its resolution state (resolved / unresolved / wildcard) and a discovery timestamp.</li>
       <li>The apex Domain node is enriched with WHOIS data (registrar, organization, country, registration dates) when WHOIS lookup is enabled.</li>
     </ul>
-    <p style={{ ...paraStyle, margin: 0 }}>
+    <p style={paraStyle}>
       Existing nodes are reused (deduplicated) — running the scan again only adds newly discovered subdomains, never duplicates.
+    </p>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When the <strong>AI TXT/SPF/DKIM Hint</strong> toggle is on, captured TXT records (including SPF/DKIM/DMARC) are regex-matched against the AI vendor catalogue. On match, the Subdomain carries <span style={codeStyle}>ai_service_hint</span> with the provider name (anthropic, openai, huggingface, replicate, langchain, langfuse, …). The <strong>AI NS Hint</strong> toggle is a weaker signal: NS records pointing at Vercel/Netlify/Replit/Modal tag the subdomain as <span style={codeStyle}>ai_service_hint=&quot;ai-hosting-candidate&quot;</span> only when no stronger TXT hint already exists.
     </p>
   </div>
 )
@@ -237,8 +240,11 @@ const Naabu = (
       <li>The IP node is updated with a fresh timestamp.</li>
       <li>The Domain is enriched with a port-scan timestamp and a total count of open ports across the project.</li>
     </ul>
-    <p style={{ ...paraStyle, margin: 0 }}>
+    <p style={paraStyle}>
       Ports are deduplicated by (IP + port number + protocol). The output format is compatible with Masscan, so they can be run interchangeably or sequentially.
+    </p>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When <strong>AI Port Catalog</strong> is enabled, open ports matching the AI port table (Ollama 11434, Qdrant 6333, Open WebUI 8080, vLLM, LiteLLM, Triton, Milvus, Gradio, ComfyUI, …) also MERGE a <strong>Technology</strong> node with <span style={codeStyle}>category=ai-*</span> linked to the Service via <span style={codeStyle}>:USES_TECHNOLOGY</span> with <span style={codeStyle}>detected_by=naabu-ai-port</span>. Shared ports (8000, 8080) are flagged for disambiguation and only promoted when a corroborating HTTP signal lands.
     </p>
 
     <div style={sectionTitleStyle}>When the scan refuses to start</div>
@@ -266,8 +272,11 @@ const Masscan = (
       <li>Port nodes get product/version/CPE properties from banner analysis.</li>
       <li>The Domain is enriched with a port scan timestamp, the scan type, the scan port configuration, and a total count of open ports.</li>
     </ul>
-    <p style={{ ...paraStyle, margin: 0 }}>
+    <p style={paraStyle}>
       IPs that have no open ports and no hostname associations are skipped to avoid creating orphaned nodes. Existing Port nodes are reused, not duplicated.
+    </p>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When <strong>AI Port Catalog</strong> is enabled, the same AI port table used by Naabu fires here too — open AI ports also MERGE a <strong>Technology</strong> node with <span style={codeStyle}>category=ai-*</span> linked to the Service via <span style={codeStyle}>:USES_TECHNOLOGY</span> with <span style={codeStyle}>detected_by=masscan-ai-port</span>.
     </p>
   </div>
 )
@@ -297,8 +306,11 @@ const Nmap = (
       <li>If NSE scripts (Nmap's vulnerability scripts) report findings, they become <strong>Vulnerability</strong> nodes linked to the Port, with associated CVE nodes attached.</li>
       <li>The Port is tagged as scanned by Nmap.</li>
     </ul>
-    <p style={{ ...paraStyle, margin: 0 }}>
+    <p style={paraStyle}>
       Runs as long as at least one IP is available (graph or custom). Without ports, falls back to Nmap's default top-ports list.
+    </p>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When <strong>AI Runtime Version Regex</strong> is enabled, Nmap's <code>product</code>/<code>version</code> strings are matched against AI runtimes (Ollama, vLLM, LiteLLM, TGI, Triton, llama.cpp). On match the Service node also carries <span style={codeStyle}>ai_runtime_version</span>, which downstream CVE lookups can join against AI library CVE clusters.
     </p>
   </div>
 )
@@ -340,8 +352,11 @@ const Httpx = (
       <li>BaseURLs are richly enriched: status code, content type, content length, page title, server header, location header, response time, HTTP version, TLS version, CDN detection, favicon hash.</li>
       <li>Wappalyzer fingerprints become tech-stack data on the BaseURL: framework name + version, CMS name + version. These also feed the CVE Lookup downstream.</li>
     </ul>
-    <p style={{ ...paraStyle, margin: 0 }}>
+    <p style={paraStyle}>
       Live vs dead is determined by status code: anything &lt; 500 is treated as live (4xx counts because the host is responding). 5xx and connection failures are stored but not used as live targets downstream.
+    </p>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When any of the four <strong>AI Surface Recon</strong> sub-toggles is on, the BaseURL also carries <span style={codeStyle}>is_ai_framework_detected</span>, <span style={codeStyle}>ai_framework_name</span>, and <span style={codeStyle}>ai_frontend_product_guess</span>. The header regex catches runtime / framework / proxy / SDK markers (<code>x-vllm-*</code>, <code>anthropic-ratelimit-*</code>, <code>x-langchain-*</code>, <code>x-litellm-*</code>, <code>cf-aig-*</code>, …). The favicon-hash and title-regex lookups identify AI frontend products (Open WebUI, LibreChat, Flowise, Dify, Gradio, …). Matching <strong>Technology</strong> nodes with <span style={codeStyle}>category=ai-*</span> are linked to the BaseURL via <span style={codeStyle}>:USES_TECHNOLOGY {`{detected_by: 'httpx-ai-*'}`}</span>.
     </p>
 
     <div style={sectionTitleStyle}>When the scan refuses to start</div>
@@ -381,6 +396,34 @@ const Katana = (
     </ul>
     <p style={{ ...paraStyle, margin: 0 }}>
       Out-of-scope discoveries do not pollute the project graph — they're either ignored or stored as orphan nodes for traceability, depending on settings. Endpoints are deduplicated by path + method.
+    </p>
+  </div>
+)
+
+const ZapAjaxSpider = (
+  <div style={wrapperStyle}>
+    <div style={firstSectionTitleStyle}>How input is generated</div>
+    <p style={paraStyle}>
+      ZAP Ajax Spider starts from <strong>BaseURL</strong> nodes by default, using the live URLs verified by HTTP Probing as browser crawl seeds.
+    </p>
+    <p style={paraStyle}>
+      When endpoint seeding mode is enabled, existing <strong>Endpoint</strong> nodes are also reconstructed into full URLs and added as seeds. Custom URLs from the partial recon modal are appended to the same target set.
+    </p>
+    <p style={paraStyle}>
+      Header and cookie lines configured in the ZAP Ajax Spider settings are sent with every browser request to support authenticated crawling. They affect crawling behavior but are not surfaced in this workflow view.
+    </p>
+
+    <div style={sectionTitleStyle}>How output transforms the graph</div>
+    <ul style={listStyle}>
+      <li>Browser-discovered routes become <strong>Endpoint</strong> nodes through the existing resource enumeration graph conventions.</li>
+      <li>Query strings and observed request inputs become <strong>Parameter</strong> nodes attached to their Endpoint.</li>
+      <li>New in-scope origins become <strong>BaseURL</strong> nodes; out-of-scope hosts are represented as <strong>ExternalDomain</strong> nodes when graph storage rules allow it.</li>
+      <li>Each discovered Endpoint is tagged with the ZAP Ajax Spider as its discovery source, while storage relationships and deduplication stay unchanged from the rest of resource enumeration.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>When the scan refuses to start</div>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      If there are no BaseURLs and no custom URLs. Endpoint-only graph input can start the scan when endpoint seeding is enabled and graph Endpoints exist.
     </p>
   </div>
 )
@@ -528,6 +571,7 @@ const JsRecon = (
       <li>URLs found inside JS source become <strong>Endpoint</strong> nodes attached to the matching BaseURL, tagged with their source JS file.</li>
       <li>Variable assignments and route definitions extracted from JS produce <strong>Parameter</strong> nodes attached to relevant Endpoints.</li>
       <li>Detected JS libraries and frameworks (React, Vue, jQuery, etc.) become <strong>JsReconFinding</strong> nodes (with finding type "framework") attached to the analysed JS file via <span style={codeStyle}>HAS_JS_FINDING</span>. They are <em>not</em> currently promoted to Technology nodes, so they do not feed the CVE Lookup phase — that's a known gap.</li>
+      <li><strong>AI SDK detection</strong> (Adversarial AI Phase 6): every bundle is also scanned for AI/LLM SDK imports, hard-coded provider keys, the <span style={codeStyle}>dangerouslyAllowBrowser</span> opt-in, and AI-frontend product markers in shipped JS chunks. Each hit becomes a <strong>JsReconFinding</strong> with finding type <span style={codeStyle}>ai-sdk-client</span>, <span style={codeStyle}>ai-sdk-key-literal</span>, <span style={codeStyle}>ai-sdk-browser-allowed</span>, <span style={codeStyle}>ai-frontend-detected</span>, or <span style={codeStyle}>ai-provider-url</span>. When a hard-coded AI key matches an existing Secret on the same JS file, that Secret node is enriched with an <span style={codeStyle}>ai_provider</span> property so generic secret queries pivot directly to the AI-context view.</li>
       <li>The BaseURL is enriched with arrays of detected frameworks, libraries, and a count of secrets found in JS.</li>
     </ul>
     <p style={{ ...paraStyle, margin: 0 }}>
@@ -563,6 +607,60 @@ const Arjun = (
     <div style={sectionTitleStyle}>When the scan refuses to start</div>
     <p style={{ ...paraStyle, margin: 0 }}>
       Only if there are zero BaseURLs and zero Endpoints in the graph and no custom URLs were entered.
+    </p>
+  </div>
+)
+
+const EndpointAiClassifier = (
+  <div style={wrapperStyle}>
+    <div style={firstSectionTitleStyle}>How input is generated</div>
+    <p style={paraStyle}>
+      Reads every Endpoint, Parameter and BaseURL already in the graph. No URL is fetched and no probe is sent to the target. The classifier is pure pattern matching over data the rest of the resource enumeration step has already collected.
+    </p>
+    <ul style={listStyle}>
+      <li><strong>Endpoint paths</strong> are matched against a catalogue of vendor-specific LLM routes (OpenAI <span style={codeStyle}>/v1/chat/completions</span>, Anthropic <span style={codeStyle}>/v1/messages</span>, Ollama <span style={codeStyle}>/api/chat</span>, Gemini <span style={codeStyle}>:generateContent</span>, Cohere <span style={codeStyle}>/v2/chat</span>, MCP <span style={codeStyle}>/mcp</span>, LangServe <span style={codeStyle}>/stream</span>, and similar) plus RAG ingestion / retrieval paths (OpenAI Vector Stores, Pinecone <span style={codeStyle}>/vectors/upsert</span>, Weaviate <span style={codeStyle}>/v1/objects</span>, Qdrant <span style={codeStyle}>/collections/.../points</span>).</li>
+      <li><strong>Parent BaseURL</strong> is checked first. Ambiguous paths like <span style={codeStyle}>/search</span>, <span style={codeStyle}>/upload</span> and <span style={codeStyle}>/query</span> only count as RAG when their host already has an AI framework tag from the HTTP probing step, to avoid flagging every e-commerce search bar.</li>
+      <li><strong>Parameter names</strong> are matched against a catalogue of prompt-injection field names (<span style={codeStyle}>prompt</span>, <span style={codeStyle}>messages</span>, <span style={codeStyle}>system</span>, <span style={codeStyle}>contents</span>, <span style={codeStyle}>inputs</span>, <span style={codeStyle}>arguments</span>, and similar) only when the parent endpoint is AI-classified.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>How output transforms the graph</div>
+    <ul style={listStyle}>
+      <li><strong>Endpoint</strong> gets <span style={codeStyle}>ai_interface_type</span> set to one of <span style={codeStyle}>llm-chat</span>, <span style={codeStyle}>llm-completion</span>, <span style={codeStyle}>llm-embedding</span>, <span style={codeStyle}>llm-tool-call</span>, <span style={codeStyle}>sse-stream</span>, <span style={codeStyle}>mcp</span>, <span style={codeStyle}>llm-graphql</span>, or <span style={codeStyle}>non-llm</span>.</li>
+      <li>Endpoints recognized as RAG also get <span style={codeStyle}>is_ai_rag_ingest=true</span>.</li>
+      <li><strong>Parameter</strong> nodes on AI-classified endpoints get <span style={codeStyle}>is_ai_prompt_injectable=true</span> when their name matches the catalogue.</li>
+      <li>No new nodes and no new relationships are created. Existing Endpoint and Parameter rows are enriched in place.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>When the scan refuses to start</div>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      Only when the graph contains zero Endpoint nodes. The classifier has nothing to do when the URL discovery tools (Katana, Hakrawler, GAU, FFuf, ParamSpider, Arjun, Kiterunner, jsluice) have not produced any endpoints yet.
+    </p>
+  </div>
+)
+
+const AiSurfaceRecon = (
+  <div style={wrapperStyle}>
+    <div style={firstSectionTitleStyle}>How input is generated</div>
+    <p style={paraStyle}>
+      Runs after Resource Enumeration and probes only hosts that already show an AI signal. Candidates come from the graph: Endpoints tagged as LLM or MCP by the Endpoint AI Classifier, BaseURLs flagged with an AI framework during HTTP probing, and Services on known AI vector-database ports. When a flagged host has no classified chat path, a small fixed list of canonical chat paths is tried against it.
+    </p>
+    <ul style={listStyle}>
+      <li><strong>Chat endpoints</strong> are confirmed by sending a single 1-token request and reading the response shape.</li>
+      <li><strong>MCP servers</strong> are detected by the Model Context Protocol handshake, then their tools, resources and prompts are listed.</li>
+      <li><strong>API specs</strong> (OpenAPI / ai-plugin manifests) and model listings are fetched read-only to learn tool, vision, streaming support and the model family.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>How output transforms the graph</div>
+    <ul style={listStyle}>
+      <li><strong>Endpoint</strong> is enriched with confirmed AI properties: interface type, streaming / tools / vision support, model-family guess, measured latency, and for MCP servers the server name, version, protocol, capabilities and tool counts.</li>
+      <li><strong>Parameter</strong> nodes are created for each MCP tool argument and flagged when they look prompt-injectable.</li>
+      <li><strong>Technology</strong> nodes are confirmed for detected AI runtimes and vector databases.</li>
+      <li><strong>Vulnerability</strong> nodes are created for MCP tool poisoning, prompt injection and data-exfiltration hints found by static analysis, linked to the MCP Endpoint.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>When the scan refuses to start</div>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When the graph contains no AI-tagged Endpoints and no AI-flagged hosts. There is nothing to probe until HTTP probing and the Endpoint AI Classifier have surfaced at least one AI signal.
     </p>
   </div>
 )
@@ -828,12 +926,15 @@ export const INPUT_LOGIC_TOOLTIPS: Record<string, ReactNode> = {
   Httpx,
   // Resource enumeration
   Katana,
+  ZapAjaxSpider,
   Hakrawler,
   Kiterunner,
   Ffuf,
   Jsluice,
   JsRecon,
   Arjun,
+  EndpointAiClassifier,
+  AiSurfaceRecon,
   // Vulnerability / exploitation
   Nuclei,
   GraphqlScan,

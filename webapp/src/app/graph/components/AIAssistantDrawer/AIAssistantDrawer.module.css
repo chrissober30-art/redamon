@@ -26,6 +26,30 @@
   transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1), visibility 0s 0s;
 }
 
+/* Suppress transitions while the user is dragging the resize handle so
+   width tracks the cursor without lag. */
+.drawerResizing {
+  transition: none !important;
+}
+
+/* Drag-to-resize handle on the inner (left) edge of the drawer. */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 200;
+  touch-action: none;
+}
+
+.resizeHandle:hover {
+  background: var(--accent-primary, #3b82f6);
+  opacity: 0.4;
+}
+
 /* =============================================================================
    HEADER
    ============================================================================= */
@@ -114,56 +138,6 @@
 
 .stealthToggleActive:hover {
   background: rgba(139, 92, 246, 0.2);
-}
-
-.deepThinkBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: var(--font-semibold);
-  color: #14b8a6;
-  background: rgba(20, 184, 166, 0.12);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(20, 184, 166, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  line-height: 1;
-}
-
-.deepThinkToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: var(--font-semibold);
-  color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-default);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  line-height: 1;
-  cursor: pointer;
-  transition: var(--transition-all);
-}
-
-.deepThinkToggle:hover {
-  color: #14b8a6;
-  border-color: rgba(20, 184, 166, 0.4);
-  background: rgba(20, 184, 166, 0.08);
-}
-
-.deepThinkToggleActive {
-  color: #14b8a6;
-  background: rgba(20, 184, 166, 0.12);
-  border-color: rgba(20, 184, 166, 0.4);
-}
-
-.deepThinkToggleActive:hover {
-  background: rgba(20, 184, 166, 0.2);
 }
 
 /* Settings dropdown */
@@ -1471,6 +1445,20 @@ td:hover .tableCellCopyButton {
   flex-direction: column;
   gap: 8px;
   min-width: 180px;
+  max-height: 300px;
+  overflow-y: auto;
+  /* nicer scrollbar inside the dark tooltip */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+.skillTooltip::-webkit-scrollbar {
+  width: 6px;
+}
+
+.skillTooltip::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
 }
 
 .skillTooltipHeader {

@@ -159,6 +159,43 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    else if (toolId === 'ZapAjaxSpider') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             WITH d
+             OPTIONAL MATCH (b:BaseURL {user_id: $uid, project_id: $pid})
+             WITH d, collect(DISTINCT b.url) AS baseurls
+             OPTIONAL MATCH (b2:BaseURL {user_id: $uid, project_id: $pid})-[:HAS_ENDPOINT]->(e:Endpoint)
+             RETURN d.name AS domain, baseurls, size(baseurls) AS baseurlCount, count(DISTINCT e) AS endpointCount`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const baseurls: string[] = record?.get('baseurls') || []
+          const baseurlCount = record?.get('baseurlCount')?.toNumber?.() ?? record?.get('baseurlCount') ?? 0
+          const endpointCount = record?.get('endpointCount')?.toNumber?.() ?? record?.get('endpointCount') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_baseurls: baseurls,
+              existing_baseurls_count: baseurlCount,
+              existing_endpoints_count: endpointCount,
+              existing_subdomains_count: 0,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for ZapAjaxSpider graph-inputs, falling back to settings:', err)
+      }
+    }
+
     else if (toolId === 'Hakrawler') {
       try {
         const session = getSession()
@@ -363,6 +400,46 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
       } catch (err) {
         console.warn('Neo4j query failed for Arjun graph-inputs, falling back to settings:', err)
+      }
+    }
+
+    else if (toolId === 'EndpointAiClassifier') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             WITH d
+             OPTIONAL MATCH (e:Endpoint {user_id: $uid, project_id: $pid})
+             OPTIONAL MATCH (p:Parameter {user_id: $uid, project_id: $pid})
+             OPTIONAL MATCH (e2:Endpoint {user_id: $uid, project_id: $pid})
+               WHERE e2.ai_interface_type IS NOT NULL AND e2.ai_interface_type <> 'non-llm'
+             RETURN d.name AS domain,
+                    count(DISTINCT e) AS endpointCount,
+                    count(DISTINCT p) AS parameterCount,
+                    count(DISTINCT e2) AS alreadyClassifiedCount`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const endpointCount = record?.get('endpointCount')?.toNumber?.() ?? record?.get('endpointCount') ?? 0
+          const parameterCount = record?.get('parameterCount')?.toNumber?.() ?? record?.get('parameterCount') ?? 0
+          const alreadyClassifiedCount = record?.get('alreadyClassifiedCount')?.toNumber?.() ?? record?.get('alreadyClassifiedCount') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_endpoints_count: endpointCount,
+              existing_parameters_count: parameterCount,
+              already_ai_classified_count: alreadyClassifiedCount,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for EndpointAiClassifier graph-inputs, falling back to settings:', err)
       }
     }
 
@@ -817,6 +894,52 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
       } catch (err) {
         console.warn('Neo4j query failed for SubdomainTakeover graph-inputs, falling back to settings:', err)
+      }
+    }
+
+    else if (toolId === 'AiSurfaceRecon') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             WITH d
+             OPTIONAL MATCH (b:BaseURL {user_id: $uid, project_id: $pid})
+             WITH d, collect(DISTINCT b.url) AS baseurls
+             OPTIONAL MATCH (e:Endpoint {user_id: $uid, project_id: $pid})
+             WITH d, baseurls,
+                  count(DISTINCT CASE WHEN (e.ai_interface_type IS NOT NULL AND e.ai_interface_type <> 'non-llm') OR e.is_ai_framework_detected = true THEN e END) AS aiEndpoints,
+                  count(DISTINCT CASE WHEN e.ai_interface_type = 'mcp' THEN e END) AS mcpEndpoints
+             OPTIONAL MATCH (svc)-[:HAS_TECHNOLOGY|USES_TECHNOLOGY]->(t:Technology {category: 'ai-vector-db', user_id: $uid, project_id: $pid})
+             RETURN d.name AS domain, baseurls, size(baseurls) AS baseurlCount, aiEndpoints, mcpEndpoints,
+                    count(DISTINCT svc) AS vectorDbServices`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const baseurls: string[] = record?.get('baseurls') || []
+          const baseurlCount = record?.get('baseurlCount')?.toNumber?.() ?? record?.get('baseurlCount') ?? 0
+          const aiEndpoints = record?.get('aiEndpoints')?.toNumber?.() ?? record?.get('aiEndpoints') ?? 0
+          const mcpEndpoints = record?.get('mcpEndpoints')?.toNumber?.() ?? record?.get('mcpEndpoints') ?? 0
+          const vectorDbServices = record?.get('vectorDbServices')?.toNumber?.() ?? record?.get('vectorDbServices') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_subdomains_count: 0,
+              existing_baseurls: baseurls,
+              existing_baseurls_count: baseurlCount,
+              existing_ai_endpoints_count: aiEndpoints,
+              existing_mcp_endpoints_count: mcpEndpoints,
+              existing_vector_db_services_count: vectorDbServices,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for AiSurfaceRecon graph-inputs, falling back to settings:', err)
       }
     }
 

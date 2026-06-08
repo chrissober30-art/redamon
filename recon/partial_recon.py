@@ -61,6 +61,7 @@ from recon.partial_recon_modules.http_probing import run_httpx
 from recon.partial_recon_modules.web_crawling import (
     run_katana,
     run_hakrawler,
+    run_zap_ajax_spider_partial,
     run_ffuf,
     run_gau,
     run_jsluice,
@@ -70,6 +71,8 @@ from recon.partial_recon_modules.parameter_discovery import (
     run_arjun,
     run_kiterunner,
 )
+from recon.partial_recon_modules.endpoint_ai_classification import run_endpoint_ai_classifier
+from recon.partial_recon_modules.ai_surface_recon import run_ai_surface_recon as run_ai_surface_partial
 from recon.partial_recon_modules.js_analysis import run_jsrecon
 from recon.partial_recon_modules.graphql_scanning import run_graphqlscan
 from recon.partial_recon_modules.vulnerability_scanning import (
@@ -122,6 +125,8 @@ def main():
         run_katana(config)
     elif tool_id == "Hakrawler":
         run_hakrawler(config)
+    elif tool_id == "ZapAjaxSpider":
+        run_zap_ajax_spider_partial(config)
     elif tool_id == "Gau":
         run_gau(config)
     elif tool_id == "Jsluice":
@@ -134,6 +139,10 @@ def main():
         run_ffuf(config)
     elif tool_id == "Arjun":
         run_arjun(config)
+    elif tool_id == "EndpointAiClassifier":
+        run_endpoint_ai_classifier(config)
+    elif tool_id == "AiSurfaceRecon":
+        run_ai_surface_partial(config)
     elif tool_id == "JsRecon":
         run_jsrecon(config)
     elif tool_id == "GraphqlScan":

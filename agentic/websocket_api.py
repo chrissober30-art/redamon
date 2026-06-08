@@ -88,6 +88,8 @@ class MessageType(str, Enum):
     FIRETEAM_MEMBER_COMPLETED = "fireteam_member_completed"
     FIRETEAM_COMPLETED = "fireteam_completed"
     FIRETEAM_MEMBER_AWAITING_CONFIRMATION = "fireteam_member_awaiting_confirmation"
+    # Background-job lifecycle events emitted by JobRegistry
+    JOB_UPDATE = "job_update"
 
 
 # =============================================================================

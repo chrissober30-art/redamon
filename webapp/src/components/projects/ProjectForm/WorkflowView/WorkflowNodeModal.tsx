@@ -16,6 +16,7 @@ import { MasscanSection } from '../sections/MasscanSection'
 import { NmapSection } from '../sections/NmapSection'
 import { HttpxSection } from '../sections/HttpxSection'
 import { KatanaSection } from '../sections/KatanaSection'
+import { ZapAjaxSpiderSection } from '../sections/ZapAjaxSpiderSection'
 import { HakrawlerSection } from '../sections/HakrawlerSection'
 import { JsluiceSection } from '../sections/JsluiceSection'
 import { FfufSection } from '../sections/FfufSection'
@@ -23,6 +24,8 @@ import { GauSection } from '../sections/GauSection'
 import { ParamSpiderSection } from '../sections/ParamSpiderSection'
 import { KiterunnerSection } from '../sections/KiterunnerSection'
 import { ArjunSection } from '../sections/ArjunSection'
+import { ResourceEnumAiSection } from '../sections/ResourceEnumAiSection'
+import { AiSurfaceReconSection } from '../sections/AiSurfaceReconSection'
 import { JsReconSection } from '../sections/JsReconSection'
 import { NucleiSection } from '../sections/NucleiSection'
 import { GraphqlScanSection } from '../sections/GraphqlScanSection'
@@ -89,6 +92,7 @@ export function WorkflowNodeModal({
       case 'Nmap':              return <NmapSection {...baseProps} />
       case 'Httpx':             return <HttpxSection {...baseProps} />
       case 'Katana':            return <KatanaSection {...baseProps} />
+      case 'ZapAjaxSpider':     return <ZapAjaxSpiderSection {...baseProps} />
       case 'Hakrawler':         return <HakrawlerSection {...baseProps} />
       case 'Jsluice':           return <JsluiceSection {...baseProps} />
       case 'Ffuf':              return <FfufSection {...extendedProps} />
@@ -96,6 +100,8 @@ export function WorkflowNodeModal({
       case 'ParamSpider':       return <ParamSpiderSection {...baseProps} />
       case 'Kiterunner':        return <KiterunnerSection {...baseProps} />
       case 'Arjun':             return <ArjunSection {...baseProps} />
+      case 'EndpointAiClassifier': return <ResourceEnumAiSection {...baseProps} />
+      case 'AiSurfaceRecon':    return <AiSurfaceReconSection {...baseProps} />
       case 'JsRecon':           return <JsReconSection {...extendedProps} />
       case 'Nuclei':            return <NucleiSection {...baseProps} />
       case 'GraphqlScan':       return <GraphqlScanSection {...extendedProps} />

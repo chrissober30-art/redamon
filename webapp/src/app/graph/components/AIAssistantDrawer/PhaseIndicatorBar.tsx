@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { Wrench, Swords, Check, Settings, Lightbulb, Server } from 'lucide-react'
+import { Wrench, Swords, Check, Settings, Server } from 'lucide-react'
 import { StealthIcon } from '@/components/icons/StealthIcon'
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip'
 import { useProject } from '@/providers/ProjectProvider'
@@ -33,8 +33,6 @@ interface PhaseIndicatorBarProps {
   iterationCount: number
   stealthMode: boolean
   onToggleStealth?: (v: boolean) => void
-  deepThinkEnabled: boolean
-  onToggleDeepThink?: (v: boolean) => void
   settingsDropdownRef: React.RefObject<HTMLDivElement | null>
   showSettingsDropdown: boolean
   setShowSettingsDropdown: React.Dispatch<React.SetStateAction<boolean>>
@@ -51,8 +49,6 @@ export function PhaseIndicatorBar({
   iterationCount,
   stealthMode,
   onToggleStealth,
-  deepThinkEnabled,
-  onToggleDeepThink,
   settingsDropdownRef,
   showSettingsDropdown,
   setShowSettingsDropdown,
@@ -158,6 +154,7 @@ export function PhaseIndicatorBar({
       {attackPathType && (currentPhase === 'informational' || currentPhase === 'exploitation' || currentPhase === 'post_exploitation') && (
         <Tooltip
           position="bottom"
+          interactive
           content={
             <div className={styles.skillTooltip}>
               <div className={styles.skillTooltipHeader}>
@@ -233,23 +230,6 @@ export function PhaseIndicatorBar({
       ) : stealthMode ? (
         <span className={styles.stealthBadge} title="Stealth Mode — passive/low-noise techniques only">
           <StealthIcon size={11} />
-        </span>
-      ) : null}
-
-      {onToggleDeepThink ? (
-        <button
-          className={`${styles.deepThinkToggle} ${deepThinkEnabled ? styles.deepThinkToggleActive : ''}`}
-          onClick={() => onToggleDeepThink(!deepThinkEnabled)}
-          title={deepThinkEnabled
-            ? 'Deep Think ON — the agent performs strategic reasoning at key decision points (start, phase transitions, failure loops) before acting. Click to disable.'
-            : 'Deep Think OFF — click to enable strategic reasoning at key decision points. Adds ~1 extra LLM call at start, phase transitions, and failure loops to plan multi-step strategies.'
-          }
-        >
-          <Lightbulb size={11} />
-        </button>
-      ) : deepThinkEnabled ? (
-        <span className={styles.deepThinkBadge} title="Deep Think — strategic reasoning at key decision points">
-          <Lightbulb size={11} />
         </span>
       ) : null}
 

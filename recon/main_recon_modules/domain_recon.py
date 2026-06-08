@@ -28,10 +28,53 @@ import sys
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from helpers.ai_signal_catalog import match_ai_txt_hint, match_ai_ns_hint
+
 # Settings are passed from main.py to avoid multiple database queries
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 DNS_RECORD_TYPES = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'SOA', 'CNAME']
+
+
+def _annotate_ai_service_hint(dns_entry: dict, settings: dict | None) -> None:
+    """Apply AI surface recon TXT/NS hint to a per-host DNS result.
+
+    Mutates ``dns_entry`` in place, setting ``ai_service_hint`` to the matched
+    provider name (e.g. ``"anthropic"``, ``"replicate"``, ``"huggingface"``)
+    when a TXT record matches the AI vendor catalogue, or to
+    ``"ai-hosting-candidate"`` when only an NS hint fires. The TXT hint always
+    wins — the NS branch only runs if no TXT match was found, because Vercel /
+    Netlify / Replit / Modal host plenty of non-AI sites.
+
+    No-op when ``settings`` is None (e.g. legacy test harnesses) or when both
+    toggles are off. An empty dict means "use defaults" — both toggles default
+    True per the integration plan's "default-coverage" rule.
+    """
+    if settings is None:
+        return
+    txt_on = settings.get('DOMAIN_RECON_AI_TXT_HINT_ENABLED', True)
+    ns_on = settings.get('DOMAIN_RECON_AI_NS_HINT_ENABLED', True)
+    if not (txt_on or ns_on):
+        return
+
+    records = (dns_entry or {}).get('records') or {}
+    hint: str | None = None
+
+    if txt_on:
+        for value in (records.get('TXT') or []):
+            matched = match_ai_txt_hint(value)
+            if matched:
+                hint = matched
+                break  # first-match wins; AI_TXT_PATTERNS is ordered by strength
+
+    if not hint and ns_on:
+        for value in (records.get('NS') or []):
+            if match_ai_ns_hint(value):
+                hint = 'ai-hosting-candidate'
+                break
+
+    if hint:
+        dns_entry['ai_service_hint'] = hint
 
 
 def get_tor_session(anonymous: bool):
@@ -526,7 +569,7 @@ def verify_domain_ownership(domain: str, token: str, txt_prefix: str = "_redamon
     return result
 
 
-def resolve_all_dns(domain: str, subdomains: list, max_workers: int = 20, record_parallelism: bool = True) -> dict:
+def resolve_all_dns(domain: str, subdomains: list, max_workers: int = 20, record_parallelism: bool = True, settings: dict = None) -> dict:
     """
     Resolve DNS for domain and all subdomains using parallel workers.
 
@@ -535,6 +578,9 @@ def resolve_all_dns(domain: str, subdomains: list, max_workers: int = 20, record
         subdomains: List of discovered subdomains
         max_workers: Max concurrent DNS resolution threads (default: 20)
         record_parallelism: Query 7 record types in parallel per host (default: True)
+        settings: Optional settings dict; when provided, AI surface recon TXT/NS
+            hint annotation runs against each resolved host (gated by
+            DOMAIN_RECON_AI_TXT_HINT_ENABLED / DOMAIN_RECON_AI_NS_HINT_ENABLED).
 
     Returns:
         Dictionary with DNS data for domain and each subdomain
@@ -550,6 +596,7 @@ def resolve_all_dns(domain: str, subdomains: list, max_workers: int = 20, record
     # Resolve root domain first
     print(f"[*][DNS] {domain} (root)")
     result["domain"] = dns_lookup(domain, parallel=record_parallelism)
+    _annotate_ai_service_hint(result["domain"], settings)
     if result["domain"]["ips"]["ipv4"]:
         print(f"[+][DNS] {domain} → {', '.join(result['domain']['ips']['ipv4'])}")
 
@@ -563,6 +610,7 @@ def resolve_all_dns(domain: str, subdomains: list, max_workers: int = 20, record
             subdomain = future_to_sub[future]
             try:
                 dns_result = future.result()
+                _annotate_ai_service_hint(dns_result, settings)
                 result["subdomains"][subdomain] = dns_result
                 if dns_result["ips"]["ipv4"] or dns_result["ips"]["ipv6"]:
                     all_ips = dns_result["ips"]["ipv4"] + dns_result["ips"]["ipv6"]
@@ -575,7 +623,12 @@ def resolve_all_dns(domain: str, subdomains: list, max_workers: int = 20, record
 
     # Stats
     resolved_count = sum(1 for v in result["subdomains"].values() if v["has_records"])
+    ai_hint_count = sum(
+        1 for v in result["subdomains"].values() if v.get("ai_service_hint")
+    ) + (1 if result["domain"].get("ai_service_hint") else 0)
     print(f"[+][DNS] Resolved: {resolved_count}/{len(subs_to_resolve)} subdomains")
+    if settings and ai_hint_count:
+        print(f"[+][DNS] AI service hint set on {ai_hint_count} host(s)")
 
     return result
 
@@ -820,7 +873,7 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
     if resolve:
         dns_workers = (settings or {}).get('DNS_MAX_WORKERS', 50)
         dns_record_parallel = (settings or {}).get('DNS_RECORD_PARALLELISM', True)
-        result["dns"] = resolve_all_dns(domain, all_subs, max_workers=dns_workers, record_parallelism=dns_record_parallel)
+        result["dns"] = resolve_all_dns(domain, all_subs, max_workers=dns_workers, record_parallelism=dns_record_parallel, settings=settings)
 
     # Build subdomain status map from DNS results
     subdomain_status_map = {}

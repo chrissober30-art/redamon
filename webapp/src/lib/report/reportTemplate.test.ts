@@ -104,6 +104,17 @@ function makeReportData(overrides: Partial<ReportData> = {}): ReportData {
       pulses: [],
       malware: [],
     },
+    aiSurface: {
+      totalAiEndpoints: 0,
+      ragIngestEndpoints: 0,
+      promptInjectableParams: 0,
+      mcpServers: 0,
+      mcpPoisoningFindings: 0,
+      vectorDbs: 0,
+      modelFamilies: [],
+      byInterfaceType: [],
+      findings: [],
+    },
     vhostSni: {
       totalFindings: 0,
       ipsTested: 0,

@@ -28,6 +28,9 @@ import sys
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# AI surface recon — regex nmap product/version strings for AI runtimes
+from helpers.ai_signal_catalog import match_ai_nmap_version
+
 
 # =============================================================================
 # Prerequisites
@@ -171,7 +174,7 @@ def build_nmap_command(target_ip: str, ports: str, output_file: str, settings: d
 # XML Parsing
 # =============================================================================
 
-def parse_nmap_xml(xml_path: str, ip_to_hostnames: Dict[str, List[str]]) -> Dict:
+def parse_nmap_xml(xml_path: str, ip_to_hostnames: Dict[str, List[str]], settings: dict = None) -> Dict:
     """
     Parse Nmap XML output using xml.etree.ElementTree.
 
@@ -283,6 +286,20 @@ def parse_nmap_xml(xml_path: str, ip_to_hostnames: Dict[str, List[str]]) -> Dict
                 "cpe": cpe,
                 "scripts": {},
             }
+
+            # AI surface recon: match the product/version string against the
+            # AI runtime catalogue (Ollama, vLLM, LiteLLM, TGI, Triton, …).
+            # Gated by NMAP_AI_VERSION_REGEX_ENABLED. The matched runtime name
+            # is stored on the port_detail so the mixin can promote it onto
+            # the Service node.
+            if settings is None or settings.get("NMAP_AI_VERSION_REGEX_ENABLED", True):
+                ai_runtime = (
+                    match_ai_nmap_version(product)
+                    or match_ai_nmap_version(version)
+                    or match_ai_nmap_version(extrainfo)
+                )
+                if ai_runtime:
+                    port_detail["ai_runtime_version"] = ai_runtime
 
             # Track service detection
             if product:
@@ -471,7 +488,7 @@ def run_nmap_scan(recon_data: dict, output_file: Path = None, settings: dict = N
             return [], [], ""
 
         # Parse XML results for this target
-        parsed = parse_nmap_xml(xml_output, ip_to_hostnames)
+        parsed = parse_nmap_xml(xml_output, ip_to_hostnames, settings=settings)
 
         hosts = list(parsed.get("by_host", {}).items())
         services = parsed.get("services_detected", [])

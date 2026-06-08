@@ -121,6 +121,7 @@ Security teams running compliance audits, blue teamers validating hardening base
     // --- DISABLE all web crawlers ---
     katanaEnabled: false,
     hakrawlerEnabled: false,
+    zapAjaxSpiderEnabled: false,
 
     // --- DISABLE archive/passive URL discovery ---
     gauEnabled: false,
@@ -130,6 +131,7 @@ Security teams running compliance audits, blue teamers validating hardening base
     jsluiceEnabled: false,
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory/API fuzzing ---
     ffufEnabled: false,
     kiterunnerEnabled: false,

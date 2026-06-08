@@ -1,0 +1,665 @@
+# RedAmon AI surface recon — guinea pig expected results
+#
+# This is the CONTRACT the e2e driver tests against. After a scan of the
+# guinea pig at 127.0.0.1 (ipMode=true, custom-ports + httpx-paths set from
+# ai_signals.py), Neo4j must match these annotations exactly. The driver
+# fails on any missing, extra, or wrongly-shaped node/edge.
+#
+# Layout of this file mirrors ai_signals.py:
+#   - port_catalog          → 11 Technology(category=ai-*) via naabu-ai-port
+#   - disambiguate_skipped  → 5 ports that MUST NOT carry an AI Technology
+#   - nmap_runtime_versions → 5 Service.ai_runtime_version from product/version regex
+#   - http_headers_via_showroom → 20 Endpoint(is_ai_framework_detected=true) via httpx-ai-header
+#   - http_titles_via_showroom  → 18 Endpoint via httpx-ai-title
+#   - http_title_on_disambiguate_port → 1 special case (port 8080 → open-webui)
+#
+# Patch D model: BaseURL is host-level (scheme://host:port — one per HTTP
+# service). The Endpoint node carries per-path response data + AI annotations
+# and links back via (BaseURL)-[:HAS_ENDPOINT]->(Endpoint). The
+# USES_TECHNOLOGY edge from http_probe lives on Endpoint, not BaseURL.
+#
+# Counts at the bottom let the driver assert exact-match aggregate totals
+# (catches accidental over- or under-tagging).
+#
+# Lap-2 — resource_enum AI classifier (new section below the original 4 phases).
+#   - endpoint_ai_classifier_paths → 21 Endpoint nodes with ai_interface_type
+#   - endpoint_ai_classifier_rag   → 8 Endpoint nodes with is_ai_rag_ingest=true
+#   - prompt_injectable_params     → Parameter nodes with is_ai_prompt_injectable
+# Driver requirements for the lap-2 section:
+#   - Katana enabled (to discover /v1/* etc. from the showroom HTML index)
+#   - resourceEnumAiClassifierEnabled (default true) — runs after Katana
+#   - The showroom is on port 9103 (added by the new lap-2 wiring)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# port_scan AI port catalog — Phase 3 (naabu-ai-port)
+# ─────────────────────────────────────────────────────────────────────
+port_catalog:
+  # Truly AI-vendor-specific ports — auto-promoted by naabu-ai-port (no
+  # corroborating signal required). These are unlikely to collide with
+  # non-AI services on a typical host.
+  - {port: 11434, name: ollama,         category: ai-runtime,   detected_by: naabu-ai-port}
+  - {port: 6333,  name: qdrant,         category: ai-vector-db, detected_by: naabu-ai-port}
+  - {port: 6334,  name: qdrant-grpc,    category: ai-vector-db, detected_by: naabu-ai-port}
+  - {port: 19530, name: milvus,         category: ai-vector-db, detected_by: naabu-ai-port}
+  - {port: 7860,  name: gradio,         category: ai-frontend,  detected_by: naabu-ai-port}
+  - {port: 8188,  name: comfyui,        category: ai-frontend,  detected_by: naabu-ai-port}
+  - {port: 8501,  name: streamlit,      category: ai-frontend,  detected_by: naabu-ai-port}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Disambiguate guard — Phase 3 (catalog disambiguate=True)
+# These ports are OPEN on the target, but port_scan MUST NOT auto-promote.
+# Promotion to Technology(ai-*) can still happen later in http_probe if a
+# title/header signal corroborates the guess.
+# ─────────────────────────────────────────────────────────────────────
+disambiguate_skipped:
+  - 1234   # lm-studio — also common as misc dev/game-server port
+  - 4000   # litellm — also Phoenix LiveView / Rails / Express
+  - 9091   # milvus-metrics — also Prometheus pushgateway default
+  - 3001   # anythingllm — also common Node alt dev port
+  - 8001   # triton-or-vllm
+  - 8080   # open-webui — promoted via http_probe title regex instead, see below
+  # NOTE: catalog ports 8000, 8002 and 3000 (also disambiguate) are NOT
+  # exercised here because Redamon services own them on the host:
+  #   - 8000 / 8002: kali-sandbox MCP network-recon and nuclei
+  #   - 3000:        webapp UI
+  # The disambiguate behaviour is still validated against the listed ports
+  # (the catalog logic is the same for every disambiguate port).
+
+
+# ─────────────────────────────────────────────────────────────────────
+# nmap version regex — Phase 3 (Service.ai_runtime_version)
+# Each Service node listed must carry ai_runtime_version set to the
+# matched runtime name. Requires Nmap -sV to run; if NMAP_ENABLED=false
+# in the project, this whole block is expected to be empty.
+# ─────────────────────────────────────────────────────────────────────
+nmap_runtime_versions:
+  # NOTE: this block is NOT enforced end-to-end. Nmap's `-sV` service
+  # detection recognises the Python aiohttp library underneath the guinea
+  # pig (response timing, error-page format, OPTIONS handling, etc.) and
+  # reports `product='aiohttp'` for every port — ignoring the custom
+  # `Server:` header we set. So `Service.ai_runtime_version` ends up NULL.
+  #
+  # The AI nmap-regex hook (recon/helpers/ai_signal_catalog.py
+  # AI_NMAP_VERSION_PATTERNS) IS validated by parameterised unit tests
+  # in recon/tests/test_ai_port_scan_catalog.py — every catalog entry
+  # (ollama, vllm, litellm, tgi, triton, llama.cpp) has a positive +
+  # negative case. The gap is in the e2e wire only; refer to the
+  # post-scan audit and the C1/C2/C3 decision notes.
+  - {port: 11434, runtime: ollama,  e2e_status: "NULL — nmap sees aiohttp"}
+  - {port: 4000,  runtime: litellm, e2e_status: "NULL — nmap sees aiohttp"}
+  - {port: 18000, runtime: vllm,    e2e_status: "NULL — nmap sees aiohttp"}
+  - {port: 8001,  runtime: triton,  e2e_status: "NULL — nmap sees aiohttp"}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# http_probe header signature — Phase 4 (httpx-ai-header)
+# Each path on port 9100 returns the matching AI header. Patch D: the
+# Endpoint node (path, method='GET', baseurl=http://127.0.0.1:9100) carries
+# ai_framework_name + ai_framework_category + is_ai_framework_detected.
+# A Technology node with the same name + category is MERGEd and linked via
+# (Endpoint)-[:USES_TECHNOLOGY {detected_by:'httpx-ai-header'}]->(Technology).
+# The parent BaseURL (one node, scheme+host+port) groups them via
+# (BaseURL)-[:HAS_ENDPOINT]->(Endpoint).
+# ─────────────────────────────────────────────────────────────────────
+http_headers_via_showroom:
+  - {path: /header/vllm,       framework: vllm,                      category: ai-runtime}
+  - {path: /header/tgi,        framework: tgi,                       category: ai-runtime}
+  - {path: /header/tei,        framework: text-embeddings-inference, category: ai-runtime}
+  - {path: /header/bentoml,    framework: bentoml,                   category: ai-runtime}
+  - {path: /header/baseten,    framework: baseten,                   category: ai-runtime}
+  - {path: /header/modal,      framework: modal,                     category: ai-runtime}
+  - {path: /header/replicate,  framework: replicate,                 category: ai-runtime}
+  - {path: /header/runpod,     framework: runpod,                    category: ai-runtime}
+  - {path: /header/langchain,  framework: langchain,                 category: ai-framework}
+  - {path: /header/llamaindex, framework: llamaindex,                category: ai-framework}
+  - {path: /header/langfuse,   framework: langfuse,                  category: ai-framework}
+  - {path: /header/mcp,        framework: mcp,                       category: ai-framework}
+  - {path: /header/litellm,    framework: litellm,                   category: ai-proxy}
+  - {path: /header/helicone,   framework: helicone,                  category: ai-proxy}
+  - {path: /header/portkey,    framework: portkey,                   category: ai-proxy}
+  - {path: /header/omniroute,  framework: omniroute,                 category: ai-proxy}
+  - {path: /header/cloudflare, framework: cloudflare-ai-gateway,     category: ai-proxy}
+  - {path: /header/together,   framework: together,                  category: ai-proxy}
+  - {path: /header/openai,     framework: openai,                    category: ai-sdk-client}
+  - {path: /header/anthropic,  framework: anthropic,                 category: ai-sdk-client}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# http_probe title regex — Phase 4 (httpx-ai-title)
+# Each path on port 9101 returns HTML with the matching <title>.
+# Patch D: Endpoint.ai_frontend_product_guess is set on the per-path
+# Endpoint node; Technology(category=ai-frontend) MERGEd and linked via
+# (Endpoint)-[:USES_TECHNOLOGY {detected_by:'httpx-ai-title'}]->(Technology).
+# ─────────────────────────────────────────────────────────────────────
+http_titles_via_showroom:
+  - {path: /title/open-webui,    product: open-webui}
+  - {path: /title/librechat,     product: librechat}
+  - {path: /title/anythingllm,   product: anythingllm}
+  - {path: /title/flowise,       product: flowise}
+  - {path: /title/langflow,      product: langflow}
+  - {path: /title/dify,          product: dify}
+  - {path: /title/comfyui,       product: comfyui}
+  - {path: /title/gradio,        product: gradio}
+  - {path: /title/streamlit,     product: streamlit}
+  - {path: /title/chatgpt-clone, product: chatgpt-clone}
+  - {path: /title/hf-chat-ui,    product: hf-chat-ui}
+  - {path: /title/lobechat,      product: lobechat}
+  - {path: /title/nextchat,      product: nextchat}
+  - {path: /title/sillytavern,   product: sillytavern}
+  - {path: /title/jan,           product: jan}
+  - {path: /title/h2ogpt,        product: h2ogpt}
+  - {path: /title/privategpt,    product: privategpt}
+  - {path: /title/quivr,         product: quivr}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Special case — disambiguate port 8080 promoted via http_probe title
+# Even though port 8080 has disambiguate=True (port_scan skipped), the
+# guinea pig serves <title>Open WebUI</title> there. http_probe sees it,
+# Patch D sets Endpoint.is_ai_framework_detected=true on the '/' Endpoint
+# under BaseURL=http://127.0.0.1:8080, MERGEs Technology(ai-frontend).
+# ─────────────────────────────────────────────────────────────────────
+http_title_on_disambiguate_port:
+  - {port: 8080, product: open-webui, category: ai-frontend, detected_by: httpx-ai-title}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Aggregate counts — exact-match assertions
+# ─────────────────────────────────────────────────────────────────────
+counts:
+  # Phase 3 — only AI-vendor-specific (non-disambiguate) ports auto-promote.
+  # Generic ports like 1234/4000/9091/3001 are now disambiguate=True and
+  # only get tagged if http_probe corroborates via header/title.
+  ai_technologies_via_port_catalog: 7
+  disambiguate_ports_open_but_not_promoted: 6    # 1234, 4000, 9091, 3001, 8001, 8080
+  services_with_ai_runtime_version: 4            # ollama, litellm, vllm@18000, triton@8001
+
+  # Phase 4 — header showroom paths (Patch D: one Endpoint per path)
+  endpoints_with_ai_framework_detected_header: 20
+
+  # Phase 4 — title showroom paths (Patch D: one Endpoint per path)
+  endpoints_with_ai_frontend_product_guess_title: 18
+
+  # Phase 4 — disambiguate port that http_probe rescues via title
+  endpoints_with_ai_via_disambiguate_title_path: 1
+
+  # Patch D — BaseURL is now one per HTTP service (scheme+host+port), no
+  # per-path duplication. With 9100 (headers), 9101 (titles), and 8080
+  # (open-webui disambiguate), there are 3 BaseURL nodes total carrying
+  # AI-tagged Endpoints (port_scan-promoted catalog ports add more BaseURLs
+  # only if httpx successfully probes them — most catalog ports here are
+  # listening on the guinea pig but not serving HTTP, so they show up as
+  # Service+Technology but no BaseURL).
+  baseurls_with_ai_tagged_endpoints: 3
+
+  # Total AI Technology nodes (union of port catalog + http_probe MERGEs).
+  # The exact total depends on name overlap: a product like 'anythingllm'
+  # appears as both port catalog (port 3001) AND title showroom (/title/anythingllm),
+  # but they MERGE to a single Technology node (catalog rule). The driver
+  # script handles the deduplication; we list the *named* Technologies expected:
+  unique_ai_technology_names_expected:
+    # From port catalog auto-promote (7 — vendor-specific only)
+    - ollama
+    - qdrant
+    - qdrant-grpc
+    - milvus
+    - gradio
+    - comfyui
+    - streamlit
+    # The following used to be auto-promoted but are now disambiguate=True.
+    # They still appear in the graph because http_probe rescues them via
+    # header or title regex on the showroom paths (or root path):
+    #   - lm-studio       — not in any showroom; would NOT appear under new rules
+    #                       on a non-guinea-pig host (only ollama header on /header/ollama
+    #                       would surface it via a different signal channel)
+    #   - litellm         — surfaces via /header/litellm
+    #   - milvus-metrics  — not in any showroom; would NOT appear under new rules
+    #   - anythingllm     — surfaces via /title/anythingllm
+    # From header showroom (20, minus any duplicates with port catalog)
+    - vllm
+    - tgi
+    - text-embeddings-inference
+    - bentoml
+    - baseten
+    - modal
+    - replicate
+    - runpod
+    - langchain
+    - llamaindex
+    - langfuse
+    - mcp
+    - helicone
+    - portkey
+    - omniroute
+    - cloudflare-ai-gateway
+    - together
+    - openai
+    - anthropic
+    # From title showroom (18, minus duplicates with port catalog and header showroom)
+    - open-webui
+    - librechat
+    - flowise
+    - langflow
+    - dify
+    - chatgpt-clone
+    - hf-chat-ui
+    - lobechat
+    - nextchat
+    - sillytavern
+    - jan
+    - h2ogpt
+    - privategpt
+    - quivr
+    # NOTE: 'litellm', 'bentoml', 'gradio', 'comfyui', 'streamlit',
+    # 'anythingllm' appear in MULTIPLE sources but MERGE to a single
+    # Technology node per name (Cypher MERGE semantics).
+
+
+# ─────────────────────────────────────────────────────────────────────
+# jsluice URL verification — additive, independent from AI surface above.
+#
+# Target: port 9102 (make_jsluice_target_app in server.py). Embeds a
+# mixed-signal /static/app.js whose URL strings exercise every branch
+# of the jsluice deny-list + httpx verifier.
+#
+# Project settings the driver MUST set for this section to apply:
+#   katanaEnabled=true, katanaJsCrawl=true, jsluiceEnabled=true,
+#   jsluiceExtractUrls=true, jsluiceVerifyUrls=true
+#
+# Run the same project twice (verify on / verify off) to validate both
+# the new behavior AND the legacy fallback.
+# ─────────────────────────────────────────────────────────────────────
+jsluice_verifier:
+  base_url: http://127.0.0.1:9102
+
+  # With jsluiceVerifyUrls=true the deny-list drops noise BEFORE httpx
+  # probes and httpx drops dead URLs AFTER probing. Only these survive
+  # as Endpoint nodes under the BaseURL.
+  verify_on:
+    endpoints_present:
+      # Regression for B1: .json must survive the .js deny rule.
+      - {path: /api/v1/users.json, status: 200, source: jsluice}
+      - {path: /api/products,      status: 200, source: jsluice}
+      # 403 is in JSLUICE_VERIFY_ACCEPT_STATUS default — counts as "live".
+      - {path: /admin,             status: 403, source: jsluice}
+
+    endpoints_absent:
+      # Dead URL — httpx 404, fail-closed drops it.
+      - /api/deprecated
+      # Library / bundle noise — deny-list drops BEFORE httpx probes.
+      - /node_modules/lodash/index.js
+      - /rxjs/static-5.10
+      # Static asset — .png suffix matches anchored extension rule.
+      - /assets/logo.png
+
+  # With jsluiceVerifyUrls=false the legacy behavior must publish EVERY
+  # jsluice-extracted URL. Use this run to prove the toggle is honored
+  # and that disabling verification has not been accidentally removed.
+  verify_off:
+    endpoints_present:
+      - {path: /api/v1/users.json,             source: jsluice}
+      - {path: /api/products,                  source: jsluice}
+      - {path: /admin,                         source: jsluice}
+      - {path: /api/deprecated,                source: jsluice}
+      - {path: /node_modules/lodash/index.js,  source: jsluice}
+      - {path: /rxjs/static-5.10,              source: jsluice}
+      - {path: /assets/logo.png,               source: jsluice}
+
+  counts:
+    # Six string literals in app.js (USERS_API, two fetch(), three lib/noise)
+    # plus three more fetch() calls = 7 distinct URLs jsluice should extract.
+    jsluice_urls_pre_verify: 7
+    # After deny-list (drops node_modules, rxjs, .png) → 4 candidates.
+    # After httpx (drops /api/deprecated 404) → 3 verified Endpoint nodes.
+    jsluice_verified_endpoints: 3
+    jsluice_skipped_blacklist: 3
+    jsluice_skipped_unverified: 1
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Lap-2 — resource_enum AI Classifier (port 9103)
+#
+# Katana crawls the showroom index at http://127.0.0.1:9103/ and follows
+# every link. Each link goes to a catalogued AI path with prompt-named
+# + control-named query params. The resource_enum AI classifier (default
+# on) then tags every Endpoint with ai_interface_type and the prompt
+# params with is_ai_prompt_injectable=true.
+#
+# Project settings the driver MUST set for this section to apply:
+#   katanaEnabled=true (so the index gets crawled and the paths discovered)
+#   resourceEnumAiClassifierEnabled=true (default — runs the classifier)
+#   resourceEnumAiPathClassifierEnabled=true
+#   resourceEnumAiRagPathFlagEnabled=true
+#   resourceEnumAiParamInjectableFlagEnabled=true
+# ─────────────────────────────────────────────────────────────────────
+endpoint_ai_classifier:
+  base_url: http://127.0.0.1:9103
+
+  # ai_interface_type per discovered path. Endpoint nodes under the showroom
+  # BaseURL must carry these values after the classifier runs. Driver asserts
+  # MATCH (e:Endpoint {baseurl: 'http://127.0.0.1:9103', path: <path>})
+  # RETURN e.ai_interface_type
+  paths_by_interface_type:
+    # llm-chat (6)
+    - {path: /v1/chat/completions, enum: llm-chat}
+    - {path: /v1/messages, enum: llm-chat}
+    - {path: /api/chat, enum: llm-chat}
+    - {path: /v1beta/models/gemini-1.5-pro:generateContent, enum: llm-chat}
+    - {path: /v2/chat, enum: llm-chat}
+    - {path: /v1/sonar, enum: llm-chat}
+    # llm-completion (3)
+    - {path: /v1/completions, enum: llm-completion}
+    - {path: /v1/fim/completions, enum: llm-completion}
+    - {path: /api/generate, enum: llm-completion}
+    # llm-embedding (3)
+    - {path: /v1/embeddings, enum: llm-embedding}
+    - {path: /api/embed, enum: llm-embedding}
+    - {path: /v2/embed, enum: llm-embedding}
+    # llm-tool-call (2)
+    - {path: /v1/threads/thread_demo/runs, enum: llm-tool-call}
+    - {path: /v1/responses/resp_demo/input_items, enum: llm-tool-call}
+    # sse-stream (2)
+    - {path: /generate_stream, enum: sse-stream}
+    - {path: /agents/demo/stream, enum: sse-stream}
+    # mcp (4)
+    - {path: /mcp, enum: mcp}
+    - {path: /api/mcp, enum: mcp}
+    - {path: /sse, enum: mcp}
+    - {path: /tools/list, enum: mcp}
+    # llm-graphql (1) — only fires here because parent BaseURL would need to
+    # be AI-tagged for the gate, BUT my catalogue actually fires
+    # /graphql unconditionally (only the AMBIGUOUS RAG patterns like /search
+    # need parent-AI). Path classifier has no parent-AI gate. Fires.
+    - {path: /graphql, enum: llm-graphql}
+
+  # is_ai_rag_ingest=true on these (unambiguous catalogue entries — fire
+  # regardless of parent-AI status)
+  rag_endpoints:
+    - /v1/files
+    - /v1/uploads
+    - /v1/vector_stores
+    - /v1/vector_stores/vs_demo/search
+    - /v1/assistants
+    - /vectors/upsert
+    - /v1/objects
+    - /collections/demo/points/search
+
+  # Parameter nodes that MUST carry is_ai_prompt_injectable=true.
+  # The classifier only fires on AI-classified parent endpoints — control
+  # params on the same endpoints (model / temperature / max_tokens / etc.)
+  # must NOT be flagged. The driver asserts both positive and negative.
+  prompt_injectable_params:
+    - {endpoint_path: /v1/chat/completions,             param: messages}
+    - {endpoint_path: /v1/chat/completions,             param: system}
+    - {endpoint_path: /v1/messages,                     param: messages}
+    - {endpoint_path: /api/chat,                        param: messages}
+    - {endpoint_path: /v1beta/models/gemini-1.5-pro:generateContent, param: contents}
+    - {endpoint_path: /v2/chat,                         param: messages}
+    - {endpoint_path: /v1/sonar,                        param: messages}
+    - {endpoint_path: /v1/completions,                  param: prompt}
+    - {endpoint_path: /v1/fim/completions,              param: prompt}
+    - {endpoint_path: /v1/fim/completions,              param: suffix}
+    - {endpoint_path: /api/generate,                    param: prompt}
+    - {endpoint_path: /api/generate,                    param: system}
+    - {endpoint_path: /v1/embeddings,                   param: input}
+    - {endpoint_path: /api/embed,                       param: input}
+    - {endpoint_path: /v2/embed,                        param: inputs}
+    - {endpoint_path: /v1/threads/thread_demo/runs,     param: instructions}
+    - {endpoint_path: /v1/responses/resp_demo/input_items, param: input}
+    - {endpoint_path: /generate_stream,                 param: prompt}
+    - {endpoint_path: /agents/demo/stream,              param: input}
+    - {endpoint_path: /mcp,                             param: arguments}
+    - {endpoint_path: /api/mcp,                         param: arguments}
+    - {endpoint_path: /graphql,                         param: query}
+    - {endpoint_path: /v1/vector_stores/vs_demo/search, param: query}
+    - {endpoint_path: /v1/assistants,                   param: instructions}
+    - {endpoint_path: /collections/demo/points/search,  param: query}
+
+  # Negative — these param names on the SAME endpoints must NOT be flagged.
+  control_params_not_flagged:
+    - {endpoint_path: /v1/chat/completions,  param: model}
+    - {endpoint_path: /v1/chat/completions,  param: temperature}
+    - {endpoint_path: /v1/completions,       param: max_tokens}
+    - {endpoint_path: /v1/embeddings,        param: model}
+    - {endpoint_path: /v1/threads/thread_demo/runs, param: assistant_id}
+    - {endpoint_path: /generate_stream,      param: max_new_tokens}
+    - {endpoint_path: /mcp,                  param: method}
+    - {endpoint_path: /graphql,              param: operationName}
+
+  counts:
+    # 21 paths from RESOURCE_ENUM_AI_PATHS — one Endpoint each.
+    endpoints_with_ai_interface_type: 21
+    # 8 unambiguous RAG paths — Endpoint.is_ai_rag_ingest=true on each.
+    endpoints_with_is_ai_rag_ingest: 8
+    # 25 prompt-injectable params across the 21 endpoints (some endpoints
+    # have 2 prompt params, hence the count > endpoint count).
+    parameters_with_is_ai_prompt_injectable: 25
+    # Endpoints by enum (rollup) — must match exactly.
+    by_interface_type:
+      llm-chat: 6
+      llm-completion: 3
+      llm-embedding: 3
+      llm-tool-call: 2
+      sse-stream: 2
+      mcp: 4
+      llm-graphql: 1
+    # The base URL gets exactly one BaseURL node with HAS_ENDPOINT into 21+8=29
+    # Endpoints (one per unique path). The classifier doesn't create new nodes
+    # — it only enriches existing Endpoint + Parameter rows.
+    base_url_count: 1
+
+
+# ============================================================================
+# Lap-3 (Phase 6) — js_recon AI SDK detection
+#
+# When the scan finishes against the JS_RECON_AI_SDK_PORT (9104) showroom:
+#
+#   1. Katana discovers each /static/<filename>.js URL via the <script>
+#      tags in the index HTML, and creates Endpoint(source='js_recon') for
+#      each (or just records them as URLs that js_recon picks up).
+#   2. js_recon downloads each fixture, runs match_ai_sdk() against the
+#      content, and writes one JsReconFinding per detection. The mixin
+#      creates a parent JsReconFinding(finding_type='js_file') for each
+#      source URL too.
+#   3. For ai-sdk-key-literal findings whose captured_value matches an
+#      existing Secret on the same source_url (from JS_SECRET_PATTERNS),
+#      the Secret node is enriched with ai_provider + ai_finding_id.
+#
+# Expectations below are minimums — the catalogue is OR-friendly so a
+# single fixture may match multiple patterns (e.g. legacy + new Google
+# SDK names). The exact counts are an UPPER bound; assertions should use
+# >= for SDK imports and == for the disambiguation and dedup-test cases.
+# ============================================================================
+
+js_recon_ai_sdk:
+  base_url: "http://127.0.0.1:9104"
+
+  # 23 fixture JS files served at /static/<filename>.js. js_recon must
+  # create one JsReconFinding(finding_type='js_file') for each.
+  js_files_created: 23
+
+  # Per-fixture expectations. Each entry is a SUBSET assertion — the
+  # finding may exist with additional fields, but at minimum these
+  # category/sdk_name pairs MUST be present.
+  fixtures:
+    openai-leaked.js:
+      categories_present:
+        - ai-sdk-client          # "OpenAI" (top-level or sub-path import)
+        - ai-sdk-key-literal     # "OpenAI SDK constructor" (suppresses prefix duplicate)
+        - ai-sdk-browser-allowed # "dangerouslyAllowBrowser"
+        - ai-provider-url        # "OpenAI API endpoint"
+      # The constructor wins; exactly ONE ai-sdk-key-literal finding.
+      key_literal_count: 1
+      severity_max: critical
+
+    anthropic-direct.js:
+      categories_present:
+        - ai-sdk-client          # "Anthropic"
+        - ai-sdk-key-literal     # "Anthropic SDK constructor"
+        - ai-sdk-browser-allowed # via !0 terser form
+        - ai-provider-url
+      key_literal_count: 1
+      severity_max: critical
+
+    gemini-with-context.js:
+      categories_present:
+        - ai-sdk-client          # "Google Gemini (legacy SDK)" + "Google GenAI (unified)"
+        - ai-sdk-key-literal     # "Google Gemini SDK constructor" (CRITICAL — disambiguation escalates)
+        - ai-provider-url
+      key_literal_count: 1
+      severity_max: critical
+      # Disambiguation must escalate — sdk_name MUST contain "Gemini"
+      key_literal_sdk_name_contains: Gemini
+
+    google-maps-key.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Google API Key (likely Maps/Firebase)" (MEDIUM — downgrade)
+      key_literal_count: 1
+      severity_max: medium
+      key_literal_sdk_name_contains: Maps/Firebase
+
+    langchain-stack.js:
+      categories_present:
+        - ai-sdk-client          # multiple @langchain/* sub-packages
+      sdk_client_count_min: 4
+
+    vercel-ai-multi.js:
+      categories_present:
+        - ai-sdk-client          # ai/react + @ai-sdk/* sub-packages
+      sdk_client_count_min: 3
+
+    vector-dbs.js:
+      categories_present:
+        - ai-sdk-client          # Pinecone + Qdrant + Chroma + Weaviate
+        - ai-sdk-key-literal     # Pinecone constructor
+      sdk_client_count_min: 4
+
+    mcp-client.js:
+      categories_present:
+        - ai-sdk-client          # MCP SDK + MCP Server
+
+    next-public-leak.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Framework-public AI key leak"
+        - ai-provider-url
+      severity_max: critical
+
+    bearer-fetch.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Bearer-header AI key literal"
+        - ai-provider-url        # Groq
+
+    anthropic-header.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Anthropic x-api-key header literal"
+        - ai-provider-url
+
+    openwebui-frontend.js:
+      categories_present:
+        - ai-frontend-detected   # "Open WebUI"
+      frontend_count: 1
+
+    gradio-frontend.js:
+      categories_present:
+        - ai-frontend-detected   # "Gradio"
+      # Multiple Gradio markers in one file — must dedup to ONE finding.
+      frontend_count: 1
+
+    flowise-frontend.js:
+      categories_present:
+        - ai-frontend-detected
+
+    sillytavern-frontend.js:
+      categories_present:
+        - ai-frontend-detected
+
+    next-data-blob.js:
+      categories_present:
+        - ai-sdk-browser-allowed # JSON-quoted form
+      browser_allowed_count: 1
+
+    minified-vendor.js:
+      categories_present:
+        - ai-sdk-client
+        - ai-sdk-key-literal
+        - ai-sdk-browser-allowed
+        - ai-provider-url
+
+    huggingface-inference.js:
+      categories_present:
+        - ai-sdk-client
+        - ai-sdk-key-literal     # "HuggingFace SDK constructor"
+        - ai-provider-url
+
+    langfuse-tracing.js:
+      categories_present:
+        - ai-sdk-client
+        - ai-sdk-key-literal     # "Langfuse SDK constructor (secretKey)"
+
+    openrouter-bearer.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Bearer-header AI key literal"
+        - ai-provider-url
+
+    secret-dup-test.js:
+      categories_present:
+        - ai-sdk-key-literal
+        - ai-provider-url
+      # CRITICAL: the legacy JS_SECRET_PATTERNS Secret node for this file
+      # must be enriched by the Phase 6 mixin. After the scan:
+      #   MATCH (s:Secret {source_url: '<file_url>'}) RETURN s.ai_provider
+      # must return a non-null value matching the AI key prefix.
+      mixin_enrichment:
+        secret_ai_provider_not_null: true
+
+    negative-jquery.js:
+      categories_present: []    # MUST produce zero ai-sdk-* findings
+
+    negative-stripe.js:
+      categories_present: []    # MUST produce zero ai-sdk-* findings
+      # Negative invariant: Stripe sk_live_ + AWS AKIA literals must NOT
+      # trip any AI key pattern. If this fails, the catalogue is too greedy.
+
+  # Global Cypher invariants — agent-level assertions the e2e driver can run.
+  cypher_invariants:
+    # The two negative fixtures together must NOT contribute any ai-sdk-*
+    # finding to the graph.
+    no_ai_findings_on_negatives: |
+      MATCH (jf:JsReconFinding)
+      WHERE jf.source_url CONTAINS '/static/negative-'
+        AND jf.finding_type STARTS WITH 'ai-'
+      RETURN count(jf) AS n  // expected: 0
+
+    # The Gemini-with-context fixture must produce a critical AI key finding.
+    gemini_escalation: |
+      MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-key-literal'})
+      WHERE jf.source_url CONTAINS '/static/gemini-with-context.js'
+        AND jf.sdk_name CONTAINS 'Gemini'
+        AND jf.severity = 'critical'
+      RETURN count(jf) AS n  // expected: 1
+
+    # The Maps-only fixture must produce a medium AI key finding tagged
+    # as Maps/Firebase.
+    maps_downgrade: |
+      MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-key-literal'})
+      WHERE jf.source_url CONTAINS '/static/google-maps-key.js'
+        AND jf.sdk_name CONTAINS 'Maps/Firebase'
+        AND jf.severity = 'medium'
+      RETURN count(jf) AS n  // expected: 1
+
+    # The secret-dup-test fixture must enrich its Secret with ai_provider.
+    secret_enrichment: |
+      MATCH (s:Secret)
+      WHERE s.source_url CONTAINS '/static/secret-dup-test.js'
+        AND s.ai_provider IS NOT NULL
+      RETURN count(s) AS n  // expected: >=1
+
+    # Across all fixtures, at least 5 distinct categories must be represented.
+    category_diversity: |
+      MATCH (jf:JsReconFinding)
+      WHERE jf.finding_type IN ['ai-sdk-client','ai-sdk-key-literal',
+                                  'ai-sdk-browser-allowed','ai-frontend-detected',
+                                  'ai-provider-url']
+      RETURN count(DISTINCT jf.finding_type) AS n  // expected: 5

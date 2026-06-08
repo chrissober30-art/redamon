@@ -34,6 +34,7 @@ from recon.helpers.js_recon.framework import (
     detect_frameworks, detect_dom_sinks, detect_dev_comments,
     load_custom_frameworks,
 )
+from recon.helpers.ai_signal_catalog import match_ai_sdk
 
 
 # File extensions to include as JS files
@@ -266,6 +267,7 @@ def _run_analysis(js_files: list, settings: dict) -> dict:
         'emails': [],
         'ip_addresses': [],
         'object_references': [],
+        'ai_sdk_findings': [],
     }
 
     # Load custom extensions
@@ -280,7 +282,15 @@ def _run_analysis(js_files: list, settings: dict) -> dict:
     min_confidence = settings.get('JS_RECON_MIN_CONFIDENCE', 'low')
 
     # --- Run analyzers in parallel ---
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    # Manual executor management so that JS_RECON_TIMEOUT acts as a real
+    # wall-clock budget: when it elapses, pending tasks are cancelled and the
+    # function returns with whatever results completed. The default `with`
+    # form calls shutdown(wait=True) which blocks until all worker threads
+    # finish naturally, defeating the per-future timeout.
+    analysis_budget = settings.get('JS_RECON_TIMEOUT', 900)
+    deadline = time.monotonic() + analysis_budget
+    executor = ThreadPoolExecutor(max_workers=4)
+    try:
         futures = {}
 
         # 1. Pattern scanning (secrets, emails, IPs, UUIDs)
@@ -349,10 +359,34 @@ def _run_analysis(js_files: list, settings: dict) -> dict:
             return fw_results
         futures['framework'] = executor.submit(run_framework_analysis)
 
+        # 6. AI SDK detection (LLM SDKs, hard-coded keys, browser-mode flag,
+        #    AI-frontend product markers in shipped JS chunks). Reads the
+        #    AI signal catalogue; sends no extra traffic.
+        if settings.get('JS_RECON_AI_SDK_DETECTION_ENABLED', True):
+            def run_ai_sdk_detection():
+                all_findings = []
+                for js_file in js_files:
+                    try:
+                        content = js_file.get('content', '')
+                        url = js_file.get('url', '')
+                        for finding in match_ai_sdk(content):
+                            # Stamp the source URL so the mixin can build a
+                            # parent file linkage. A deterministic ID lets
+                            # the graph MERGE be idempotent across re-scans.
+                            sig = f"{url}:{finding['category']}:{finding['sdk_name']}:{finding['byte_offset']}"
+                            finding['id'] = f"ai-sdk-{hashlib.sha256(sig.encode()).hexdigest()[:16]}"
+                            finding['source_url'] = url
+                            all_findings.append(finding)
+                    except Exception as e:
+                        print(f"[!][JsRecon] AI SDK scan failed for {js_file.get('url', '?')}: {e}")
+                return all_findings
+            futures['ai_sdk'] = executor.submit(run_ai_sdk_detection)
+
         # Collect results
         for name, future in futures.items():
             try:
-                result = future.result(timeout=settings.get('JS_RECON_TIMEOUT', 900))
+                remaining = max(1.0, deadline - time.monotonic())
+                result = future.result(timeout=remaining)
 
                 if name == 'patterns':
                     # Unpack tuple: (findings, filtered_stats)
@@ -411,8 +445,16 @@ def _run_analysis(js_files: list, settings: dict) -> dict:
                     results['dom_sinks'] = result.get('dom_sinks', [])
                     results['dev_comments'] = result.get('dev_comments', [])
 
+                elif name == 'ai_sdk':
+                    results['ai_sdk_findings'] = result
+
             except Exception as e:
                 print(f"[!][JsRecon] Analyzer '{name}' failed: {type(e).__name__}: {e}")
+    finally:
+        # cancel_futures drops tasks that have not started yet; tasks already
+        # running cannot be killed (Python limitation) but the container exits
+        # shortly after this function returns so the threads die with it.
+        executor.shutdown(wait=False, cancel_futures=True)
 
     return results
 
@@ -586,7 +628,19 @@ def _build_summary(results: dict) -> dict:
         'new_subdomains_discovered': len(results.get('discovered_subdomains', [])),
         'external_domains_found': len(results.get('external_domains', [])),
         'object_references_found': len(results.get('object_references', [])),
+        'ai_sdk_findings_total': len(results.get('ai_sdk_findings', [])),
+        'ai_sdk_findings_by_category': _count_by(results.get('ai_sdk_findings', []), 'category'),
+        'ai_sdk_findings_by_severity': _count_by(results.get('ai_sdk_findings', []), 'severity'),
     }
+
+
+def _count_by(items: list, key: str) -> dict:
+    """Tally ``items`` by ``key`` for summary rollups."""
+    out: dict = {}
+    for item in items:
+        v = item.get(key, 'unknown')
+        out[v] = out.get(v, 0) + 1
+    return out
 
 
 def run_js_recon(combined_result: dict, settings: dict) -> dict:
@@ -634,6 +688,7 @@ def run_js_recon(combined_result: dict, settings: dict) -> dict:
             ("JS_RECON_CUSTOM_FRAMEWORKS", "Filtering"),
             ("JS_RECON_VALIDATE_KEYS", "Validation"),
             ("JS_RECON_VALIDATION_TIMEOUT", "Validation"),
+            ("JS_RECON_AI_SDK_DETECTION_ENABLED", "AI surface"),
         ],
     )
 

@@ -400,6 +400,11 @@ def run_httpx(config: dict) -> None:
         print(f"[+][Partial Recon] Found {sub_count} subdomains (no port scan data, httpx will use default ports)")
 
     # Run httpx probe (same function as full pipeline)
+    # Partial recon already scopes ports via its own modal injection into
+    # by_host (probe_ports above), so disable run_http_probe's NAABU_CUSTOM_PORTS
+    # scope guard — otherwise a project-level custom-port setting could drop the
+    # ports the user picked for this specific partial run.
+    settings["HTTPX_ENFORCE_CUSTOM_PORT_SCOPE"] = False
     print(f"[*][Partial Recon] Running httpx HTTP probing...")
     result = _run_http_probe(recon_data, output_file=None, settings=settings)
 

@@ -6,6 +6,7 @@ from state import (
     _group_trace_by_iteration,
     _dedup_findings,
     _severity_rank,
+    _format_step_diagnostics,
     format_chain_context,
 )
 
@@ -845,6 +846,224 @@ class TestSummaryTier(unittest.TestCase):
         self.assertIn("[info]", result)
         self.assertIn("[exploit]", result)
         self.assertIn("[post-ex]", result)
+
+
+# ---------------------------------------------------------------------------
+# _format_step_diagnostics — the P1+P2 inline annotation helper
+# ---------------------------------------------------------------------------
+
+class TestFormatStepDiagnostics(unittest.TestCase):
+    """The `[3ms, application_5xx_fast: <hint>]` suffix that turns the chain
+    context from a list of FAILED stamps into a diagnostic timeline. The
+    label is preserved (engineers grep for it) and a terse plain-English
+    hint is appended after a colon so the LLM gets immediate context."""
+
+    def test_renders_duration_and_class(self):
+        out = _format_step_diagnostics(
+            {"duration_ms": 3, "error_class": "application_5xx_fast"}
+        )
+        # Label preserved for grep / programmatic consumers
+        self.assertIn("application_5xx_fast", out)
+        # Hint appended after colon, plain English
+        self.assertIn("parse-time crash", out)
+        # Duration prefix unchanged
+        self.assertTrue(out.startswith(" [3ms,"))
+
+    def test_omits_class_when_success(self):
+        """Success steps don't need a class annotation — just timing."""
+        out = _format_step_diagnostics(
+            {"duration_ms": 18, "error_class": "success"}
+        )
+        self.assertEqual(out, " [18ms]")
+
+    def test_renders_shell_parser_error(self):
+        out = _format_step_diagnostics(
+            {"duration_ms": 12, "error_class": "shell_parser_error"}
+        )
+        self.assertIn("shell_parser_error", out)
+        self.assertIn("shell quoting", out)
+        self.assertTrue(out.startswith(" [12ms,"))
+
+    def test_legacy_step_renders_empty(self):
+        """Backward compat: steps written before P2 shipped (no duration_ms
+        AND no error_class) must render to empty string so existing chain
+        contexts don't gain spurious '[None]' annotations."""
+        self.assertEqual(_format_step_diagnostics({}), "")
+
+    def test_only_duration_no_class(self):
+        """If a step has duration but no error_class (transitional case),
+        render just the duration — never crash."""
+        out = _format_step_diagnostics({"duration_ms": 42})
+        self.assertEqual(out, " [42ms]")
+
+    def test_only_class_no_duration(self):
+        out = _format_step_diagnostics({"error_class": "application_4xx"})
+        self.assertIn("application_4xx", out)
+        # Hint present even without duration
+        self.assertIn("semantic rejection", out)
+
+    def test_zero_duration_still_renders(self):
+        """duration_ms=0 is a real measurement (sub-millisecond), not
+        missing data — should render as '0ms', not be hidden."""
+        out = _format_step_diagnostics(
+            {"duration_ms": 0, "error_class": "tool_internal_error"}
+        )
+        self.assertIn("0ms", out)
+        self.assertIn("tool_internal_error", out)
+
+    def test_float_duration_truncates_to_int(self):
+        out = _format_step_diagnostics(
+            {"duration_ms": 12.7, "error_class": "success"}
+        )
+        self.assertEqual(out, " [12ms]")
+
+    def test_negative_duration_rejected(self):
+        """Negative durations indicate a clock glitch — render empty rather
+        than confuse the LLM."""
+        out = _format_step_diagnostics({"duration_ms": -5})
+        self.assertEqual(out, "")
+
+    def test_unknown_class_falls_back_to_label_only(self):
+        """Defensive: when an error_class has no hint registered (new class
+        added to classifier without matching ERROR_CLASS_HINTS entry), the
+        renderer falls back to label-only rendering so the chain context
+        still carries the diagnostic."""
+        out = _format_step_diagnostics(
+            {"duration_ms": 7, "error_class": "future_class_not_in_hints"}
+        )
+        self.assertEqual(out, " [7ms, future_class_not_in_hints]")
+
+    def test_renders_new_networked_fast_class(self):
+        """The new tier added to address networked-target parse-time crashes
+        (110ms 5xx on docker-network targets) gets its own hint, not
+        bucketed as a DB-level error."""
+        out = _format_step_diagnostics(
+            {"duration_ms": 110, "error_class": "application_5xx_networked_fast"}
+        )
+        self.assertIn("application_5xx_networked_fast", out)
+        self.assertIn("parse-time crash", out)
+        self.assertIn("networked", out)
+        self.assertNotIn("DB", out)  # crucial — must NOT say "DB-level error"
+
+
+# ---------------------------------------------------------------------------
+# format_chain_context integration — diagnostics surface in all 3 render sites
+# ---------------------------------------------------------------------------
+
+class TestFormatChainContextWithDiagnostics(unittest.TestCase):
+    """End-to-end check: when steps carry error_class + duration_ms, those
+    annotations appear in the rendered context that goes to the LLM."""
+
+    def _step(self, iteration, *, tool="execute_curl", success=True,
+              args=None, output="", analysis="", error_class=None,
+              duration_ms=None, error_message=None):
+        return {
+            "iteration": iteration,
+            "phase": "informational",
+            "tool_name": tool,
+            "tool_args": args or {"args": "-X POST /"},
+            "success": success,
+            "tool_output": output,
+            "output_analysis": analysis,
+            "error_class": error_class,
+            "duration_ms": duration_ms,
+            "error_message": error_message,
+            "thought": "",
+            "reasoning": "",
+        }
+
+    def test_single_tool_step_shows_diagnostics(self):
+        """The single-tool render path — diagnostic suffix appears next to
+        the tool name in the step header."""
+        trace = [self._step(
+            1, success=True, output='HTTP/1.1 200 OK\n[{"id":1}]',
+            error_class="success", duration_ms=18,
+        )]
+        out = format_chain_context([], [], [], trace)
+        self.assertIn("[18ms]", out)
+        # Success class is collapsed in the renderer; only timing should show
+        self.assertNotIn("[18ms, success]", out)
+
+    def test_single_tool_failed_shows_class(self):
+        trace = [self._step(
+            1, success=False, output="[ERROR] No closing quotation",
+            error_class="shell_parser_error", duration_ms=12,
+            error_message="shell quoting",
+        )]
+        out = format_chain_context([], [], [], trace)
+        # Diagnostic suffix now renders as `[12ms, shell_parser_error: <hint>]`
+        # — the label is preserved (so engineers can still grep) and the
+        # terse hint is appended after a colon for the LLM.
+        self.assertIn("[12ms, shell_parser_error:", out)
+        # The FAILED line should also carry the class so 12 FAILED rows
+        # aren't all identical to the LLM
+        self.assertIn("[shell_parser_error]", out)
+
+    def test_wave_steps_show_diagnostics_per_tool(self):
+        """The XBEN-006-24 iter-11 scenario in miniature: 3 SQL probes in a
+        wave, all 5xx_fast. Each should carry its own annotation."""
+        trace = [
+            self._step(1, args={"args": "p1"}, output="Internal Server Error",
+                       error_class="application_5xx_fast", duration_ms=3),
+            self._step(1, args={"args": "p2"}, output="Internal Server Error",
+                       error_class="application_5xx_fast", duration_ms=4),
+            self._step(1, args={"args": "p3"}, output="Internal Server Error",
+                       error_class="application_5xx_fast", duration_ms=2),
+        ]
+        out = format_chain_context([], [], [], trace)
+        # Wave header lists the tools, per-tool lines show args + diagnostics
+        # in the new `[duration, label: hint]` format. We assert the label
+        # is present after the duration (still grep-able) — the trailing
+        # hint text is verified separately in TestFormatStepDiagnostics.
+        self.assertIn("[3ms, application_5xx_fast:", out)
+        self.assertIn("[4ms, application_5xx_fast:", out)
+        self.assertIn("[2ms, application_5xx_fast:", out)
+
+    def test_legacy_step_still_renders_cleanly(self):
+        """A step without error_class/duration_ms (legacy/before P2) must
+        still render — the chain context must not regress on old data."""
+        legacy = {
+            "iteration": 1,
+            "phase": "informational",
+            "tool_name": "execute_curl",
+            "tool_args": {"args": "-s /"},
+            "success": True,
+            "tool_output": "OK",
+            "output_analysis": "got body",
+            # NO error_class, NO duration_ms, NO error_message
+        }
+        out = format_chain_context([], [], [], [legacy])
+        # No diagnostic suffix should appear — the renderer omits it cleanly
+        self.assertNotIn("[None]", out)
+        self.assertNotIn("[None,", out)
+        self.assertNotIn(", None]", out)
+        # And the tool name should still be there
+        self.assertIn("execute_curl", out)
+
+    def test_older_steps_summary_carries_diagnostics(self):
+        """When the recent window overflows, older steps are rendered via
+        the digest summary. Diagnostics must surface there too — that's
+        where dozens of identical failures end up in long sessions."""
+        trace = []
+        # 5 old steps with bad latency, all parse-time
+        for i in range(1, 6):
+            trace.append(self._step(
+                i, args={"args": f"payload-{i}"},
+                output="Internal Server Error",
+                error_class="application_5xx_fast", duration_ms=3,
+                analysis=f"probe {i} crashed",
+            ))
+        # 20 more recent steps to push the first 5 into the 'older' bucket
+        for i in range(6, 26):
+            trace.append(self._step(
+                i, output='[{"x":1}]', error_class="success", duration_ms=15,
+                analysis=f"recent {i}",
+            ))
+        out = format_chain_context([], [], [], trace, recent_iterations=20)
+        # The older summary should mention the diagnostic class of the
+        # parse-time crashes — without this, the LLM loses the timing
+        # signal as soon as steps age out of the recent window.
+        self.assertIn("application_5xx_fast", out)
 
 
 if __name__ == "__main__":

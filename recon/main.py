@@ -59,6 +59,7 @@ from recon.main_recon_modules.port_scan import run_port_scan, run_port_scan_isol
 from recon.main_recon_modules.masscan_scan import run_masscan_scan, run_masscan_scan_isolated
 from recon.main_recon_modules.http_probe import run_http_probe
 from recon.main_recon_modules.resource_enum import run_resource_enum
+from recon.main_recon_modules.ai_surface_recon import run_ai_surface_recon
 from recon.main_recon_modules.vuln_scan import run_vuln_scan
 from recon.main_recon_modules.add_mitre import run_mitre_enrichment
 
@@ -366,6 +367,32 @@ def save_recon_file(data: dict, output_file: Path):
     with _save_lock:
         with open(output_file, 'w') as f:
             json.dump(data, f, indent=2)
+
+
+def _maybe_run_ai_surface(result: dict, settings: dict, output_file: Path) -> dict:
+    """GROUP 4.5 — AI Surface Recon. Runs after resource_enum at every call site.
+
+    Gated purely on AI_SURFACE_RECON_ENABLED (the js_recon pattern), not
+    SCAN_MODULES. Failure-soft: a probe error records a phase_error and the
+    pipeline continues.
+    """
+    if not settings.get('AI_SURFACE_RECON_ENABLED', True):
+        return result
+    try:
+        result = run_ai_surface_recon(result, output_file=output_file, settings=settings)
+        result.setdefault("metadata", {}).setdefault("modules_executed", [])
+        if "ai_surface_recon" not in result["metadata"]["modules_executed"]:
+            result["metadata"]["modules_executed"].append("ai_surface_recon")
+        save_recon_file(result, output_file)
+        _graph_update_bg("update_graph_from_ai_surface_recon", result, USER_ID, PROJECT_ID)
+    except Exception as e:
+        print(f"[!][AISurfaceRecon] failed: {e}")
+        result.setdefault("metadata", {}).setdefault("phase_errors", {})["ai_surface_recon"] = str(e)
+        try:
+            save_recon_file(result, output_file)
+        except Exception:
+            pass
+    return result
 
 
 def merge_port_scan_results(combined_result: dict) -> None:
@@ -769,6 +796,33 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
         if "port_scan" in combined_result:
             _graph_update_bg("update_graph_from_port_scan", combined_result, USER_ID, PROJECT_ID)
 
+    # =====================================================================
+    # GROUP 3.5 — Nmap Service Version Detection + NSE Vulnerability Scripts
+    # IP-mode equivalent of the domain-mode block at run_domain_recon().
+    # Without this, Service.product / Service.version / Service.ai_runtime_version
+    # never get populated in IP-mode scans (recon's port_scan only carries
+    # IANA-derived service names, not real banner-read versions).
+    # Depends on: port_scan output. Runs sequentially BEFORE HTTP probe so
+    # http_probe sees the enriched port_details.
+    # =====================================================================
+    nmap_enabled = settings.get('NMAP_ENABLED', True)
+    if nmap_enabled and "port_scan" in combined_result:
+        print(f"\n[*][Pipeline] GROUP 3.5: Nmap Service Detection (IP mode)")
+        print("-" * 40)
+
+        from recon.main_recon_modules.nmap_scan import run_nmap_scan
+        combined_result = run_nmap_scan(combined_result, output_file=output_file, settings=settings)
+        combined_result["metadata"]["modules_executed"].append("nmap_scan")
+
+        # Merge Nmap service versions (incl. ai_runtime_version) into port_scan.port_details
+        if "nmap_scan" in combined_result:
+            merge_nmap_into_port_scan(combined_result)
+
+        save_recon_file(combined_result, output_file)
+
+        if "nmap_scan" in combined_result:
+            _graph_update_bg("update_graph_from_nmap", combined_result, USER_ID, PROJECT_ID)
+
     # OSINT Enrichment (parallel, same logic as domain recon Group 3b)
     _ip_osint_tools = {
         'censys': ('CENSYS_ENABLED', 'recon.main_recon_modules.censys_enrich', 'run_censys_enrichment_isolated', 'update_graph_from_censys'),
@@ -854,6 +908,9 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
                 combined_result["metadata"].setdefault("phase_errors", {})["resource_enum"] = str(e)
                 save_recon_file(combined_result, output_file)
 
+    # GROUP 4.5 -- AI Surface Recon (runs after resource_enum)
+    combined_result = _maybe_run_ai_surface(combined_result, settings, output_file)
+
     # GROUP 5b -- JS Recon (runs after resource_enum, before vuln_scan;
     # runs even when active scans are skipped -- uploaded files don't need live targets)
     if settings.get('JS_RECON_ENABLED', False):
@@ -931,6 +988,20 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
     # Parse target if not provided
     if target_info is None:
         target_info = parse_target(target, SUBDOMAIN_LIST)
+
+    # Auto-promote to FILTERED MODE when discovery is disabled and only the root
+    # domain is in scope. Without this, the FULL DISCOVERY branch runs but the
+    # discovery step is skipped, leaving subdomains/dns empty and the rest of
+    # the pipeline with no targets to chew on (silent failure).
+    if (
+        not target_info["filtered_mode"]
+        and target_info.get("include_root_domain")
+        and not _settings.get('SUBDOMAIN_DISCOVERY_ENABLED', True)
+    ):
+        target_info["filtered_mode"] = True
+        if target_info["root_domain"] not in target_info["full_subdomains"]:
+            target_info["full_subdomains"].append(target_info["root_domain"])
+        print("[*][Pipeline] Discovery disabled + root-domain-only → forcing FILTERED MODE")
 
     filtered_mode = target_info["filtered_mode"]
     root_domain = target_info["root_domain"]
@@ -1023,7 +1094,7 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
             # Use parallel resolve_all_dns for filtered subdomains too
             dns_workers = _settings.get('DNS_MAX_WORKERS', 50)
             dns_record_parallel = _settings.get('DNS_RECORD_PARALLELISM', True)
-            dns_result = resolve_all_dns(root_domain, full_subdomains, max_workers=dns_workers, record_parallelism=dns_record_parallel)
+            dns_result = resolve_all_dns(root_domain, full_subdomains, max_workers=dns_workers, record_parallelism=dns_record_parallel, settings=_settings)
             domain_dns = dns_result["domain"] if include_root else {}
             combined_result["dns"] = {
                 "domain": domain_dns,
@@ -1341,6 +1412,9 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
                 print(f"[!][Pipeline] resource_enum failed: {e}")
                 combined_result["metadata"].setdefault("phase_errors", {})["resource_enum"] = str(e)
                 save_recon_file(combined_result, output_file)
+
+    # GROUP 4.5 — AI Surface Recon (runs after resource_enum)
+    combined_result = _maybe_run_ai_surface(combined_result, _settings, output_file)
 
     # GROUP 5b — JS Recon (runs after resource_enum, before vuln_scan;
     # runs even when active scans are skipped -- uploaded files don't need live targets)
@@ -1803,6 +1877,9 @@ def main():
 
                     with open(output_file, 'w') as f:
                         json.dump(domain_result, f, indent=2)
+
+        # GROUP 4.5 — AI Surface Recon (runs after resource_enum)
+        domain_result = _maybe_run_ai_surface(domain_result, _settings, output_file)
 
         # GROUP 5b — JS Recon (runs after resource_enum, before vuln_scan;
         # runs even when active scans are skipped -- uploaded files don't need live targets)

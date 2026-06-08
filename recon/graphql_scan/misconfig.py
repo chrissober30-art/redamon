@@ -111,12 +111,14 @@ def run_graphql_cop(
     excluded = _build_excluded_tests(settings)
     excluded_set = set(excluded)
 
-    # Network mode: match Nuclei's pattern -- add --network host only when Tor is on.
-    # Default docker-bridge network works for external targets.
+    # --net=host is ALWAYS passed so GraphQL-Cop can reach loopback / local-lab
+    # GraphQL endpoints. See recon/helpers/resource_enum/katana_helpers.py for
+    # the long comment on sibling-container network isolation. Host networking
+    # is also equivalent to bridge for external targets, so it's strictly an
+    # upgrade. `use_tor` is preserved separately to drive graphql-cop's `-T`
+    # flag (in-process Tor signaling), independent of the docker network mode.
     use_tor = bool(settings.get('USE_TOR_FOR_RECON', False))
-    net_flags = ['--network', 'host'] if use_tor else []
-
-    cmd = ['docker', 'run', '--rm', *net_flags, image,
+    cmd = ['docker', 'run', '--rm', '--net=host', image,
            '-t', endpoint, '-o', 'json']
 
     # NOTE: the dolevf/graphql-cop:1.14 Docker image does NOT support the `-e`

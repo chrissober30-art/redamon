@@ -172,8 +172,13 @@ def _run_gau_docker(
     """Internal: execute GAU Docker container."""
     discovered_urls = set()
 
-    # Build GAU command
-    cmd = ["docker", "run", "--rm"]
+    # Build GAU command.
+    # --net=host is ALWAYS passed for consistency with the rest of the recon
+    # pipeline. GAU queries third-party APIs (Wayback/OTX/CommonCrawl) which
+    # work over either bridge or host networking, BUT when use_proxy is on we
+    # also need to reach the Tor SOCKS proxy at 127.0.0.1:9050 — only host
+    # networking can route there. See recon/helpers/resource_enum/katana_helpers.py.
+    cmd = ["docker", "run", "--rm", "--net=host"]
     if _is_arm64_host():
         cmd.extend(["--platform", "linux/amd64"])
 
@@ -182,9 +187,8 @@ def _run_gau_docker(
         config_file = config_temp_dir / ".gau.toml"
         cmd.extend(["-v", f"{config_file}:/root/.gau.toml:ro"])
 
-    # Network mode for Tor proxy
+    # Tor proxy env (network already host-mode above)
     if use_proxy:
-        cmd.extend(["--network", "host"])
         cmd.extend([
             "-e", "HTTP_PROXY=socks5://127.0.0.1:9050",
             "-e", "HTTPS_PROXY=socks5://127.0.0.1:9050"
@@ -397,9 +401,12 @@ def verify_gau_urls(
             for url in urls:
                 f.write(f"{url}\n")
 
-        # Build httpx command
+        # Build httpx command.
+        # --net=host always — httpx verifier must reach loopback / local-lab
+        # targets. See recon/helpers/resource_enum/katana_helpers.py for the
+        # long comment on sibling-container network isolation.
         cmd = [
-            "docker", "run", "--rm",
+            "docker", "run", "--rm", "--net=host",
             "-v", f"{temp_dir}:/data",
             docker_image,
             "-l", "/data/urls.txt",
@@ -487,8 +494,10 @@ def detect_gau_methods(
             for url in urls:
                 f.write(f"{url}\n")
 
+        # --net=host always — httpx verifier must reach loopback / local-lab
+        # targets. See recon/helpers/resource_enum/katana_helpers.py.
         cmd = [
-            "docker", "run", "--rm",
+            "docker", "run", "--rm", "--net=host",
             "-v", f"{temp_dir}:/data",
             docker_image,
             "-l", "/data/urls.txt",
@@ -566,8 +575,10 @@ def detect_gau_methods(
                 for url in urls_needing_get_check:
                     f.write(f"{url}\n")
 
+            # --net=host always — httpx verifier must reach loopback / local-lab
+            # targets. See recon/helpers/resource_enum/katana_helpers.py.
             get_cmd = [
-                "docker", "run", "--rm",
+                "docker", "run", "--rm", "--net=host",
                 "-v", f"{temp_dir}:/data",
                 docker_image,
                 "-l", "/data/get_urls.txt",

@@ -17,7 +17,14 @@ from .user_inputs import _create_user_subdomains_in_graph, _cleanup_orphan_user_
 from .subdomain_discovery import run_subdomain_discovery
 from .port_scanning import run_naabu, run_masscan, run_nmap
 from .http_probing import run_httpx
-from .web_crawling import run_katana, run_hakrawler, run_ffuf, run_gau, run_jsluice
+from .web_crawling import (
+    run_katana,
+    run_hakrawler,
+    run_zap_ajax_spider_partial,
+    run_ffuf,
+    run_gau,
+    run_jsluice,
+)
 from .parameter_discovery import run_paramspider, run_arjun, run_kiterunner
 from .js_analysis import run_jsrecon
 from .vulnerability_scanning import run_nuclei, run_security_checks_partial

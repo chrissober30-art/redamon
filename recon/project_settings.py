@@ -66,6 +66,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'NAABU_SKIP_HOST_DISCOVERY': True,
     'NAABU_VERIFY_PORTS': True,
     'NAABU_PASSIVE_MODE': False,
+    # AI surface recon — annotate AI-bearing ports (Ollama 11434, Qdrant 6333, Open WebUI 8080, …) on naabu output
+    'PORT_SCAN_AI_PORT_CATALOG_ENABLED': True,
 
     # Nmap Service Detection & NSE Vuln Scripts
     'NMAP_ENABLED': True,
@@ -75,6 +77,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'NMAP_TIMEOUT': 600,
     'NMAP_HOST_TIMEOUT': 300,
     'NMAP_PARALLELISM': 5,
+    # AI surface recon — regex nmap product/version strings against AI runtimes (Ollama, vLLM, LiteLLM, TGI, …)
+    'NMAP_AI_VERSION_REGEX_ENABLED': True,
 
     # Masscan Port Scanner (disabled by default -- only useful for large IP ranges/CIDRs)
     'MASSCAN_ENABLED': False,
@@ -85,6 +89,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'MASSCAN_WAIT': 10,
     'MASSCAN_RETRIES': 1,
     'MASSCAN_EXCLUDE_TARGETS': '',
+    # AI surface recon — same AI port catalogue applied to masscan output
+    'MASSCAN_AI_PORT_CATALOG_ENABLED': True,
 
     # httpx HTTP Probing
     'HTTPX_ENABLED': True,
@@ -131,6 +137,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     ],
     'HTTPX_MATCH_CODES': [],
     'HTTPX_FILTER_CODES': [],
+    # AI surface recon — annotate captured response headers / favicon / title against AI vendor catalogues
+    'HTTP_PROBE_AI_HEADER_SCAN_ENABLED': True,
+    'HTTP_PROBE_AI_FAVICON_HASH_ENABLED': True,
+    'HTTP_PROBE_AI_TITLE_DETECTION_ENABLED': True,
+    'HTTP_PROBE_AI_WAPPALYZER_ENABLED': True,
 
     # Wappalyzer
     'WAPPALYZER_ENABLED': True,
@@ -225,6 +236,34 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'VHOST_SNI_CUSTOM_WORDLIST': '',
     'VHOST_SNI_MAX_CANDIDATES_PER_IP': 2000,
 
+    # Resource Enum AI Classifier — cross-cutting endpoint + parameter
+    # classifier that runs after Katana/Hakrawler/GAU/FFuf/jsluice/ParamSpider/
+    # Kiterunner/Arjun have produced endpoints. Pure regex, no extra traffic.
+    'RESOURCE_ENUM_AI_CLASSIFIER_ENABLED': True,
+    'RESOURCE_ENUM_AI_PATH_CLASSIFIER_ENABLED': True,
+    'RESOURCE_ENUM_AI_RAG_PATH_FLAG_ENABLED': True,
+    'RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED': True,
+    'RESOURCE_ENUM_AI_TOOL_ARG_PATH_ENABLED': True,
+
+    # AI Surface Recon (central module) — active, protocol-aware AI/LLM/MCP
+    # fingerprinting. Runs after resource_enum (display Phase 4.5). Benign
+    # shape-probes only; gated per-workload, stealth flips actives off.
+    'AI_SURFACE_RECON_ENABLED': True,
+    'AI_SURFACE_RECON_TIMEOUT': 10,
+    'AI_SURFACE_RECON_MAX_WORKERS': 5,
+    'AI_SURFACE_RECON_USER_AGENT': 'RedAmon-AISurfaceRecon/1.0',
+    'AI_SURFACE_RECON_CHAT_SHAPE_PROBE_ENABLED': True,
+    'AI_SURFACE_RECON_MCP_HANDSHAKE_ENABLED': True,
+    'AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED': True,
+    'AI_SURFACE_RECON_MCP_YARA_ENABLED': True,
+    'AI_SURFACE_RECON_OPENAPI_DISCOVERY_ENABLED': True,
+    'AI_SURFACE_RECON_MODEL_LIST_ENABLED': True,
+    'AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED': True,
+    'AI_SURFACE_RECON_JULIUS_PROBE_PACK_ENABLED': True,
+    'AI_SURFACE_RECON_LATENCY_BASELINE_ENABLED': True,
+    'AI_SURFACE_RECON_CACHE_ENABLED': True,
+    'AI_SURFACE_RECON_PROBE_PACK_VERSION': 'latest',
+
     # Katana Web Crawler
     'KATANA_ENABLED': True,
     'KATANA_DOCKER_IMAGE': 'projectdiscovery/katana:latest',
@@ -282,6 +321,27 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'KATANA_PARALLELISM': 8,
     'KATANA_CONCURRENCY': 15,
 
+    # ZAP Ajax Spider Browser Crawler
+    'ZAP_AJAX_SPIDER_ENABLED': False,
+    'ZAP_AJAX_SPIDER_DOCKER_IMAGE': 'ghcr.io/zaproxy/zaproxy:stable',
+    'ZAP_AJAX_SPIDER_SEED_MODE': 'base_urls',
+    'ZAP_AJAX_SPIDER_MAX_DURATION': 10,
+    'ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH': 5,
+    'ZAP_AJAX_SPIDER_MAX_CRAWL_STATES': 0,
+    'ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS': 1,
+    'ZAP_AJAX_SPIDER_BROWSER_ID': 'firefox-headless',
+    'ZAP_AJAX_SPIDER_EVENT_WAIT': 1000,
+    'ZAP_AJAX_SPIDER_RELOAD_WAIT': 1000,
+    'ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS': True,
+    'ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE': True,
+    'ZAP_AJAX_SPIDER_RANDOM_INPUTS': False,
+    'ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE': True,
+    'ZAP_AJAX_SPIDER_SCOPE_CHECK': 'Strict',
+    'ZAP_AJAX_SPIDER_CUSTOM_HEADERS': [],
+    'ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS': [],
+    'ZAP_AJAX_SPIDER_MAX_URLS': 1000,
+    'ZAP_AJAX_SPIDER_PARALLELISM': 3,
+
     # GAU Passive URL Discovery
     'GAU_ENABLED': False,
     'GAU_DOCKER_IMAGE': 'sxcurity/gau:latest',
@@ -337,6 +397,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'JSLUICE_EXTRACT_SECRETS': True,
     'JSLUICE_CONCURRENCY': 5,
     'JSLUICE_PARALLELISM': 5,
+    'JSLUICE_VERIFY_URLS': True,
+    'JSLUICE_VERIFY_DOCKER_IMAGE': 'projectdiscovery/httpx:latest',
+    'JSLUICE_VERIFY_TIMEOUT': 5,
+    'JSLUICE_VERIFY_RATE_LIMIT': 50,
+    'JSLUICE_VERIFY_THREADS': 50,
+    'JSLUICE_VERIFY_ACCEPT_STATUS': [200, 201, 301, 302, 307, 308, 401, 403],
+    'JSLUICE_EXCLUDE_PATTERNS': [
+        '/_next/image', '/_next/static', '/_next/data', '/__nextjs',
+        '/_nuxt/', '/__nuxt',
+        '/runtime.', '/polyfills.', '/vendor.',
+        '/webpack', '/chunk.', '.chunk.js', '.bundle.js', 'hot-update',
+        '/static/', '/public/', '/dist/', '/build/', '/lib/', '/vendor/', '/node_modules/',
+        '.js', '.mjs', '.map', '.css', '.scss', '.sass', '.less',
+        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.avif',
+        '.woff', '.woff2', '.ttf', '.eot', '.otf',
+        '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm',
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.zip', '.rar', '.7z', '.tar', '.gz',
+        '/rxjs/', '/react/', '/angular/', '/lodash/', '/zone.js/',
+    ],
 
     # ========== JS RECON SCANNER ==========
     'JS_RECON_ENABLED': False,
@@ -364,6 +444,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'JS_RECON_CUSTOM_PACKAGES': '',
     'JS_RECON_CUSTOM_ENDPOINT_KEYWORDS': '',
     'JS_RECON_CUSTOM_FRAMEWORKS': '',
+    # AI SDK detection — Phase 6 of the Adversarial AI surface recon rollout.
+    # Scans every analysed JS file for AI/LLM SDK imports, hard-coded provider
+    # keys, ``dangerouslyAllowBrowser`` flags, and AI-frontend product markers
+    # that http_probe's Wappalyzer pass cannot see (those live in async-loaded
+    # chunks, not the initial HTML body). Default on — pure regex over data
+    # js_recon already harvested, sends no additional traffic.
+    'JS_RECON_AI_SDK_DETECTION_ENABLED': True,
 
     # FFuf Directory Fuzzer
     'FFUF_ENABLED': False,
@@ -533,6 +620,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     # Subdomain Discovery
     'SUBDOMAIN_DISCOVERY_ENABLED': True,
+
+    # AI surface recon hooks inside domain_recon (TXT/NS hint annotation during DNS pass)
+    'DOMAIN_RECON_AI_TXT_HINT_ENABLED': True,
+    'DOMAIN_RECON_AI_NS_HINT_ENABLED': True,
 
     # Subdomain Discovery Tool Toggles
     'CRTSH_ENABLED': True,
@@ -716,6 +807,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['NAABU_SKIP_HOST_DISCOVERY'] = project.get('naabuSkipHostDiscovery', DEFAULT_SETTINGS['NAABU_SKIP_HOST_DISCOVERY'])
     settings['NAABU_VERIFY_PORTS'] = project.get('naabuVerifyPorts', DEFAULT_SETTINGS['NAABU_VERIFY_PORTS'])
     settings['NAABU_PASSIVE_MODE'] = project.get('naabuPassiveMode', DEFAULT_SETTINGS['NAABU_PASSIVE_MODE'])
+    settings['PORT_SCAN_AI_PORT_CATALOG_ENABLED'] = project.get('portScanAiPortCatalogEnabled', DEFAULT_SETTINGS['PORT_SCAN_AI_PORT_CATALOG_ENABLED'])
 
     # Masscan Port Scanner
     settings['MASSCAN_ENABLED'] = project.get('masscanEnabled', DEFAULT_SETTINGS['MASSCAN_ENABLED'])
@@ -726,6 +818,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['MASSCAN_WAIT'] = project.get('masscanWait', DEFAULT_SETTINGS['MASSCAN_WAIT'])
     settings['MASSCAN_RETRIES'] = project.get('masscanRetries', DEFAULT_SETTINGS['MASSCAN_RETRIES'])
     settings['MASSCAN_EXCLUDE_TARGETS'] = project.get('masscanExcludeTargets', DEFAULT_SETTINGS['MASSCAN_EXCLUDE_TARGETS'])
+    settings['MASSCAN_AI_PORT_CATALOG_ENABLED'] = project.get('masscanAiPortCatalogEnabled', DEFAULT_SETTINGS['MASSCAN_AI_PORT_CATALOG_ENABLED'])
 
     # Nmap Service Detection & NSE Vuln Scripts
     settings['NMAP_ENABLED'] = project.get('nmapEnabled', DEFAULT_SETTINGS['NMAP_ENABLED'])
@@ -735,6 +828,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['NMAP_TIMEOUT'] = project.get('nmapTimeout', DEFAULT_SETTINGS['NMAP_TIMEOUT'])
     settings['NMAP_HOST_TIMEOUT'] = project.get('nmapHostTimeout', DEFAULT_SETTINGS['NMAP_HOST_TIMEOUT'])
     settings['NMAP_PARALLELISM'] = project.get('nmapParallelism', DEFAULT_SETTINGS['NMAP_PARALLELISM'])
+    settings['NMAP_AI_VERSION_REGEX_ENABLED'] = project.get('nmapAiVersionRegexEnabled', DEFAULT_SETTINGS['NMAP_AI_VERSION_REGEX_ENABLED'])
 
     # httpx HTTP Probing
     settings['HTTPX_ENABLED'] = project.get('httpxEnabled', DEFAULT_SETTINGS['HTTPX_ENABLED'])
@@ -769,6 +863,10 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['HTTPX_CUSTOM_HEADERS'] = project.get('httpxCustomHeaders', DEFAULT_SETTINGS['HTTPX_CUSTOM_HEADERS'])
     settings['HTTPX_MATCH_CODES'] = project.get('httpxMatchCodes', DEFAULT_SETTINGS['HTTPX_MATCH_CODES'])
     settings['HTTPX_FILTER_CODES'] = project.get('httpxFilterCodes', DEFAULT_SETTINGS['HTTPX_FILTER_CODES'])
+    settings['HTTP_PROBE_AI_HEADER_SCAN_ENABLED'] = project.get('httpProbeAiHeaderScanEnabled', DEFAULT_SETTINGS['HTTP_PROBE_AI_HEADER_SCAN_ENABLED'])
+    settings['HTTP_PROBE_AI_FAVICON_HASH_ENABLED'] = project.get('httpProbeAiFaviconHashEnabled', DEFAULT_SETTINGS['HTTP_PROBE_AI_FAVICON_HASH_ENABLED'])
+    settings['HTTP_PROBE_AI_TITLE_DETECTION_ENABLED'] = project.get('httpProbeAiTitleDetectionEnabled', DEFAULT_SETTINGS['HTTP_PROBE_AI_TITLE_DETECTION_ENABLED'])
+    settings['HTTP_PROBE_AI_WAPPALYZER_ENABLED'] = project.get('httpProbeAiWappalyzerEnabled', DEFAULT_SETTINGS['HTTP_PROBE_AI_WAPPALYZER_ENABLED'])
 
     # Wappalyzer
     settings['WAPPALYZER_ENABLED'] = project.get('wappalyzerEnabled', DEFAULT_SETTINGS['WAPPALYZER_ENABLED'])
@@ -848,6 +946,30 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['VHOST_SNI_CUSTOM_WORDLIST'] = project.get('vhostSniCustomWordlist', DEFAULT_SETTINGS['VHOST_SNI_CUSTOM_WORDLIST'])
     settings['VHOST_SNI_MAX_CANDIDATES_PER_IP'] = project.get('vhostSniMaxCandidatesPerIp', DEFAULT_SETTINGS['VHOST_SNI_MAX_CANDIDATES_PER_IP'])
 
+    # Resource Enum AI Classifier
+    settings['RESOURCE_ENUM_AI_CLASSIFIER_ENABLED'] = project.get('resourceEnumAiClassifierEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_CLASSIFIER_ENABLED'])
+    settings['RESOURCE_ENUM_AI_PATH_CLASSIFIER_ENABLED'] = project.get('resourceEnumAiPathClassifierEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_PATH_CLASSIFIER_ENABLED'])
+    settings['RESOURCE_ENUM_AI_RAG_PATH_FLAG_ENABLED'] = project.get('resourceEnumAiRagPathFlagEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_RAG_PATH_FLAG_ENABLED'])
+    settings['RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED'] = project.get('resourceEnumAiParamInjectableFlagEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED'])
+    settings['RESOURCE_ENUM_AI_TOOL_ARG_PATH_ENABLED'] = project.get('resourceEnumAiToolArgPathEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_TOOL_ARG_PATH_ENABLED'])
+
+    # AI Surface Recon (central module)
+    settings['AI_SURFACE_RECON_ENABLED'] = project.get('aiSurfaceReconEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_ENABLED'])
+    settings['AI_SURFACE_RECON_TIMEOUT'] = project.get('aiSurfaceReconTimeout', DEFAULT_SETTINGS['AI_SURFACE_RECON_TIMEOUT'])
+    settings['AI_SURFACE_RECON_MAX_WORKERS'] = project.get('aiSurfaceReconMaxWorkers', DEFAULT_SETTINGS['AI_SURFACE_RECON_MAX_WORKERS'])
+    settings['AI_SURFACE_RECON_USER_AGENT'] = project.get('aiSurfaceReconUserAgent', DEFAULT_SETTINGS['AI_SURFACE_RECON_USER_AGENT'])
+    settings['AI_SURFACE_RECON_CHAT_SHAPE_PROBE_ENABLED'] = project.get('aiSurfaceReconChatShapeProbeEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_CHAT_SHAPE_PROBE_ENABLED'])
+    settings['AI_SURFACE_RECON_MCP_HANDSHAKE_ENABLED'] = project.get('aiSurfaceReconMcpHandshakeEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MCP_HANDSHAKE_ENABLED'])
+    settings['AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED'] = project.get('aiSurfaceReconMcpListToolsEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED'])
+    settings['AI_SURFACE_RECON_MCP_YARA_ENABLED'] = project.get('aiSurfaceReconMcpYaraEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MCP_YARA_ENABLED'])
+    settings['AI_SURFACE_RECON_OPENAPI_DISCOVERY_ENABLED'] = project.get('aiSurfaceReconOpenapiDiscoveryEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_OPENAPI_DISCOVERY_ENABLED'])
+    settings['AI_SURFACE_RECON_MODEL_LIST_ENABLED'] = project.get('aiSurfaceReconModelListEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MODEL_LIST_ENABLED'])
+    settings['AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED'] = project.get('aiSurfaceReconVectorDbReadEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED'])
+    settings['AI_SURFACE_RECON_JULIUS_PROBE_PACK_ENABLED'] = project.get('aiSurfaceReconJuliusProbePackEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_JULIUS_PROBE_PACK_ENABLED'])
+    settings['AI_SURFACE_RECON_LATENCY_BASELINE_ENABLED'] = project.get('aiSurfaceReconLatencyBaselineEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_LATENCY_BASELINE_ENABLED'])
+    settings['AI_SURFACE_RECON_CACHE_ENABLED'] = project.get('aiSurfaceReconCacheEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_CACHE_ENABLED'])
+    settings['AI_SURFACE_RECON_PROBE_PACK_VERSION'] = project.get('aiSurfaceReconProbePackVersion', DEFAULT_SETTINGS['AI_SURFACE_RECON_PROBE_PACK_VERSION'])
+
     # Katana Web Crawler
     settings['KATANA_ENABLED'] = project.get('katanaEnabled', DEFAULT_SETTINGS['KATANA_ENABLED'])
     settings['KATANA_DOCKER_IMAGE'] = project.get('katanaDockerImage', DEFAULT_SETTINGS['KATANA_DOCKER_IMAGE'])
@@ -861,6 +983,27 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['KATANA_CUSTOM_HEADERS'] = project.get('katanaCustomHeaders', DEFAULT_SETTINGS['KATANA_CUSTOM_HEADERS'])
     settings['KATANA_PARALLELISM'] = project.get('katanaParallelism', DEFAULT_SETTINGS['KATANA_PARALLELISM'])
     settings['KATANA_CONCURRENCY'] = project.get('katanaConcurrency', DEFAULT_SETTINGS['KATANA_CONCURRENCY'])
+
+    # ZAP Ajax Spider Browser Crawler
+    settings['ZAP_AJAX_SPIDER_ENABLED'] = project.get('zapAjaxSpiderEnabled', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_ENABLED'])
+    settings['ZAP_AJAX_SPIDER_DOCKER_IMAGE'] = project.get('zapAjaxSpiderDockerImage', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_DOCKER_IMAGE'])
+    settings['ZAP_AJAX_SPIDER_SEED_MODE'] = project.get('zapAjaxSpiderSeedMode', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_SEED_MODE'])
+    settings['ZAP_AJAX_SPIDER_MAX_DURATION'] = project.get('zapAjaxSpiderMaxDuration', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_MAX_DURATION'])
+    settings['ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH'] = project.get('zapAjaxSpiderMaxCrawlDepth', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_MAX_CRAWL_DEPTH'])
+    settings['ZAP_AJAX_SPIDER_MAX_CRAWL_STATES'] = project.get('zapAjaxSpiderMaxCrawlStates', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_MAX_CRAWL_STATES'])
+    settings['ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS'] = project.get('zapAjaxSpiderNumberOfBrowsers', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS'])
+    settings['ZAP_AJAX_SPIDER_BROWSER_ID'] = project.get('zapAjaxSpiderBrowserId', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_BROWSER_ID'])
+    settings['ZAP_AJAX_SPIDER_EVENT_WAIT'] = project.get('zapAjaxSpiderEventWait', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_EVENT_WAIT'])
+    settings['ZAP_AJAX_SPIDER_RELOAD_WAIT'] = project.get('zapAjaxSpiderReloadWait', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_RELOAD_WAIT'])
+    settings['ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS'] = project.get('zapAjaxSpiderClickDefaultElems', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_CLICK_DEFAULT_ELEMS'])
+    settings['ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE'] = project.get('zapAjaxSpiderClickElemsOnce', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_CLICK_ELEMS_ONCE'])
+    settings['ZAP_AJAX_SPIDER_RANDOM_INPUTS'] = project.get('zapAjaxSpiderRandomInputs', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_RANDOM_INPUTS'])
+    settings['ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE'] = project.get('zapAjaxSpiderLogoutAvoidance', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE'])
+    settings['ZAP_AJAX_SPIDER_SCOPE_CHECK'] = project.get('zapAjaxSpiderScopeCheck', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_SCOPE_CHECK'])
+    settings['ZAP_AJAX_SPIDER_CUSTOM_HEADERS'] = project.get('zapAjaxSpiderCustomHeaders', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_CUSTOM_HEADERS'])
+    settings['ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS'] = project.get('zapAjaxSpiderExcludePatterns', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS'])
+    settings['ZAP_AJAX_SPIDER_MAX_URLS'] = project.get('zapAjaxSpiderMaxUrls', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_MAX_URLS'])
+    settings['ZAP_AJAX_SPIDER_PARALLELISM'] = project.get('zapAjaxSpiderParallelism', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_PARALLELISM'])
 
     # Hakrawler Web Crawler
     settings['HAKRAWLER_ENABLED'] = project.get('hakrawlerEnabled', DEFAULT_SETTINGS['HAKRAWLER_ENABLED'])
@@ -882,6 +1025,16 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['JSLUICE_EXTRACT_SECRETS'] = project.get('jsluiceExtractSecrets', DEFAULT_SETTINGS['JSLUICE_EXTRACT_SECRETS'])
     settings['JSLUICE_CONCURRENCY'] = project.get('jsluiceConcurrency', DEFAULT_SETTINGS['JSLUICE_CONCURRENCY'])
     settings['JSLUICE_PARALLELISM'] = project.get('jsluiceParallelism', DEFAULT_SETTINGS['JSLUICE_PARALLELISM'])
+    settings['JSLUICE_VERIFY_URLS'] = project.get('jsluiceVerifyUrls', DEFAULT_SETTINGS['JSLUICE_VERIFY_URLS'])
+    settings['JSLUICE_VERIFY_DOCKER_IMAGE'] = project.get('jsluiceVerifyDockerImage', DEFAULT_SETTINGS['JSLUICE_VERIFY_DOCKER_IMAGE'])
+    settings['JSLUICE_VERIFY_TIMEOUT'] = project.get('jsluiceVerifyTimeout', DEFAULT_SETTINGS['JSLUICE_VERIFY_TIMEOUT'])
+    settings['JSLUICE_VERIFY_RATE_LIMIT'] = project.get('jsluiceVerifyRateLimit', DEFAULT_SETTINGS['JSLUICE_VERIFY_RATE_LIMIT'])
+    settings['JSLUICE_VERIFY_THREADS'] = project.get('jsluiceVerifyThreads', DEFAULT_SETTINGS['JSLUICE_VERIFY_THREADS'])
+    # Treat empty arrays as "use defaults" so DB rows defaulted to [] don't silently disable filtering/status acceptance.
+    accept_status = project.get('jsluiceVerifyAcceptStatus') or DEFAULT_SETTINGS['JSLUICE_VERIFY_ACCEPT_STATUS']
+    settings['JSLUICE_VERIFY_ACCEPT_STATUS'] = accept_status
+    exclude_patterns = project.get('jsluiceExcludePatterns') or DEFAULT_SETTINGS['JSLUICE_EXCLUDE_PATTERNS']
+    settings['JSLUICE_EXCLUDE_PATTERNS'] = exclude_patterns
 
     # JS Recon Scanner
     settings['JS_RECON_ENABLED'] = project.get('jsReconEnabled', DEFAULT_SETTINGS['JS_RECON_ENABLED'])
@@ -909,6 +1062,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['JS_RECON_CUSTOM_PACKAGES'] = project.get('jsReconCustomPackages', DEFAULT_SETTINGS['JS_RECON_CUSTOM_PACKAGES'])
     settings['JS_RECON_CUSTOM_ENDPOINT_KEYWORDS'] = project.get('jsReconCustomEndpointKeywords', DEFAULT_SETTINGS['JS_RECON_CUSTOM_ENDPOINT_KEYWORDS'])
     settings['JS_RECON_CUSTOM_FRAMEWORKS'] = project.get('jsReconCustomFrameworks', DEFAULT_SETTINGS['JS_RECON_CUSTOM_FRAMEWORKS'])
+    settings['JS_RECON_AI_SDK_DETECTION_ENABLED'] = project.get('jsReconAiSdkDetectionEnabled', DEFAULT_SETTINGS['JS_RECON_AI_SDK_DETECTION_ENABLED'])
 
     # FFuf Directory Fuzzer
     settings['FFUF_ENABLED'] = project.get('ffufEnabled', DEFAULT_SETTINGS['FFUF_ENABLED'])
@@ -1082,6 +1236,8 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
 
     # Subdomain Discovery Tool Toggles
     settings['SUBDOMAIN_DISCOVERY_ENABLED'] = project.get('subdomainDiscoveryEnabled', DEFAULT_SETTINGS['SUBDOMAIN_DISCOVERY_ENABLED'])
+    settings['DOMAIN_RECON_AI_TXT_HINT_ENABLED'] = project.get('domainReconAiTxtHintEnabled', DEFAULT_SETTINGS['DOMAIN_RECON_AI_TXT_HINT_ENABLED'])
+    settings['DOMAIN_RECON_AI_NS_HINT_ENABLED'] = project.get('domainReconAiNsHintEnabled', DEFAULT_SETTINGS['DOMAIN_RECON_AI_NS_HINT_ENABLED'])
     settings['CRTSH_ENABLED'] = project.get('crtshEnabled', DEFAULT_SETTINGS['CRTSH_ENABLED'])
     settings['CRTSH_MAX_RESULTS'] = project.get('crtshMaxResults', DEFAULT_SETTINGS['CRTSH_MAX_RESULTS'])
     settings['HACKERTARGET_ENABLED'] = project.get('hackerTargetEnabled', DEFAULT_SETTINGS['HACKERTARGET_ENABLED'])
@@ -1390,6 +1546,9 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     settings['KATANA_PARALLELISM'] = 1
     settings['KATANA_CONCURRENCY'] = 1
 
+    # --- ZAP Ajax Spider: DISABLED (browser-driven active crawling) ---
+    settings['ZAP_AJAX_SPIDER_ENABLED'] = False
+
     # --- GAU: enable it (passive source) but throttle verification ---
     settings['GAU_ENABLED'] = True
     settings['GAU_VERIFY_RATE_LIMIT'] = 2
@@ -1525,10 +1684,16 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     settings['GRAPHQL_COP_TEST_DIRECTIVE_OVERLOADING'] = False
     settings['GRAPHQL_COP_TEST_CIRCULAR_INTROSPECTION'] = False
 
+    # --- AI Surface Recon: keep passive probes on, flip the marginally-active
+    # ones off, throttle concurrency. Stealth = quieter, not off. ---
+    settings['AI_SURFACE_RECON_MAX_WORKERS'] = 2
+    settings['AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED'] = False  # extra JSON-RPC calls
+    settings['AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED'] = False  # one GET per service
+
     logger.info("Stealth overrides applied: Naabu=passive, Masscan=OFF, httpx=low-rate, Katana=minimal, "
                 "Nuclei=no-DAST, Kiterunner=OFF, BannerGrab=OFF, BruteForce=OFF, "
                 "ActiveSecurityChecks=OFF, JsRecon=reduced, GraphQL=introspection-only, "
-                "GraphQLCop=no-DoS")
+                "GraphQLCop=no-DoS, AISurfaceRecon=throttled")
 
     return settings
 

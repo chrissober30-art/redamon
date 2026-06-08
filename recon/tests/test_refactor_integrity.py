@@ -106,6 +106,10 @@ class TestRefactorIntegrity(unittest.TestCase):
         from partial_recon import run_hakrawler
         self.assertTrue(callable(run_hakrawler))
 
+    def test_run_zap_ajax_spider_partial_importable(self):
+        from partial_recon import run_zap_ajax_spider_partial
+        self.assertTrue(callable(run_zap_ajax_spider_partial))
+
     def test_run_ffuf_importable(self):
         from partial_recon import run_ffuf
         self.assertTrue(callable(run_ffuf))
@@ -258,14 +262,16 @@ class TestFunctionSignatures(unittest.TestCase):
         """All run_* functions should accept a single config dict parameter."""
         from partial_recon import (
             run_subdomain_discovery, run_naabu, run_masscan, run_nmap,
-            run_httpx, run_katana, run_hakrawler, run_ffuf, run_gau,
+            run_httpx, run_katana, run_hakrawler, run_zap_ajax_spider_partial,
+            run_ffuf, run_gau,
             run_jsluice, run_paramspider, run_kiterunner, run_arjun,
             run_jsrecon, run_nuclei, run_security_checks_partial,
             run_shodan, run_urlscan, run_uncover, run_osint_enrichment,
         )
         run_functions = [
             run_subdomain_discovery, run_naabu, run_masscan, run_nmap,
-            run_httpx, run_katana, run_hakrawler, run_ffuf, run_gau,
+            run_httpx, run_katana, run_hakrawler, run_zap_ajax_spider_partial,
+            run_ffuf, run_gau,
             run_jsluice, run_paramspider, run_kiterunner, run_arjun,
             run_jsrecon, run_nuclei, run_security_checks_partial,
             run_shodan, run_urlscan, run_uncover, run_osint_enrichment,
@@ -336,7 +342,7 @@ class TestModuleStructure(unittest.TestCase):
             self.assertTrue(os.path.exists(filepath), f"Missing module: {filename}")
 
     def test_total_function_count(self):
-        """Verify we have all 37 functions accessible."""
+        """Verify we have all 38 functions accessible."""
         import partial_recon as pr
         expected_functions = [
             # Helpers (5)
@@ -347,9 +353,10 @@ class TestModuleStructure(unittest.TestCase):
             '_build_http_probe_data_from_graph', '_build_vuln_scan_data_from_graph',
             # User inputs (2)
             '_create_user_subdomains_in_graph', '_cleanup_orphan_user_inputs',
-            # Tool runners (21)
+            # Tool runners (22)
             'run_subdomain_discovery', 'run_naabu', 'run_masscan', 'run_nmap',
-            'run_httpx', 'run_katana', 'run_hakrawler', 'run_ffuf', 'run_gau',
+            'run_httpx', 'run_katana', 'run_hakrawler', 'run_zap_ajax_spider_partial',
+            'run_ffuf', 'run_gau',
             'run_jsluice', 'run_paramspider', 'run_kiterunner', 'run_arjun',
             'run_jsrecon', 'run_nuclei', 'run_security_checks_partial',
             'run_shodan', 'run_urlscan', 'run_uncover', 'run_osint_enrichment',

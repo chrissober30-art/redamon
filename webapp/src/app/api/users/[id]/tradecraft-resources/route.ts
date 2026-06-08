@@ -118,6 +118,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       )
     }
+    // llmModel is required at the API layer too — protects against direct
+    // API callers that bypass the UI. Empty string is rejected; downstream
+    // agent code uses the value as the model id.
+    if (!body.llmModel || typeof body.llmModel !== 'string' || !body.llmModel.trim()) {
+      return NextResponse.json(
+        { error: 'llmModel is required — pick a model for this resource' },
+        { status: 400 }
+      )
+    }
 
     const v = validateUrl(body.url)
     if (!v.ok) {
@@ -140,6 +149,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         crawlStats: {},
         githubTokenOverride: body.githubTokenOverride ?? '',
         cacheTtlSec: body.cacheTtlSec ?? 0,
+        llmModel: body.llmModel.trim(),
       },
     })
 
@@ -164,6 +174,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               user_id: id,
               github_token: tokenForFetch,
               force: false,
+              model: created.llmModel,
             }),
           })
           if (!agentResp.ok) {
